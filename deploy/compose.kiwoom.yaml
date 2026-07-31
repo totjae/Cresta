@@ -1,0 +1,19 @@
+services:
+  api:
+    environment:
+      CRESTA_KIWOOM_ENABLED: "true"
+      CRESTA_KIWOOM_APP_KEY_FILE: /run/secrets/kiwoom_mock_app_key
+      CRESTA_KIWOOM_APP_SECRET_FILE: /run/secrets/kiwoom_mock_app_secret
+      CRESTA_KIWOOM_ACCOUNT_ID_FILE: /run/secrets/kiwoom_mock_account_id
+    secrets:
+      - kiwoom_mock_app_key
+      - kiwoom_mock_app_secret
+      - kiwoom_mock_account_id
+
+secrets:
+  kiwoom_mock_app_key:
+    file: ../secrets/kiwoom_mock_app_key
+  kiwoom_mock_app_secret:
+    file: ../secrets/kiwoom_mock_app_secret
+  kiwoom_mock_account_id:
+    file: ../secrets/kiwoom_mock_account_id

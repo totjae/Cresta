@@ -146,6 +146,7 @@ PATCH는 활성 설정을 직접 수정하지 않고 초안 version을 생성한
 | API-083 | 주문 상세는 체결과 상태 이벤트를 시간순으로 제공하고 원주문·정정 관계 식별자를 유지한다. |
 | API-084 | 포지션 목록은 수량 0의 종료 포지션을 `state`로 구분하며 평균단가·version·기준시각을 제공한다. |
 | API-085 | 운영 Web API에는 Paper 주문·체결·게이트를 임의 생성하거나 변경하는 endpoint를 제공하지 않는다. |
+| API-086 | `kiwoom_broker_status`는 기능 비활성 또는 secret 미준비 시 `NOT_CONFIGURED`, secret 파일 준비 시 `CONFIGURED`를 반환한다. 실제 인증과 연결 확인 전에는 `CONNECTED`를 반환하지 않는다. |
 
 ### 3.6 Watch snapshot 조회 모델
 

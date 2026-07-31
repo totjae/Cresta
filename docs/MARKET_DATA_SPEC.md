@@ -130,6 +130,16 @@ VWAP
 | MKT-065 | 첫 조회 API는 최신 정상 snapshot, stream 품질과 서버 기준 경과시간을 반환하고 주문 가능 여부를 추정하지 않는다. |
 | MKT-066 | 운영 HTTP API에는 quote·순번·stream 품질을 임의로 생성하거나 수정하는 endpoint를 제공하지 않는다. |
 
+### 3.8 키움 REST 복구 snapshot 정규화
+
+| ID | 요구사항 |
+| --- | --- |
+| MKT-070 | 키움 `ka10001` 응답의 `cur_prc`, `open_pric`, `high_pric`, `low_pric`, `trde_qty`를 내부 `QuoteEvent`로 정규화한다. |
+| MKT-071 | 가격 문자열의 `+`·`-`는 전일 대비 방향 표기이므로 내부 절대 가격에는 부호를 제거한다. 빈 값, 0 이하 가격, 음수 거래량과 종목 불일치는 저장 전에 거부한다. |
+| MKT-072 | REST 응답에는 거래소 event timestamp와 안정적인 sequence가 없으므로 수신시각을 event 시각으로 사용하고 정규화 payload hash를 `sequence_or_hash`로 사용한다. |
+| MKT-073 | REST snapshot의 거래 상태는 응답에서 추정하지 않고 세션 관리자에게 명시적으로 전달받는다. 상태가 불명확하면 신규매수에 사용할 수 없다. |
+| MKT-074 | REST snapshot은 WebSocket 시작 전 seed 또는 gap 복구 입력이며 정상 실시간 stream을 대체하지 않는다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 거래량이 역행하거나 가격이 유효 범위를 벗어나면 해당 이벤트를 격리하고 이전 정상 snapshot을 유지한다.

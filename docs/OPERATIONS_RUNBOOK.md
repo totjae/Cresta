@@ -194,6 +194,24 @@ restore_drill: monthly
 
 ## 4. 오류·예외 또는 경계 조건
 
+### 3.8 키움 모의투자 secret 준비
+
+키움 기능을 켜기 전 아래 세 파일을 `/home/totquf4171/cresta/secrets`에 만들고 컨테이너 실행 UID `10001`만 읽을 수 있게 한다. 값 자체를 터미널 기록, 문서 또는 채팅에 붙여넣지 않는다.
+
+```bash
+install -d -m 700 /home/totquf4171/cresta/secrets
+sudo chown 10001:10001 /home/totquf4171/cresta/secrets/kiwoom_mock_app_key \
+  /home/totquf4171/cresta/secrets/kiwoom_mock_app_secret \
+  /home/totquf4171/cresta/secrets/kiwoom_mock_account_id
+sudo chmod 0400 /home/totquf4171/cresta/secrets/kiwoom_mock_app_key \
+  /home/totquf4171/cresta/secrets/kiwoom_mock_app_secret \
+  /home/totquf4171/cresta/secrets/kiwoom_mock_account_id
+```
+
+세 파일을 만든 뒤에는 `sudo deploy/prepare-secrets.sh`로 기존 DB·TOTP secret과 함께 권한을 검사·적용할 수 있다. 키움 파일이 하나라도 존재하면 세 파일 모두 비어 있지 않아야 통과한다.
+
+`CRESTA_KIWOOM_ENABLED=true`는 세 secret이 준비되고 출구 IP를 별도로 확인한 뒤에만 적용한다. 이번 단계의 `CONFIGURED`는 파일 준비 상태이며 키움 인증·계좌조회 성공을 뜻하지 않는다.
+
 - 키움이나 네트워크 장애 시 Cresta가 시장 체결을 보장하지 않는다는 경고를 유지한다.
 - RPO/RTO는 운영 목표이며 거래 결과 보장을 의미하지 않는다.
 - 백업 복원본을 기존 서버와 동시에 같은 계좌의 Active worker로 실행하지 않는다.

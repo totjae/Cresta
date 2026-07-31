@@ -40,3 +40,37 @@ def test_live_environment_is_rejected() -> None:
         assert "MOCK" in str(exc)
     else:  # pragma: no cover - assertion branch
         raise AssertionError("LIVE environment must be rejected")
+
+
+def test_kiwoom_configuration_requires_enabled_readable_nonempty_secrets(tmp_path: Path) -> None:
+    paths = []
+    for name, value in (("app_key", "key"), ("app_secret", "secret"), ("account", "12345678")):
+        path = tmp_path / name
+        path.write_text(value, encoding="utf-8")
+        paths.append(str(path))
+
+    disabled = Settings(
+        kiwoom_app_key_file=paths[0],
+        kiwoom_app_secret_file=paths[1],
+        kiwoom_account_id_file=paths[2],
+    )
+    configured = Settings(
+        kiwoom_enabled=True,
+        kiwoom_app_key_file=paths[0],
+        kiwoom_app_secret_file=paths[1],
+        kiwoom_account_id_file=paths[2],
+    )
+    assert disabled.kiwoom_configuration_status() == "NOT_CONFIGURED"
+    assert Settings(kiwoom_enabled=True).kiwoom_configuration_status() == "NOT_CONFIGURED"
+    assert configured.kiwoom_configuration_status() == "CONFIGURED"
+    assert configured.load_kiwoom_credentials() == ("key", "secret", "12345678")
+
+
+def test_kiwoom_live_endpoint_is_rejected() -> None:
+    settings = Settings(kiwoom_rest_base_url="https://api.kiwoom.com")
+    try:
+        settings.validate_safety()
+    except RuntimeError as exc:
+        assert "MOCK" in str(exc)
+    else:  # pragma: no cover - assertion branch
+        raise AssertionError("Kiwoom live endpoint must be rejected")

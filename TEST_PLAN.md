@@ -97,6 +97,11 @@
 | T-KIW-008 | KIW-060~063 | 모의 환경에서 NXT/SOR 주문 요청 | 주문 생성 전 차단 | 계획 |
 | T-KIW-009 | KIW-070~073 | 호출 제한을 넘는 조회·주문 요청 | 중앙 큐 제한 준수, 손절·취소 우선 | 계획 |
 | T-KIW-010 | KIW-080~084 | WebSocket 단절·재연결 | 신규매수 차단, 재구독·재동기화 후 복귀 | 계획 |
+| T-KIW-011 | KIW-090~092 | 모의 URL에서 토큰 발급 응답 수신·재호출 | KST 만료시각 해석, 메모리 재사용, 60분 전 단일 갱신 | 통과 (2026-08-01, 자동) |
+| T-KIW-012 | KIW-093, KIW-095 | 일반 REST 인증 실패와 오류·비 JSON 응답 | 토큰 폐기 후 1회만 재시도, 실패 응답 격리 | 통과 (2026-08-01, 자동) |
+| T-KIW-013 | KIW-094, MKT-070~074 | `ka10001` fixture 정규화 | 부호 제거·필수값 검증·결정적 hash·명시적 거래상태 | 통과 (2026-08-01, 자동) |
+| T-KIW-014 | KIW-096, API-086 | Broker 비활성·secret 누락·secret 준비 상태 조회 | 각각 `NOT_CONFIGURED`, `NOT_CONFIGURED`, `CONFIGURED`; 외부 인증 전 `CONNECTED` 금지 | 통과 (2026-08-01, 자동) |
+| T-KIW-015 | KIW-090 | MOCK 환경에 운영 Kiwoom URL 주입 시도 | 설정 검증에서 기동 거부 | 통과 (2026-08-01, 자동) |
 
 ### 3.7 Guard 리스크 및 비상정지
 
@@ -254,11 +259,11 @@
 
 ## 7. 실행 결과
 
-2026-08-01 Backend 인증·Paper 조회와 첫 Watch 영속 기반 구현 결과:
+2026-08-01 Backend 인증·Paper 조회, 첫 Watch 영속 기반과 키움 MOCK REST 기반 구현 결과:
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 37개 통과 | 인증·Paper와 Watch 중복/역순/갭/복구·quote API 포함; 실제 키움·WebSocket·전체 복구 절차 제외 |
+| Python 단위·API 시험 | `python -m pytest` | 47개 통과 | 인증·Paper·Watch와 키움 토큰/REST fixture mapping 포함; 실제 키움 인증·계좌·WebSocket·주문 제외 |
 | Console component 시험 | `npm test` | 4개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃, Paper 조회 전용 화면 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
@@ -272,4 +277,4 @@
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
 | Watch 상태 UI 변경 점검 | component·TypeScript·production build | 통과 | 인앱 브라우저의 로컬 URL 정책 차단으로 이번 변경의 추가 시각 점검은 미실행 |
 
-검증된 세부 동작은 인증·Paper 흐름 외에 Watch quote의 KRX/NXT 분리, payload 중복·충돌, 역순·순번 갭·누적량 역행, 명시적 복구 snapshot, 최신성·stream 품질과 인증된 quote 조회를 포함한다. 실제 키움 mapping·수신 순번·분봉·지표·호가 가격정책·재동기화 snapshot·PostgreSQL 동시성은 미검증이므로 관련 표의 `계획` 또는 `부분 통과` 상태를 유지한다.
+검증된 세부 동작은 인증·Paper 흐름 외에 Watch quote의 KRX/NXT 분리, payload 중복·충돌, 역순·순번 갭·누적량 역행, 명시적 복구 snapshot, 최신성·stream 품질, 키움 MOCK URL 강제, 메모리 토큰 단일 갱신, 401 1회 재인증과 `ka10001` fixture mapping을 포함한다. 실제 키움 인증·계좌·WebSocket mapping·수신 순번·분봉·지표·호가 가격정책·재동기화 snapshot·PostgreSQL 동시성은 미검증이므로 관련 표의 `계획` 또는 `부분 통과` 상태를 유지한다.

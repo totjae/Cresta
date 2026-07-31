@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     auth_max_failures: int = 5
     auth_lock_minutes: int = 15
     quote_stale_seconds: int = Field(default=2, ge=1, le=30)
+    expected_egress_ip: str = "180.68.4.149"
+    kiwoom_enabled: bool = False
+    kiwoom_rest_base_url: str = "https://mockapi.kiwoom.com"
+    kiwoom_ws_base_url: str = "wss://mockapi.kiwoom.com:10000"
+    kiwoom_app_key_file: str | None = None
+    kiwoom_app_secret_file: str | None = None
+    kiwoom_account_id_file: str | None = None
+    kiwoom_token_refresh_minutes: int = Field(default=60, ge=1, le=720)
+    kiwoom_timeout_seconds: int = Field(default=5, ge=1, le=30)
     totp_encryption_key: str | None = Field(default=None, repr=False)
     totp_encryption_key_file: str | None = None
 
@@ -63,6 +72,41 @@ class Settings(BaseSettings):
             raise RuntimeError("Only MOCK broker environment is allowed in the first release")
         if self.live_trading_enabled:
             raise RuntimeError("Live trading must remain disabled in the first release")
+        if self.kiwoom_rest_base_url.rstrip("/") != "https://mockapi.kiwoom.com":
+            raise RuntimeError("Only the Kiwoom MOCK REST endpoint is allowed in the first release")
+        if self.kiwoom_ws_base_url.rstrip("/") != "wss://mockapi.kiwoom.com:10000":
+            raise RuntimeError("Only the Kiwoom MOCK WebSocket endpoint is allowed in the first release")
+
+    def kiwoom_configuration_status(self) -> str:
+        if not self.kiwoom_enabled:
+            return "NOT_CONFIGURED"
+        paths = (
+            self.kiwoom_app_key_file,
+            self.kiwoom_app_secret_file,
+            self.kiwoom_account_id_file,
+        )
+        if not all(paths):
+            return "NOT_CONFIGURED"
+        try:
+            values = [Path(path).read_text(encoding="utf-8").strip() for path in paths if path]
+        except OSError:
+            return "NOT_CONFIGURED"
+        return "CONFIGURED" if len(values) == 3 and all(values) else "NOT_CONFIGURED"
+
+    def load_kiwoom_credentials(self) -> tuple[str, str, str]:
+        if self.kiwoom_configuration_status() != "CONFIGURED":
+            raise RuntimeError("Kiwoom MOCK credentials are not configured")
+        assert self.kiwoom_app_key_file
+        assert self.kiwoom_app_secret_file
+        assert self.kiwoom_account_id_file
+        return tuple(
+            Path(path).read_text(encoding="utf-8").strip()
+            for path in (
+                self.kiwoom_app_key_file,
+                self.kiwoom_app_secret_file,
+                self.kiwoom_account_id_file,
+            )
+        )
 
 
 @lru_cache

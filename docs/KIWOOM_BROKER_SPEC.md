@@ -275,6 +275,27 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 - 전체 계좌번호
 - 비밀 파일 경로의 실제 내용
 
+### 3.14 모의투자 인증·REST 시세 계약
+
+2026-08-01 기준 키움증권 공식 REST API 저장소와 API 명세 JSON으로 다음 계약을 확인했다.
+
+참고 자료:
+
+- <https://github.com/Kiwoom-Securities/Kiwoom-REST-API>
+- <https://openapi.kiwoom.com/guide/apiguide?dummyVal=0>
+
+| ID | 요구사항 |
+| --- | --- |
+| KIW-090 | 모의투자 REST base URL은 `https://mockapi.kiwoom.com`, WebSocket base URL은 `wss://mockapi.kiwoom.com:10000`으로 고정하며 첫 버전에서 설정값으로 운영 URL로 바꿀 수 없게 한다. |
+| KIW-091 | 접근토큰은 `POST /oauth2/token`, API ID `au10001`, JSON body의 `grant_type=client_credentials`, `appkey`, `secretkey`로 발급한다. |
+| KIW-092 | 토큰 응답의 `expires_dt`는 `yyyyMMddHHmmss` 한국시간으로 해석하고, 토큰은 프로세스 메모리에만 보관하며 만료 60분 전부터 한 번만 갱신한다. |
+| KIW-093 | 일반 REST 요청은 `Content-Type: application/json;charset=UTF-8`, `api-id`, `authorization: Bearer <token>` 헤더를 사용한다. 인증 실패 시 토큰을 폐기하고 최대 한 번만 재발급·재요청한다. |
+| KIW-094 | 복구용 기본 시세 snapshot은 `POST /api/dostk/stkinfo`, API ID `ka10001`, body `{"stk_cd":"종목코드"}`를 사용한다. 부호가 포함된 가격 문자열은 방향 정보와 분리해 절대 가격으로 정규화한다. |
+| KIW-095 | `return_code`가 0이 아니거나 필수 필드가 없거나 JSON이 아니면 해당 응답을 정상 시세로 저장하지 않는다. 오류 응답에는 토큰·App Key·Secret을 포함하지 않는다. |
+| KIW-096 | 자격증명이 없거나 Broker가 비활성인 경우 API 서버는 계속 기동할 수 있지만 상태는 `NOT_CONFIGURED`이다. 자격증명 파일이 읽기 가능하면 외부 호출 전 상태는 `CONFIGURED`이며 실제 인증 성공 전 `CONNECTED`로 표시하지 않는다. |
+
+이번 구현 단계는 토큰 수명주기, 공통 REST client, `ka10001` 정규화와 구성 상태까지만 포함한다. WebSocket 상시 연결, 출구 IP 외부 확인, 계좌조회, 주문 송신과 Active worker lease는 후속 단계로 유지한다.
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 고정 IP가 맞더라도 키움 등록이 완료되지 않았으면 인증 성공으로 간주하지 않는다.

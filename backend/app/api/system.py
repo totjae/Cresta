@@ -100,7 +100,7 @@ def system_health(
         live_trading_enabled=settings.live_trading_enabled,
         database_status="CONNECTED",
         paper_broker_status="AVAILABLE" if gate else "NOT_INITIALIZED",
-        kiwoom_broker_status="NOT_CONFIGURED",
+        kiwoom_broker_status=settings.kiwoom_configuration_status(),
         market_data_status=_market_data_status(db, settings),
         trading_gate=gate_response,
         counts=counts,

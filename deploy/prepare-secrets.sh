@@ -21,4 +21,29 @@ for secret_name in postgres_password totp_encryption_key; do
   chmod 0400 "$secret_path"
 done
 
+kiwoom_secret_names="kiwoom_mock_app_key kiwoom_mock_app_secret kiwoom_mock_account_id"
+kiwoom_secret_count=0
+for secret_name in $kiwoom_secret_names; do
+  if [ -e "$PROJECT_ROOT/secrets/$secret_name" ]; then
+    kiwoom_secret_count=$((kiwoom_secret_count + 1))
+  fi
+done
+
+if [ "$kiwoom_secret_count" -ne 0 ] && [ "$kiwoom_secret_count" -ne 3 ]; then
+  echo "Kiwoom MOCK secrets must be prepared as a complete set of three files." >&2
+  exit 1
+fi
+
+if [ "$kiwoom_secret_count" -eq 3 ]; then
+  for secret_name in $kiwoom_secret_names; do
+    secret_path="$PROJECT_ROOT/secrets/$secret_name"
+    if [ ! -s "$secret_path" ]; then
+      echo "Missing or empty secret file: $secret_path" >&2
+      exit 1
+    fi
+    chown "$APP_UID:$APP_GID" "$secret_path"
+    chmod 0400 "$secret_path"
+  done
+fi
+
 echo "Cresta secret ownership and permissions are ready for UID/GID 10001:10001."

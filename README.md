@@ -17,9 +17,10 @@
 - 결정론적 Paper Broker 주문·부분체결·취소·정정·응답유실 상태 머신
 - 주문·체결·포지션 원장과 인증된 주문 조회 API
 - Watch quote 정규화·중복/역순/갭 처리, PostgreSQL snapshot과 인증된 최신 시세 조회 API
+- 키움 모의투자 전용 메모리 토큰·REST client와 `ka10001` 복구 시세 정규화 기반
 - N100·16GiB 서버용 Docker Compose 자원 제한 초안
 
-Console의 주문 생성·승인·설정 화면, 주문가격 산정, 전체 Guard·재동기화·분봉·지표·AI·키움 Adapter는 아직 구현되지 않았습니다. 현재 Paper 화면과 Watch API는 조회 전용이며 운영 Web에서 주문·체결·시세를 생성하지 않습니다.
+Console의 주문 생성·승인·설정 화면, 주문가격 산정, 전체 Guard·재동기화·분봉·지표·AI와 키움 WebSocket·계좌·주문 연결은 아직 구현되지 않았습니다. 현재 Paper 화면과 Watch API는 조회 전용이며 운영 Web에서 주문·체결·시세를 생성하지 않습니다.
 
 ## Backend 개발 실행
 
