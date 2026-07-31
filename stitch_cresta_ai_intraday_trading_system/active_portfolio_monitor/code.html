@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Active Portfolio &amp; AI Monitor | Cresta</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts for Tailwind Config -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-bright": "#31394d",
+                        "inverse-on-surface": "#283044",
+                        "secondary-container": "#05b046",
+                        "tertiary-fixed-dim": "#ffb4aa",
+                        "surface-container-lowest": "#060e20",
+                        "secondary-fixed-dim": "#53e16f",
+                        "inverse-surface": "#dae2fd",
+                        "on-tertiary-fixed": "#410001",
+                        "primary-fixed-dim": "#adc6ff",
+                        "tertiary-container": "#ff5545",
+                        "on-tertiary": "#690003",
+                        "surface-container-highest": "#2d3449",
+                        "on-primary-fixed": "#001a41",
+                        "surface-variant": "#2d3449",
+                        "surface-container-low": "#131b2e",
+                        "tertiary": "#ffb4aa",
+                        "primary-fixed": "#d8e2ff",
+                        "on-primary-container": "#00285c",
+                        "on-primary": "#002e69",
+                        "on-secondary-fixed-variant": "#00531c",
+                        "on-tertiary-fixed-variant": "#930005",
+                        "surface-container": "#171f33",
+                        "on-surface-variant": "#c1c6d7",
+                        "surface-tint": "#adc6ff",
+                        "secondary": "#53e16f",
+                        "on-secondary-container": "#003a11",
+                        "tertiary-fixed": "#ffdad5",
+                        "surface": "#0b1326",
+                        "secondary-fixed": "#72fe88",
+                        "surface-dim": "#0b1326",
+                        "on-surface": "#dae2fd",
+                        "on-error": "#690005",
+                        "on-secondary": "#003911",
+                        "on-primary-fixed-variant": "#004493",
+                        "error-container": "#93000a",
+                        "outline-variant": "#414755",
+                        "outline": "#8b90a0",
+                        "error": "#ffb4ab",
+                        "primary": "#adc6ff",
+                        "on-error-container": "#ffdad6",
+                        "background": "#0b1326",
+                        "on-background": "#dae2fd",
+                        "primary-container": "#4b8eff",
+                        "surface-container-high": "#222a3d",
+                        "inverse-primary": "#005bc1",
+                        "on-tertiary-container": "#5c0002",
+                        "on-secondary-fixed": "#002107"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "unit": "4px",
+                        "gutter": "12px",
+                        "component-gap": "8px",
+                        "compact-padding": "4px 8px",
+                        "container-padding": "16px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "label-caps": ["Inter"],
+                        "body-md": ["Inter"],
+                        "data-mono": ["JetBrains Mono"],
+                        "display-lg": ["Inter"],
+                        "title-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["12px", { "lineHeight": "16px", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "label-caps": ["10px", { "lineHeight": "12px", "letterSpacing": "0.05em", "fontWeight": "700" }],
+                        "body-md": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "data-mono": ["14px", { "lineHeight": "20px", "fontWeight": "500" }],
+                        "display-lg": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "title-sm": ["18px", { "lineHeight": "24px", "fontWeight": "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        /* Custom scrollbar for deep UI feel */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0b1326; }
+        ::-webkit-scrollbar-thumb { background: #2d3449; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #414755; }
+
+        /* Subtle row highlight flash animation */
+        @keyframes flashGreen { 0% { background-color: rgba(83, 225, 111, 0.2); } 100% { background-color: transparent; } }
+        @keyframes flashRed { 0% { background-color: rgba(255, 180, 171, 0.2); } 100% { background-color: transparent; } }
+        .tick-up { animation: flashGreen 1s ease-out; }
+        .tick-down { animation: flashRed 1s ease-out; }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md text-body-md h-screen overflow-hidden flex flex-col selection:bg-primary/30">
+<!-- TopNavBar -->
+<header class="bg-surface-container-low/70 dark:bg-surface-container-low/70 backdrop-blur-xl border-b border-outline-variant flex justify-between items-center w-full px-container h-12 z-50 fixed top-0 left-0 right-0">
+<div class="flex items-center gap-6">
+<span class="font-headline-md text-headline-md font-black text-primary dark:text-primary tracking-tight">Cresta</span>
+<!-- Search Bar (on_left) -->
+<div class="hidden lg:flex items-center relative">
+<span class="material-symbols-outlined absolute left-2 text-on-surface-variant text-[16px]">search</span>
+<input class="bg-surface border border-outline-variant rounded pl-8 pr-3 py-1 font-data-mono text-body-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors w-64 bg-opacity-50" placeholder="Search entity..." type="text"/>
+</div>
+</div>
+<!-- Navigation Links -->
+<div class="hidden md:flex items-center gap-8">
+<div class="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant">
+<span class="w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(83,225,111,0.6)]"></span>
+                Market: Open
+            </div>
+<div class="font-data-mono text-data-mono text-on-surface-variant">
+<span class="font-label-caps text-label-caps mr-1 text-outline">BAL</span>$124,500
+            </div>
+<div class="font-data-mono text-data-mono text-secondary">
+<span class="font-label-caps text-label-caps mr-1 text-outline">P&amp;L</span>+$1,240
+            </div>
+</div>
+<!-- Trailing Actions -->
+<div class="flex items-center gap-4">
+<button class="bg-error-container/20 border border-error text-error font-label-caps text-label-caps px-3 py-1 rounded hover:bg-error-container hover:text-on-error-container transition-all duration-150 uppercase tracking-wider">
+                Emergency Stop
+            </button>
+<div class="flex gap-2">
+<button class="text-on-surface-variant hover:text-primary hover:bg-surface-container-high p-1 rounded transition-all duration-150 flex items-center justify-center">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-on-surface-variant hover:text-primary hover:bg-surface-container-high p-1 rounded transition-all duration-150 flex items-center justify-center">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</div>
+</header>
+<div class="flex flex-1 mt-12 overflow-hidden relative">
+<!-- AI / Tech Background Glow -->
+<div class="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-primary/5 rounded-full blur-[120px] pointer-events-none z-0"></div>
+<!-- SideNavBar -->
+<nav class="hidden md:flex flex-col h-full py-container bg-surface-container dark:bg-surface-container border-r border-outline-variant w-[240px] fixed left-0 top-12 z-40 bg-surface dark:bg-surface text-primary dark:text-primary">
+<div class="px-4 mb-8">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-surface-bright flex items-center justify-center overflow-hidden border border-outline-variant">
+<span class="material-symbols-outlined text-on-surface">person</span>
+</div>
+<div>
+<div class="font-title-sm text-title-sm text-on-surface">Cresta AI</div>
+<div class="font-label-caps text-label-caps text-on-surface-variant">Institutional Grade</div>
+</div>
+</div>
+</div>
+<div class="flex flex-col flex-1 gap-1 px-2">
+<!-- Inactive Tab -->
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-bright dark:hover:bg-surface-bright hover:text-on-surface transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-body-md text-body-md">Dashboard</span>
+</a>
+<!-- Inactive Tab -->
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-bright dark:hover:bg-surface-bright hover:text-on-surface transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">visibility</span>
+<span class="font-body-md text-body-md">Watchlist</span>
+</a>
+<!-- Active Tab -->
+<a class="flex items-center gap-3 px-3 py-2 rounded text-primary dark:text-primary font-bold border-r-2 border-primary bg-surface-container-high/50" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">account_balance_wallet</span>
+<span class="font-body-md text-body-md">Portfolio</span>
+</a>
+<!-- Inactive Tab -->
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-bright dark:hover:bg-surface-bright hover:text-on-surface transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">precision_manufacturing</span>
+<span class="font-body-md text-body-md">Strategies</span>
+</a>
+<!-- Inactive Tab -->
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-bright dark:hover:bg-surface-bright hover:text-on-surface transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">history</span>
+<span class="font-body-md text-body-md">History</span>
+</a>
+<!-- Inactive Tab -->
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-bright dark:hover:bg-surface-bright hover:text-on-surface transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">settings_input_component</span>
+<span class="font-body-md text-body-md">System Status</span>
+</a>
+</div>
+<div class="px-4 mt-auto">
+<button class="w-full bg-primary-container text-on-primary-container hover:bg-primary font-title-sm text-title-sm py-2 rounded transition-colors duration-200 shadow-md">
+                    New Strategy
+                </button>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-1 md:ml-[240px] overflow-y-auto p-container lg:p-8 z-10 relative">
+<!-- Section Header -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6 pb-4 border-b border-outline-variant/50">
+<div>
+<h1 class="font-display-lg text-display-lg text-on-surface mb-1">Active Positions</h1>
+<p class="font-body-md text-body-md text-on-surface-variant">Real-time AI monitoring and execution guardrails active.</p>
+</div>
+<div class="flex items-center gap-6 bg-surface-container-high/40 p-3 rounded-lg border border-outline-variant/30 backdrop-blur-md">
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-outline">GUARDS ACTIVE</span>
+<span class="font-data-mono text-data-mono text-primary flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">shield</span> 12/12
+                        </span>
+</div>
+<div class="w-px h-8 bg-outline-variant/50"></div>
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-outline">TIME TO CLOSE</span>
+<span class="font-data-mono text-data-mono text-on-surface">03:45:12</span>
+</div>
+</div>
+</div>
+<!-- Bento Grid of Positions -->
+<div class="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-6">
+<!-- Position Card 1 (Strong Long) -->
+<article class="bg-surface-container/70 backdrop-blur-[12px] border border-outline-variant/40 rounded-xl p-5 flex flex-col gap-4 group hover:border-outline-variant transition-all duration-300 shadow-lg relative overflow-hidden">
+<!-- Subtle top gradient line -->
+<div class="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-secondary/50 to-transparent"></div>
+<header class="flex justify-between items-start">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<h2 class="font-headline-md text-headline-md text-on-surface tracking-tight">NVDA</h2>
+<span class="px-2 py-0.5 rounded bg-secondary/10 text-secondary border border-secondary/20 font-label-caps text-label-caps">LONG</span>
+</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant">NVIDIA Corp.</div>
+</div>
+<div class="text-right">
+<div class="font-headline-md text-headline-md text-secondary tick-up">+$4,250.00</div>
+<div class="font-data-mono text-data-mono text-secondary text-sm text-right">+4.82%</div>
+</div>
+</header>
+<div class="grid grid-cols-4 gap-3 py-3 border-y border-outline-variant/30">
+<div class="flex flex-col gap-1">
+<span class="font-label-caps text-label-caps text-outline">CURRENT</span>
+<span class="font-data-mono text-data-mono text-on-surface">$128.45</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-label-caps text-label-caps text-outline">AVG PRICE</span>
+<span class="font-data-mono text-data-mono text-on-surface-variant">$122.50</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-label-caps text-label-caps text-outline">QTY</span>
+<span class="font-data-mono text-data-mono text-on-surface">500</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-label-caps text-label-caps text-outline">STOP LOSS</span>
+<span class="font-data-mono text-data-mono text-error">$118.00</span>
+</div>
+</div>
+<!-- AI Scout Panel -->
+<div class="bg-primary-fixed/5 border-l-2 border-primary rounded-r p-3 flex flex-col gap-1 shadow-[0_0_15px_rgba(75,142,255,0.03)] mt-1">
+<div class="flex items-center gap-1 mb-1 opacity-80">
+<span class="material-symbols-outlined text-primary text-[14px]">memory</span>
+<span class="font-label-caps text-label-caps text-primary tracking-widest">AI SCOUT</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-label-caps text-label-caps text-outline">ACTION:</span>
+<span class="font-title-sm text-title-sm text-secondary">HOLD</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+                            Volume profile robust. Holding firmly above VWAP. No immediate downside catalyst detected in recent news stream.
+                        </p>
+</div>
+<!-- Quick Actions -->
+<div class="flex gap-2 mt-auto pt-2">
+<button class="flex-1 bg-surface-container-highest hover:bg-outline-variant/50 border border-outline-variant/50 text-on-surface font-label-caps text-label-caps py-2 rounded transition-colors flex justify-center items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">compress</span> TIGHTEN STOP
+                        </button>
+<button class="flex-1 bg-tertiary-container/80 hover:bg-tertiary-container text-on-tertiary-container font-label-caps text-label-caps py-2 rounded transition-colors flex justify-center items-center gap-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
+<span class="material-symbols-outlined text-[16px]">sell</span> FULL SELL
+                        </button>
+<button class="w-12 bg-error-container/20 hover:bg-error-container/50 border border-error/30 text-error rounded flex justify-center items-center transition-colors" title="Emergency Exit">
+<span class="material-symbols-outlined text-[20px]">eject</span>
+</button>
+</div>
+</article>
+<!-- Position Card 2 (Struggling Short) -->
+<article class="bg-surface-container/70 backdrop-blur-[12px] border border-outline-variant/40 rounded-xl p-5 flex flex-col gap-4 group hover:border-outline-variant transition-all duration-300 shadow-lg relative overflow-hidden">
+<div class="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-tertiary-container/50 to-transparent"></div>
+<header class="flex justify-between items-start">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<h2 class="font-headline-md text-headline-md text-on-surface tracking-tight">AAPL</h2>
+<span class="px-2 py-0.5 rounded bg-tertiary-container/10 text-tertiary-container border border-tertiary-container/20 font-label-caps text-label-caps">SHORT</span>
+</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant">Apple Inc.</div>
+</div>
+<div class="text-right">
+<div class="font-headline-md text-headline-md text-error tick-down">-$840.50</div>
+<div class="font-data-mono text-data-mono text-error text-sm text-right">-1.24%</div>
+</div>
+</header>
+<div class="grid grid-cols-4 gap-3 py-3 border-y border-outline-variant/30">
+<div class="flex flex-col gap-1">
+<span class="font-label-caps text-label-caps text-outline">CURRENT</span>
+<span class="font-data-mono text-data-mono text-on-surface">$175.20</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-label-caps text-label-caps text-outline">AVG PRICE</span>
+<span class="font-data-mono text-data-mono text-on-surface-variant">$173.05</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-label-caps text-label-caps text-outline">QTY</span>
+<span class="font-data-mono text-data-mono text-on-surface">300</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-label-caps text-label-caps text-outline">STOP LOSS</span>
+<span class="font-data-mono text-data-mono text-error">$178.50</span>
+</div>
+</div>
+<!-- AI Scout Panel -->
+<div class="bg-primary-fixed/5 border-l-2 border-primary rounded-r p-3 flex flex-col gap-1 shadow-[0_0_15px_rgba(75,142,255,0.03)] mt-1 relative overflow-hidden">
+<!-- subtle warning pulse -->
+<div class="absolute inset-0 bg-tertiary-container/5 animate-pulse pointer-events-none"></div>
+<div class="flex items-center gap-1 mb-1 opacity-80 z-10">
+<span class="material-symbols-outlined text-primary text-[14px]">memory</span>
+<span class="font-label-caps text-label-caps text-primary tracking-widest">AI SCOUT</span>
+</div>
+<div class="flex items-baseline gap-2 z-10">
+<span class="font-label-caps text-label-caps text-outline">ACTION:</span>
+<span class="font-title-sm text-title-sm text-tertiary-container">TIGHTEN STOP</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed z-10">
+                            High watermark drawdown detected. Sector momentum shifting positive against position. Consider reducing exposure.
+                        </p>
+</div>
+<!-- Quick Actions -->
+<div class="flex gap-2 mt-auto pt-2">
+<button class="flex-1 bg-surface-container-highest hover:bg-outline-variant/50 border border-outline-variant/50 text-on-surface font-label-caps text-label-caps py-2 rounded transition-colors flex justify-center items-center gap-1 ring-1 ring-tertiary-container/30">
+<span class="material-symbols-outlined text-[16px]">compress</span> TIGHTEN STOP
+                        </button>
+<button class="flex-1 bg-secondary/80 hover:bg-secondary text-on-secondary font-label-caps text-label-caps py-2 rounded transition-colors flex justify-center items-center gap-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
+<span class="material-symbols-outlined text-[16px]">shopping_cart</span> BUY COVER
+                        </button>
+<button class="w-12 bg-error-container/20 hover:bg-error-container/50 border border-error/30 text-error rounded flex justify-center items-center transition-colors" title="Emergency Exit">
+<span class="material-symbols-outlined text-[20px]">eject</span>
+</button>
+</div>
+</article>
+</div>
+</main>
+</div>
+<!-- Init simple scripts -->
+<script>
+        // Simulate real-time flashes on grid numbers
+        setInterval(() => {
+            const elements = document.querySelectorAll('.tick-up, .tick-down');
+            if(elements.length > 0) {
+                const randomEl = elements[Math.floor(Math.random() * elements.length)];
+                // re-trigger animation
+                randomEl.style.animation = 'none';
+                randomEl.offsetHeight; /* trigger reflow */
+                randomEl.style.animation = null;
+            }
+        }, 3000);
+    </script>
+</body></html>

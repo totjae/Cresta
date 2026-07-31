@@ -1,0 +1,31 @@
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+secrets/
+**/secrets/
+*.pem
+*.key
+
+# Runtime data and generated artifacts
+data/
+logs/
+backups/
+artifacts/
+test-results/
+
+# Python / Node / editor caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+.next/
+dist/
+coverage/
+.coverage
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
