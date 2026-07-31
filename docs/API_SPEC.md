@@ -147,6 +147,18 @@ PATCH는 활성 설정을 직접 수정하지 않고 초안 version을 생성한
 | API-084 | 포지션 목록은 수량 0의 종료 포지션을 `state`로 구분하며 평균단가·version·기준시각을 제공한다. |
 | API-085 | 운영 Web API에는 Paper 주문·체결·게이트를 임의 생성하거나 변경하는 endpoint를 제공하지 않는다. |
 
+### 3.6 Watch snapshot 조회 모델
+
+`GET /quotes/{symbol}?market=KRX`는 인증된 사용자에게 Watch가 마지막으로 확정한 정상 snapshot과 현재 stream 품질을 제공한다. snapshot이 없으면 `QUOTE_NOT_FOUND`를 반환한다.
+
+| ID | 요구사항 |
+| --- | --- |
+| API-090 | quote 응답은 가격을 문자열, 수량을 정수, 시각을 UTC ISO 8601로 제공한다. |
+| API-091 | 응답은 `quality`, `age_seconds`, `is_fresh`를 분리해 제공하며 `is_fresh`만으로 주문 가능 여부를 표현하지 않는다. |
+| API-092 | KRX와 NXT 조회는 명시적인 `market`으로 분리하고 지원하지 않는 시장은 검증 오류로 거부한다. |
+| API-093 | 시스템 상태의 시장데이터 값은 stream이 없으면 `NOT_STARTED`, 갭이 있으면 `DEGRADED`, 정상 stream이 모두 오래됐으면 `STALE`, 최신 정상 stream이 있으면 `AVAILABLE`로 표시한다. |
+| API-094 | 공개 또는 인증된 HTTP mutation으로 fixture·quote·stream 상태를 주입하지 않는다. |
+
 ## 4. 공통 오류
 
 ```json

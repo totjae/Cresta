@@ -174,3 +174,29 @@ class SystemHealthResponse(StrictModel):
     market_data_status: str
     trading_gate: TradingGateResponse | None
     counts: SystemCountResponse
+
+
+class QuoteResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    symbol: str
+    market: str
+    source: str
+    sequence_or_hash: str
+    source_sequence: int | None
+    last_price: Decimal
+    open_price: Decimal
+    high_price: Decimal
+    low_price: Decimal
+    cumulative_volume: int
+    best_bid_price: Decimal | None
+    best_bid_quantity: int | None
+    best_ask_price: Decimal | None
+    best_ask_quantity: int | None
+    trading_status: str
+    quality: str
+    age_seconds: Decimal
+    is_fresh: bool
+    event_at: datetime
+    received_at: datetime
+    stream_version: int

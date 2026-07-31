@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -7,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import AuthContext, get_auth_context
 from app.config import Settings, get_settings
 from app.db import get_db
-from app.models import Position, TradingGate, TradingOrder
+from app.models import MarketStreamState, Position, TradingGate, TradingOrder
 from app.schemas import (
     SystemCountResponse,
     SystemHealthResponse,
@@ -28,6 +30,20 @@ ACTIVE_ORDER_STATES = {
     "UNKNOWN",
     "RECONCILING",
 }
+
+
+def _market_data_status(db: Session, settings: Settings) -> str:
+    states = db.scalars(select(MarketStreamState)).all()
+    if not states:
+        return "NOT_STARTED"
+    if any(state.quality == "GAP_DETECTED" for state in states):
+        return "DEGRADED"
+    received = [state.last_received_at for state in states if state.last_received_at is not None]
+    if not received:
+        return "NOT_STARTED"
+    latest = max(value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC) for value in received)
+    age = (datetime.now(UTC) - latest).total_seconds()
+    return "AVAILABLE" if age <= settings.quote_stale_seconds else "STALE"
 
 
 @router.get("/health", response_model=SystemHealthResponse)
@@ -85,7 +101,7 @@ def system_health(
         database_status="CONNECTED",
         paper_broker_status="AVAILABLE" if gate else "NOT_INITIALIZED",
         kiwoom_broker_status="NOT_CONFIGURED",
-        market_data_status="NOT_STARTED",
+        market_data_status=_market_data_status(db, settings),
         trading_gate=gate_response,
         counts=counts,
     )

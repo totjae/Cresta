@@ -23,16 +23,16 @@
 | 주문 상태 머신과 키움 매핑 | `docs/ORDER_STATE_MACHINE_SPEC.md` | 구현 중 | Paper 전이·수량 불변·멱등성 구현, 키움 이벤트 필드 매핑은 잠정 |
 | 계좌·주문 재동기화 | `docs/RECONCILIATION_SPEC.md` | 구현 중 | STARTING gate·UNKNOWN 종목 차단 구현, snapshot 대조 worker 미구현 |
 | 시스템 아키텍처 | `docs/SYSTEM_DESIGN.md` | 구현 중 | Backend·Console·gateway 골격 구현, trading worker 미구현 |
-| HTTP/WebSocket API | `docs/API_SPEC.md` | 구현 중 | 인증·system health·주문/체결·포지션 조회 구현, 거래 명령·stream 미구현 |
+| HTTP/WebSocket API | `docs/API_SPEC.md` | 구현 중 | 인증·system health·주문/체결·포지션·최신 quote 조회 구현, 거래 명령·WebSocket stream 미구현 |
 | UI 콘셉트 참고자료 | `stitch_cresta_ai_intraday_trading_system/` | 참고자료 | 실제 Console 구현물이 아님 |
 | 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 명세 완료 | 계좌 secret·고정 출구 IP 운영 확인 필요 |
 | Guard 리스크·비상정지 | `docs/GUARD_RISK_SPEC.md` | 명세 완료 | MVP 기본값·허용범위 확정, 모의시험 후 조정 가능 |
 | 사용자 설정·적용 | `docs/CONFIGURATION_SPEC.md` | 명세 완료 | Web UI 연계 명세 완료, 코드 미구현 |
-| Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console과 실제 Paper 상태·주문 상세·포지션 읽기 전용 화면 구현·로컬 검증, 주문 생성·승인·설정 화면 미구현 |
+| Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, Paper 읽기 전용 화면과 Watch stream 상태 표시 구현·로컬 검증, 주문 생성·승인·설정·상세 Watch 화면 미구현 |
 | 인증·세션·TOTP | `docs/SECURITY_SPEC.md` | 구현 중 | 로그인·세션·CSRF·실패제한·재인증 기반 17개 로컬 시험 통과, 복구·운영 검증 미완료 |
-| 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 명세 완료 | 키움 실제 이벤트 순번 미검증, 코드 미구현 |
+| 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 정규화·KRX/NXT 분리·중복/역순/갭·복구 snapshot·최신성 조회 로컬 검증, 키움 수신·분봉·지표 미구현 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 명세 완료 | 모델 제공자 미선정, mock interface 구현 가능 |
-| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 인증·주문·체결·포지션 migration과 SQLite 왕복 및 실서버 PostgreSQL migration 검증 완료, PostgreSQL 동시성 시험 미완료 |
+| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 인증·Paper·Watch migration SQLite 왕복 및 기존 실서버 PostgreSQL migration 검증 완료, 신규 Watch migration 실서버 적용·PostgreSQL 동시성 시험 미완료 |
 | 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 실서버 DB·Redis·API·Frontend·gateway, secret 권한, host Nginx·TLS와 ID·비밀번호·TOTP 로그인 확인; 백업·경보·복구훈련 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 명세 완료 | 내부 구현 시작 가능, 외부 통합 게이트 유지 |
 | Backend·Docker 골격 | `docs/SYSTEM_DESIGN.md`, `docs/OPERATIONS_RUNBOOK.md` | 검증 완료 | Backend·Frontend·gateway와 N100 자원 제한 반영, PostgreSQL·Redis·API·Frontend·gateway 실서버 기동 및 HTTPS 접속 확인 |

@@ -116,6 +116,20 @@ VWAP
 | MKT-052 | 보존 만료로 삭제해도 판단·주문 감사에 연결된 최소 snapshot과 해시는 삭제하지 않는다. |
 | MKT-053 | Watch는 종목별 단일 writer 원칙을 사용하고 장애 승계 시 snapshot 복원 후 이벤트 처리를 시작한다. |
 
+### 3.7 첫 Watch 영속 기반
+
+키움 WebSocket 연결 전 단계에서는 결정론적 내부 ingestion service와 fixture로 정규화 계약을 검증한다. 운영 Web에는 시세 주입 endpoint를 만들지 않고, 인증된 최신 snapshot 조회만 제공한다.
+
+| ID | 요구사항 |
+| --- | --- |
+| MKT-060 | 정규화된 quote와 시장·종목별 stream 상태를 PostgreSQL에 분리 저장하고 현재 snapshot은 stream 상태가 가리키는 정상 snapshot으로 결정한다. |
+| MKT-061 | 같은 `source + market + symbol + sequence_or_hash`와 같은 payload는 중복으로 무시하며 내용이 다르면 충돌로 격리한다. |
+| MKT-062 | 이벤트 시각 또는 숫자 순번이 현재보다 과거면 `LATE` 이력으로 저장하되 현재 snapshot을 바꾸지 않는다. |
+| MKT-063 | 숫자 순번 갭이나 누적 거래량 역행은 stream을 `GAP_DETECTED`로 만들고 이전 정상 snapshot을 유지한다. 일반 이벤트만으로 자동 복구하지 않는다. |
+| MKT-064 | 명시적인 복구 snapshot만 `GAP_DETECTED`를 해제할 수 있으며 이후 최신성 안정 구간은 Guard 연동 단계에서 별도로 적용한다. |
+| MKT-065 | 첫 조회 API는 최신 정상 snapshot, stream 품질과 서버 기준 경과시간을 반환하고 주문 가능 여부를 추정하지 않는다. |
+| MKT-066 | 운영 HTTP API에는 quote·순번·stream 품질을 임의로 생성하거나 수정하는 endpoint를 제공하지 않는다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 거래량이 역행하거나 가격이 유효 범위를 벗어나면 해당 이벤트를 격리하고 이전 정상 snapshot을 유지한다.

@@ -163,12 +163,14 @@
 
 | 테스트 ID | 관련 요구사항 | 시나리오 | 기대 결과 | 상태 |
 | --- | --- | --- | --- | --- |
-| T-MKT-001 | MKT-001~005 | KRX·NXT 동일 종목 이벤트 정규화 | 시장별 snapshot 분리, 단위·시각·품질 유지 | 계획 |
-| T-MKT-002 | MKT-010~014 | 중복·역순·순번 갭·누적량 역행 주입 | 중복 억제, 현재값 비역행, gap 복구 요청 | 계획 |
+| T-MKT-001 | MKT-001~005 | KRX·NXT 동일 종목 이벤트 정규화 | 시장별 snapshot 분리, 단위·시각·품질 유지 | 부분 통과 |
+| T-MKT-002 | MKT-010~014 | 중복·역순·순번 갭·누적량 역행 주입 | 중복 억제, 현재값 비역행, gap 복구 요청 | 부분 통과 |
 | T-MKT-003 | MKT-020~024 | quote·호가 지연 후 정상 이벤트 복구 | 신규매수 차단, 안정 구간·대조 후 재개 | 계획 |
 | T-MKT-004 | MKT-030~034 | 고정 tick fixture로 1분봉·VWAP 계산 | 기준값·버전·시장과 정확히 일치 | 계획 |
 | T-MKT-005 | MKT-040~043 | VI·거래정지·호가부재·기업행동 이벤트 | 주문 차단 또는 분석 기준 초기화 | 계획 |
 | T-MKT-006 | MKT-050~053 | Redis 유실과 Watch 승계 | DB snapshot 복원 후 단일 writer 처리 | 계획 |
+| T-MKT-007 | MKT-060~066, DB-080~083 | 동일·충돌·역순·순번 갭·거래량 역행 fixture 주입 | 중복 억제, 충돌 격리, 이전 정상 snapshot 유지 | 로컬 통과 |
+| T-MKT-008 | API-090~094 | 미인증·KRX/NXT·없음·정상·지연 quote 조회와 mutation 탐색 | 401/404/검증 오류, 명시적 품질·경과시간, mutation 없음 | 로컬 통과 |
 
 ### 3.12 Scout·Core AI 계약
 
@@ -252,11 +254,11 @@
 
 ## 7. 실행 결과
 
-2026-08-01 Backend 인증 기반, Paper 조회 API와 Console 구현 결과:
+2026-08-01 Backend 인증·Paper 조회와 첫 Watch 영속 기반 구현 결과:
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 30개 통과 | 예약문자 DB 비밀번호의 Alembic 이스케이프와 실제 Paper 상태·주문·포지션 조회 포함; 실제 키움·WebSocket·전체 복구 절차 제외 |
+| Python 단위·API 시험 | `python -m pytest` | 37개 통과 | 인증·Paper와 Watch 중복/역순/갭/복구·quote API 포함; 실제 키움·WebSocket·전체 복구 절차 제외 |
 | Console component 시험 | `npm test` | 4개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃, Paper 조회 전용 화면 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
@@ -264,9 +266,10 @@
 | Console production dependency audit | `npm audit --omit=dev --audit-level=high` | 취약점 0건 | Next 하위 PostCSS·Sharp를 검증된 패치 버전으로 고정 |
 | 정적 검사 | `python -m ruff check app tests migrations` | 통과 | FastAPI dependency의 B008은 프레임워크 관용구로 제외 |
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
-| migration 왕복 | `alembic upgrade head`·`current`·`downgrade base` | 통과 | `%25`가 포함된 SQLite URL로 인증·Paper schema와 STARTING seed 검증; 실서버 PostgreSQL upgrade 검증 완료 |
+| migration 왕복 | `alembic upgrade head`·`current`·`downgrade base` | 통과 | SQLite에서 인증·Paper·Watch schema와 `20260801_0003` head 검증; 신규 migration의 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
 | Docker Compose·HTTPS | Ubuntu 서버에서 전체 서비스 기동, migration, host Nginx·TLS 접속과 로그인 | 통과 | PostgreSQL·Redis healthy, secret 읽기, API·Frontend·gateway, HTTPS와 ID·비밀번호·TOTP 로그인 확인 |
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
+| Watch 상태 UI 변경 점검 | component·TypeScript·production build | 통과 | 인앱 브라우저의 로컬 URL 정책 차단으로 이번 변경의 추가 시각 점검은 미실행 |
 
-검증된 세부 동작은 인증 기반 외에 Paper 주문 시작 gate, MOCK/KRX 제한, payload 결합 멱등성, ACKNOWLEDGED·OPEN·부분체결·취소·정정·UNKNOWN 전이, 중복 체결 제거, 취소·정정 경쟁, 늦은 원주문 체결의 자식 잔량 조정, 수량 불변조건, 원자적 포지션 원장, 낙관적 version 충돌, 인증된 주문·포지션·시스템 상태 조회와 반응형 조회 화면을 포함한다. 실제 키움 mapping·호가 가격정책·재동기화 snapshot·PostgreSQL 동시성은 미검증이므로 관련 표의 `계획` 또는 `부분 통과` 상태를 유지한다.
+검증된 세부 동작은 인증·Paper 흐름 외에 Watch quote의 KRX/NXT 분리, payload 중복·충돌, 역순·순번 갭·누적량 역행, 명시적 복구 snapshot, 최신성·stream 품질과 인증된 quote 조회를 포함한다. 실제 키움 mapping·수신 순번·분봉·지표·호가 가격정책·재동기화 snapshot·PostgreSQL 동시성은 미검증이므로 관련 표의 `계획` 또는 `부분 통과` 상태를 유지한다.

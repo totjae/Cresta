@@ -16,7 +16,7 @@ const healthResponse = {
   database_status: "CONNECTED",
   paper_broker_status: "AVAILABLE",
   kiwoom_broker_status: "NOT_CONFIGURED",
-  market_data_status: "NOT_STARTED",
+  market_data_status: "AVAILABLE",
   trading_gate: {
     account_alias: "PAPER",
     environment: "MOCK",
@@ -59,6 +59,8 @@ describe("CrestaConsole authentication", () => {
     await user.click(screen.getByRole("button", { name: /Console 접속/ }));
     expect(await screen.findByRole("heading", { name: "대시보드" })).toBeInTheDocument();
     expect(await screen.findByText("Paper Broker 조회 연결")).toBeInTheDocument();
+    expect(await screen.findByText("시장 데이터")).toBeInTheDocument();
+    expect((await screen.findAllByText("AVAILABLE")).length).toBeGreaterThanOrEqual(2);
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
       schema_version: "1.0",

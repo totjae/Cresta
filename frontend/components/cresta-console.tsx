@@ -259,7 +259,7 @@ function DashboardPage({ session, health }: { session: SessionData; health: Syst
       <StatusCard icon={ShieldCheck} tone="ok" title="Web 보안" status="READY" description="ID·비밀번호·TOTP 세션이 활성화되었습니다." />
       <StatusCard icon={Database} tone={health?.database_status === "CONNECTED" ? "ok" : "wait"} title="데이터베이스" status={health?.database_status ?? "LOADING"} description="Backend가 확인한 영속 저장소 상태입니다." />
       <StatusCard icon={ReceiptText} tone={paperReady ? "ok" : "wait"} title="Paper Broker" status={health?.paper_broker_status ?? "LOADING"} description={`거래 게이트: ${health?.trading_gate?.status ?? "초기화 전"}`} />
-      <StatusCard icon={Activity} tone="wait" title="시장 데이터" status={health?.market_data_status ?? "LOADING"} description="Watch 서비스는 후속 구현 단계입니다." />
+      <StatusCard icon={Activity} tone={health?.market_data_status === "AVAILABLE" ? "ok" : "wait"} title="시장 데이터" status={health?.market_data_status ?? "LOADING"} description="Watch가 확인한 stream 최신성과 품질 상태입니다." />
     </section>
     <section className="dashboard-grid">
       <article className="panel guard-panel"><div className="panel-head"><div><ShieldCheck size={18} /><span>Cresta Guard</span></div><span className="status-pill ok">ENFORCED</span></div><div className="guard-body"><div className="shield-visual"><ShieldCheck size={36} /></div><div><h3>거래 게이트 우선</h3><p>Paper Broker가 조회 가능해도 게이트가 READY가 아니면 신규 주문은 생성되지 않습니다.</p></div></div><div className="policy-row"><span>거래 게이트</span><b>{health?.trading_gate?.status ?? "초기화 전"}</b></div><div className="policy-row"><span>차단 사유</span><b>{health?.trading_gate?.reason ?? "없음"}</b></div></article>

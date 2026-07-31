@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     reauth_minutes: int = 5
     auth_max_failures: int = 5
     auth_lock_minutes: int = 15
+    quote_stale_seconds: int = Field(default=2, ge=1, le=30)
     totp_encryption_key: str | None = Field(default=None, repr=False)
     totp_encryption_key_file: str | None = None
 

@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import ClassVar
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -320,3 +321,73 @@ class PositionEvent(Base):
     after_json: Mapped[str] = mapped_column(Text, nullable=False)
     correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MarketSnapshot(Base):
+    __tablename__ = "market_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "source",
+            "market",
+            "symbol",
+            "sequence_or_hash",
+            name="uq_market_snapshots_source_identity",
+        ),
+        CheckConstraint("market IN ('KRX','NXT')", name="ck_market_snapshots_market"),
+        CheckConstraint(
+            "quality IN ('NORMAL','LATE','GAP_DETECTED')",
+            name="ck_market_snapshots_quality",
+        ),
+        Index("ix_market_snapshots_stream_event", "market", "symbol", "event_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    market: Mapped[str] = mapped_column(String(16), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence_or_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_sequence: Mapped[int | None] = mapped_column(Integer)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    open_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    high_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    low_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    cumulative_volume: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    best_bid_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    best_bid_quantity: Mapped[int | None] = mapped_column(BigInteger)
+    best_ask_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    best_ask_quantity: Mapped[int | None] = mapped_column(BigInteger)
+    trading_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    quality: Mapped[str] = mapped_column(String(24), nullable=False)
+    recovery_snapshot: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MarketStreamState(Base):
+    __tablename__ = "market_stream_states"
+    __table_args__ = (
+        CheckConstraint("market IN ('KRX','NXT')", name="ck_market_stream_states_market"),
+        CheckConstraint(
+            "quality IN ('NORMAL','GAP_DETECTED')",
+            name="ck_market_stream_states_quality",
+        ),
+    )
+
+    market: Mapped[str] = mapped_column(String(16), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    current_snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("market_snapshots.id"))
+    last_sequence: Mapped[int | None] = mapped_column(Integer)
+    last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cumulative_volume: Mapped[int | None] = mapped_column(BigInteger)
+    quality: Mapped[str] = mapped_column(String(24), nullable=False, default="NORMAL")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __mapper_args__: ClassVar[dict[str, object]] = {
+        "version_id_col": version,
+        "version_id_generator": False,
+    }

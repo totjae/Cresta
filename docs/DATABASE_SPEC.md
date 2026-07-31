@@ -120,7 +120,16 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-052 | Redis 전체 유실 후 PostgreSQL과 Broker 재동기화로 복구할 수 있어야 한다. |
 | DB-053 | 큐 작업에는 멱등성 키를 포함하고 ack 전 worker 종료 시 안전하게 재처리한다. |
 
-### 3.8 migration과 초기화
+### 3.8 첫 Watch 영속 테이블
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-080 | `market_snapshots`는 정규화 가격·호가·거래량, 원본 식별자·해시, 이벤트·수신시각과 품질을 불변 행으로 저장한다. |
+| DB-081 | `market_stream_states`는 `market + symbol`을 기본키로 하고 현재 정상 snapshot, 최근 순번·거래량, 품질과 version을 저장한다. |
+| DB-082 | snapshot 원본 식별자는 `source + market + symbol + sequence_or_hash` unique로 중복을 DB에서도 차단한다. |
+| DB-083 | snapshot 삽입과 stream 상태 변경은 하나의 transaction에서 처리하고 stream 상태는 낙관적 version 검사를 사용한다. |
+
+### 3.9 migration과 초기화
 
 | ID | 요구사항 |
 | --- | --- |
@@ -130,7 +139,7 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-063 | 초기 관리자 생성과 시스템 기본 설정 seed는 반복 실행해도 중복 생성되지 않아야 한다. |
 | DB-064 | 파일에서 읽은 DB 비밀번호는 SQLAlchemy URL에서 percent-encoding하고, Alembic ConfigParser에 주입할 때 `%`를 이중 이스케이프한다. migration 오류에는 완성된 인증 URL이나 비밀번호를 출력하지 않는다. |
 
-### 3.9 보존·백업
+### 3.10 보존·백업
 
 | ID | 요구사항 |
 | --- | --- |
