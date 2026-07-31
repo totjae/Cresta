@@ -138,7 +138,7 @@
 | T-UI-008 | UI-070~074 | EMERGENCY_LIQUIDATE 실행 | 영향 미리보기·강한 확인·지속 상태 표시 | 계획 |
 | T-UI-009 | UI-080~084 | 외부 주문 발견 | 격리·해결 선택과 거래 차단 범위 표시 | 계획 |
 | T-UI-010 | UI-090~093 | WebSocket 단절·복구 | 마지막 정상시각·재조회·상태 전환 표시 | 계획 |
-| T-UI-011 | UI-100~105 | 데스크톱·태블릿·모바일·키보드 검사 | 반응형·포커스·대비·감소된 움직임 통과 | 계획 |
+| T-UI-011 | UI-100~105 | 데스크톱·태블릿·모바일·키보드 검사 | 반응형·포커스·대비·감소된 움직임 통과 | 부분 통과 |
 
 ### 3.10 인증 및 보안
 
@@ -157,6 +157,7 @@
 | T-SEC-011 | SEC-010~012 | 서버 시각 허용 오차 초과 | 로그인·재인증 fail-closed 및 운영 경보 | 계획 |
 | T-UI-AUTH-001 | UI-AUTH-001~005, SEC-003, SEC-034 | 미인증 초기 접속·비밀번호 성공·TOTP 성공·새로고침 | TOTP 전 보호 화면 미노출, 성공 후 Console, 인증값 브라우저 저장 없음 | 부분 통과 |
 | T-UI-AUTH-002 | UI-AUTH-004~007, SEC-051~053 | 인증 실패·세션 만료·로그아웃 | 일반 오류, 보호 상태 폐기, 상태 변경 자동 재실행 없음 | 부분 통과 |
+| T-UI-PAP-001 | UI-PAP-001~006, API-080~085 | 실제 Paper 상태·빈 주문·주문 상세·포지션 조회와 401 발생 | 실제 저장값만 표시, 빈 상태 구분, 세션 폐기, 운영 생성 컨트롤 없음 | 로컬 통과 |
 
 ### 3.11 시장데이터 및 Watch
 
@@ -251,20 +252,21 @@
 
 ## 7. 실행 결과
 
-2026-07-31 Backend 인증 기반과 첫 Console 구현 결과:
+2026-08-01 Backend 인증 기반, Paper 조회 API와 Console 구현 결과:
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 27개 통과 | 예약문자 DB 비밀번호의 Alembic 이스케이프 포함; 실제 키움·WebSocket·전체 복구 절차 제외 |
-| Console 인증 component 시험 | `npm test` | 3개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃 |
+| Python 단위·API 시험 | `python -m pytest` | 30개 통과 | 예약문자 DB 비밀번호의 Alembic 이스케이프와 실제 Paper 상태·주문·포지션 조회 포함; 실제 키움·WebSocket·전체 복구 절차 제외 |
+| Console component 시험 | `npm test` | 4개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃, Paper 조회 전용 화면 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
 | Console HTTP smoke | standalone server에 HTTP 요청 | 통과 | `/` 응답 200과 Cresta metadata 확인 |
 | Console production dependency audit | `npm audit --omit=dev --audit-level=high` | 취약점 0건 | Next 하위 PostCSS·Sharp를 검증된 패치 버전으로 고정 |
 | 정적 검사 | `python -m ruff check app tests migrations` | 통과 | FastAPI dependency의 B008은 프레임워크 관용구로 제외 |
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
-| migration 왕복 | `alembic upgrade head`·`current`·`downgrade base` | 통과 | `%25`가 포함된 SQLite URL로 인증·Paper schema와 STARTING seed 검증; PostgreSQL 재검증 대기 |
+| migration 왕복 | `alembic upgrade head`·`current`·`downgrade base` | 통과 | `%25`가 포함된 SQLite URL로 인증·Paper schema와 STARTING seed 검증; 실서버 PostgreSQL upgrade 검증 완료 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
-| Docker Compose | Ubuntu 서버에서 PostgreSQL·Redis 기동 및 API migration 시도 | 부분 통과 | DB·Redis healthy·secret 읽기 확인; Alembic `%` 보간 결함 재현 후 수정, PostgreSQL migration 재검증 대기 |
+| Docker Compose·HTTPS | Ubuntu 서버에서 전체 서비스 기동, migration, host Nginx·TLS 접속과 로그인 | 통과 | PostgreSQL·Redis healthy, secret 읽기, API·Frontend·gateway, HTTPS와 ID·비밀번호·TOTP 로그인 확인 |
+| Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
 
-검증된 세부 동작은 인증 기반 외에 Paper 주문 시작 gate, MOCK/KRX 제한, payload 결합 멱등성, ACKNOWLEDGED·OPEN·부분체결·취소·정정·UNKNOWN 전이, 중복 체결 제거, 취소·정정 경쟁, 늦은 원주문 체결의 자식 잔량 조정, 수량 불변조건, 원자적 포지션 원장, 낙관적 version 충돌과 인증된 주문 조회를 포함한다. 실제 키움 mapping·호가 가격정책·재동기화 snapshot·PostgreSQL 동시성은 미검증이므로 관련 표의 `계획` 또는 `부분 통과` 상태를 유지한다.
+검증된 세부 동작은 인증 기반 외에 Paper 주문 시작 gate, MOCK/KRX 제한, payload 결합 멱등성, ACKNOWLEDGED·OPEN·부분체결·취소·정정·UNKNOWN 전이, 중복 체결 제거, 취소·정정 경쟁, 늦은 원주문 체결의 자식 잔량 조정, 수량 불변조건, 원자적 포지션 원장, 낙관적 version 충돌, 인증된 주문·포지션·시스템 상태 조회와 반응형 조회 화면을 포함한다. 실제 키움 mapping·호가 가격정책·재동기화 snapshot·PostgreSQL 동시성은 미검증이므로 관련 표의 `계획` 또는 `부분 통과` 상태를 유지한다.

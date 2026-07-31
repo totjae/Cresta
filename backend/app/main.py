@@ -9,6 +9,8 @@ from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
 from app.api.orders import router as orders_router
+from app.api.positions import router as positions_router
+from app.api.system import router as system_router
 from app.auth.service import AuthenticationError, CsrfError
 from app.errors import ResourceNotFoundError
 from app.ids import uuid7
@@ -108,6 +110,8 @@ def create_app() -> FastAPI:
 
     application.include_router(auth_router, prefix="/api/v1")
     application.include_router(orders_router, prefix="/api/v1")
+    application.include_router(positions_router, prefix="/api/v1")
+    application.include_router(system_router, prefix="/api/v1")
     return application
 
 

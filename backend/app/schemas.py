@@ -121,3 +121,56 @@ class OrderDetailResponse(OrderSummary):
     request_id: str
     events: list[OrderEventResponse]
     fills: list[FillResponse]
+
+
+class PositionSummary(StrictModel):
+    id: str
+    account_alias: str
+    environment: str = "MOCK"
+    market: str = "KRX"
+    symbol: str
+    quantity: int
+    average_price: Decimal
+    state: str
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class PositionListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[PositionSummary]
+
+
+class PositionDetailResponse(PositionSummary):
+    schema_version: str = "1.0"
+    request_id: str
+
+
+class TradingGateResponse(StrictModel):
+    account_alias: str
+    environment: str
+    status: str
+    reason: str | None
+    version: int
+    updated_at: datetime
+
+
+class SystemCountResponse(StrictModel):
+    orders: int
+    active_orders: int
+    open_positions: int
+
+
+class SystemHealthResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    environment: str
+    live_trading_enabled: bool
+    database_status: str
+    paper_broker_status: str
+    kiwoom_broker_status: str
+    market_data_status: str
+    trading_gate: TradingGateResponse | None
+    counts: SystemCountResponse

@@ -134,6 +134,19 @@ PATCH는 활성 설정을 직접 수정하지 않고 초안 version을 생성한
 | API-051 | 로그인·재인증 endpoint에는 멱등성 키 대신 인증 실패 제한과 challenge 1회 사용을 적용한다. |
 | API-052 | CSRF token은 쿠키와 다른 채널의 header로 검증하고 상태 변경 GET endpoint를 만들지 않는다. |
 
+### 3.5 Paper Broker 조회 모델
+
+첫 Console 연동은 Paper Broker의 상태와 결과를 읽기 전용으로 제공한다. `/system/health`는 DB 연결, Paper Broker 사용 가능 여부, 거래 게이트와 키움·시장데이터 준비 상태를 반환한다. `/orders`와 `/orders/{id}`는 주문·체결·상태 이벤트를, `/positions`와 `/positions/{symbol}`은 실제 Paper 체결로 생성된 포지션만 반환한다.
+
+| ID | 요구사항 |
+| --- | --- |
+| API-080 | Paper 조회 응답은 `MOCK` 환경과 `PAPER` 계좌를 명시하고 샘플 주문·포지션을 생성하지 않는다. |
+| API-081 | 시스템 상태는 `STARTING`, `RECONCILING`, `READY`, `DEGRADED`, `HALTED` 거래 게이트와 차단 사유·version을 그대로 제공한다. |
+| API-082 | 주문 목록은 수량 불변조건을 구성하는 주문·체결·취소·잔량과 `UNKNOWN`·`RECONCILING` 상태를 생략하지 않는다. |
+| API-083 | 주문 상세는 체결과 상태 이벤트를 시간순으로 제공하고 원주문·정정 관계 식별자를 유지한다. |
+| API-084 | 포지션 목록은 수량 0의 종료 포지션을 `state`로 구분하며 평균단가·version·기준시각을 제공한다. |
+| API-085 | 운영 Web API에는 Paper 주문·체결·게이트를 임의 생성하거나 변경하는 endpoint를 제공하지 않는다. |
+
 ## 4. 공통 오류
 
 ```json

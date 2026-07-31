@@ -13,12 +13,12 @@
 - 계정·IP 실패 제한, TOTP replay 차단과 고위험 행동 재인증 proof
 - 비밀번호 Argon2id hash, TOTP secret AES-GCM 암호화와 감사 로그
 - Next.js ID·비밀번호·TOTP 로그인, 세션 복구와 로그아웃 UI
-- 보호된 반응형 MOCK Console과 시스템 준비 상태 화면
+- 보호된 반응형 MOCK Console, 실제 Paper 시스템 상태·주문 상세·포지션 조회 화면
 - 결정론적 Paper Broker 주문·부분체결·취소·정정·응답유실 상태 머신
 - 주문·체결·포지션 원장과 인증된 주문 조회 API
 - N100·16GiB 서버용 Docker Compose 자원 제한 초안
 
-Console 거래 화면, 주문가격 산정, 전체 Guard·재동기화·Watch·AI·키움 Adapter는 아직 구현되지 않았습니다.
+Console의 주문 생성·승인·설정 화면, 주문가격 산정, 전체 Guard·재동기화·Watch·AI·키움 Adapter는 아직 구현되지 않았습니다. 현재 Paper 화면은 저장된 원장을 조회만 하며 운영 Web에서 주문이나 체결을 생성하지 않습니다.
 
 ## Backend 개발 실행
 
