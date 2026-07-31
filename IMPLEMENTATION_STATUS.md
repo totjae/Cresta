@@ -33,9 +33,9 @@
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 명세 완료 | 키움 실제 이벤트 순번 미검증, 코드 미구현 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 명세 완료 | 모델 제공자 미선정, mock interface 구현 가능 |
 | DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 인증·주문·체결·포지션 migration과 SQLite 왕복 검증, PostgreSQL 검증 미완료 |
-| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 도메인·localhost 7788 gateway 반영, 호스트 Nginx·TLS·백업·경보 실서버 검증 미완료 |
+| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 실서버 DB·Redis healthy 확인, API UID/GID `10001:10001` secret 준비 절차 추가; migration 재검증·호스트 Nginx·TLS·백업·경보 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 명세 완료 | 내부 구현 시작 가능, 외부 통합 게이트 유지 |
-| Backend·Docker 골격 | `docs/SYSTEM_DESIGN.md`, `docs/OPERATIONS_RUNBOOK.md` | 구현 완료/미검증 | Backend·Frontend·gateway와 N100 자원 제한 반영, 로컬 Docker 부재로 Compose 기동 미검증 |
+| Backend·Docker 골격 | `docs/SYSTEM_DESIGN.md`, `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | Backend·Frontend·gateway와 N100 자원 제한 반영, PostgreSQL·Redis 실서버 기동 성공; secret 권한 수정 후 API·gateway 재검증 대기 |
 
 ## 4. 구현 완료 조건
 

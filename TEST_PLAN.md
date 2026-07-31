@@ -220,6 +220,7 @@
 | T-OPS-006 | OPS-050~053 | DB·Redis·키움·시세 장애 주입 | 장애별 게이트와 복구 순서 준수 | 계획 |
 | T-OPS-007 | OPS-060~063 | Web 또는 Broker secret 유출 가정 | 세션·token 폐기, 증거 보존·사고 기록 | 계획 |
 | T-OPS-008 | OPS-006~007 | N100 자원 제한과 디스크 임계값 검사 | 예약 메모리 유지, 20% 경고·10% 차단 | 계획 |
+| T-OPS-009 | OPS-002 | host secret이 `0600` 사용자 소유인 상태와 준비 스크립트 실행 후 API 읽기 검사 | 준비 전 API 접근 실패, 실행 후 `10001:10001`·`0400`이며 migration에서 읽기 성공 | 실서버 부분 통과 |
 
 ## 4. 시험 환경
 
@@ -263,6 +264,6 @@
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
 | migration 왕복 | `alembic upgrade head`·`check`·`downgrade base` | 통과 | 인증·Paper schema와 STARTING seed SQLite 검증; PostgreSQL·Docker 미검증 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
-| Docker Compose | 미실행 | 미검증 | 현재 작업 환경에 Docker CLI 없음 |
+| Docker Compose | Ubuntu 서버에서 PostgreSQL·Redis 기동 및 API migration 시도 | 부분 통과 | DB·Redis healthy 확인; file secret 소유권 불일치 재현 후 준비 절차 추가, 수정 후 migration 재검증 대기 |
 
 검증된 세부 동작은 인증 기반 외에 Paper 주문 시작 gate, MOCK/KRX 제한, payload 결합 멱등성, ACKNOWLEDGED·OPEN·부분체결·취소·정정·UNKNOWN 전이, 중복 체결 제거, 취소·정정 경쟁, 늦은 원주문 체결의 자식 잔량 조정, 수량 불변조건, 원자적 포지션 원장, 낙관적 version 충돌과 인증된 주문 조회를 포함한다. 실제 키움 mapping·호가 가격정책·재동기화 snapshot·PostgreSQL 동시성은 미검증이므로 관련 표의 `계획` 또는 `부분 통과` 상태를 유지한다.

@@ -43,12 +43,23 @@ N100 환경에서는 Scout·Core 모델을 서버에 직접 적재하지 않고 
 | ID | 요구사항 |
 | --- | --- |
 | OPS-001 | 배포 루트는 `/home/totquf4171/cresta`로 고정하고 앱·설정·비밀·데이터·로그·백업 디렉터리를 분리한다. |
-| OPS-002 | 컨테이너는 root가 아닌 전용 고정 UID/GID로 실행하고 이미지에는 비밀값을 포함하지 않는다. |
+| OPS-002 | API 컨테이너는 root가 아닌 전용 고정 UID/GID `10001:10001`로 실행하고 이미지에는 비밀값을 포함하지 않는다. 호스트의 API용 secret 파일도 같은 소유자로 설정한다. |
 | OPS-003 | 공개 서비스 주소는 `https://trade.mihoservice.xyz`로 고정하고 인터넷에는 호스트 Nginx의 HTTPS 443만 노출한다. Cresta gateway는 `127.0.0.1:7788`에만 바인딩하며 DB·Redis·API·worker 포트는 Docker 내부망에만 둔다. |
 | OPS-004 | SSH 접근은 키 기반과 방화벽 허용 정책을 사용하며 Cresta Web 인증과 별도로 관리한다. |
 | OPS-005 | 운영 Compose는 `MOCK` 환경과 `live_trading_enabled=false`를 명시하고 실거래 secret이 발견되면 시작을 거부한다. |
 | OPS-006 | N100·16GiB 환경에서 API·Broker·Watch의 총 리소스 제한을 설정하고 PostgreSQL·OS를 위한 메모리 6GiB 이상을 예약한다. |
 | OPS-007 | 가용 SSD 20% 미만 경고와 10% 미만 거래·수집 차단 기준을 적용한다. |
+
+Compose의 `file` 기반 secret은 호스트 파일을 bind mount하며 `uid`, `gid`, `mode` 재매핑을 지원하지 않는다. 따라서 최초 배포와 secret 교체 후 다음 사전 점검을 반드시 실행한다.
+
+```bash
+cd /home/totquf4171/cresta
+sudo deploy/prepare-secrets.sh
+sudo docker compose -f deploy/compose.yaml run --rm api \
+  sh -c 'test -r /run/secrets/postgres_password && test -r /run/secrets/totp_encryption_key'
+```
+
+준비 스크립트는 비밀 내용을 출력하지 않고 두 파일의 소유자를 `10001:10001`, 권한을 읽기 전용 `0400`으로 제한한다. 이 검사가 실패하면 migration, 관리자 생성과 API 시작을 진행하지 않는다.
 
 ### 3.2 서비스와 의존 순서
 
@@ -198,7 +209,6 @@ restore_drill: monthly
 
 ## 6. 미결정·보류 항목
 
-- Docker 전용 UID/GID 값
 - 외부 백업 매체와 암호화 키 보관 위치
 - 경보 전달 채널과 야간 알림 정책
 - TLS 인증서 발급·자동 갱신 도구와 갱신 실패 알림 방식
