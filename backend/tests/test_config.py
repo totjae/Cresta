@@ -15,6 +15,21 @@ def test_database_password_file_is_encoded_without_exposure(tmp_path: Path) -> N
     assert settings.resolved_database_url == (
         "postgresql+psycopg://cresta:p%40ss%20word@postgres:5432/cresta"
     )
+    assert settings.alembic_database_url == (
+        "postgresql+psycopg://cresta:p%%40ss%%20word@postgres:5432/cresta"
+    )
+
+
+def test_alembic_database_url_escapes_encoded_slash(tmp_path: Path) -> None:
+    password_file = tmp_path / "postgres_password"
+    password_file.write_text("secret/value", encoding="utf-8")
+    settings = Settings(
+        database_url="postgresql+psycopg://cresta@postgres:5432/cresta",
+        database_password_file=str(password_file),
+    )
+
+    assert "%2F" in settings.resolved_database_url
+    assert "%%2F" in settings.alembic_database_url
 
 
 def test_live_environment_is_rejected() -> None:

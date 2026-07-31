@@ -52,6 +52,11 @@ class Settings(BaseSettings):
             raise RuntimeError("Database URL must contain a username without an embedded password")
         return f"{marker}{authority}:{quote(password, safe='')}@{remainder}"
 
+    @property
+    def alembic_database_url(self) -> str:
+        """Escape ConfigParser interpolation markers without changing the SQLAlchemy URL."""
+        return self.resolved_database_url.replace("%", "%%")
+
     def validate_safety(self) -> None:
         if self.environment.upper() != "MOCK":
             raise RuntimeError("Only MOCK broker environment is allowed in the first release")

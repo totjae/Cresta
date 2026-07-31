@@ -8,7 +8,7 @@ from app.config import get_settings
 from app.db import Base
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().resolved_database_url)
+config.set_main_option("sqlalchemy.url", get_settings().alembic_database_url)
 target_metadata = Base.metadata
 
 

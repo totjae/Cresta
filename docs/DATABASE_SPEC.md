@@ -128,6 +128,7 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-061 | 애플리케이션 시작 시 DB schema version 호환성을 검사하고 불일치 시 거래 worker를 시작하지 않는다. |
 | DB-062 | 되돌릴 수 없는 migration은 사전 백업·복원 시험·명시적 운영 승인 절차를 요구한다. |
 | DB-063 | 초기 관리자 생성과 시스템 기본 설정 seed는 반복 실행해도 중복 생성되지 않아야 한다. |
+| DB-064 | 파일에서 읽은 DB 비밀번호는 SQLAlchemy URL에서 percent-encoding하고, Alembic ConfigParser에 주입할 때 `%`를 이중 이스케이프한다. migration 오류에는 완성된 인증 URL이나 비밀번호를 출력하지 않는다. |
 
 ### 3.9 보존·백업
 

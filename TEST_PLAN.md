@@ -193,6 +193,7 @@
 | T-DB-005 | DB-040~042 | 활성 주문 대표 쿼리 실행계획 | 전체 시계열 scan 없이 인덱스 사용 | 계획 |
 | T-DB-006 | DB-050~053 | Redis 전체 삭제 후 worker 재시작 | DB·Broker로 복구, 작업 중복 없음 | 계획 |
 | T-DB-007 | DB-060~063 | schema 불일치·migration 실패·seed 재실행 | worker 시작 차단, 중복 seed 없음 | 계획 |
+| T-DB-008 | DB-064, SEC-033 | `/` 등 예약문자가 포함된 DB 비밀번호로 Alembic 실행 | URL은 정상 해석되고 오류·로그에 비밀번호 또는 완성된 인증 URL 미노출 | 단위 통과·PostgreSQL 재검증 대기 |
 | T-DB-008 | DB-070~073 | 암호화 백업 복원·보존 삭제 | 불변조건 통과, hold 데이터 보존 | 계획 |
 
 ### 3.14 HTTP·WebSocket API
@@ -254,7 +255,7 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 26개 통과 | SQLite 기반; 실제 키움·WebSocket·전체 복구 절차 제외 |
+| Python 단위·API 시험 | `python -m pytest` | 27개 통과 | 예약문자 DB 비밀번호의 Alembic 이스케이프 포함; 실제 키움·WebSocket·전체 복구 절차 제외 |
 | Console 인증 component 시험 | `npm test` | 3개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
@@ -262,8 +263,8 @@
 | Console production dependency audit | `npm audit --omit=dev --audit-level=high` | 취약점 0건 | Next 하위 PostCSS·Sharp를 검증된 패치 버전으로 고정 |
 | 정적 검사 | `python -m ruff check app tests migrations` | 통과 | FastAPI dependency의 B008은 프레임워크 관용구로 제외 |
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
-| migration 왕복 | `alembic upgrade head`·`check`·`downgrade base` | 통과 | 인증·Paper schema와 STARTING seed SQLite 검증; PostgreSQL·Docker 미검증 |
+| migration 왕복 | `alembic upgrade head`·`current`·`downgrade base` | 통과 | `%25`가 포함된 SQLite URL로 인증·Paper schema와 STARTING seed 검증; PostgreSQL 재검증 대기 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
-| Docker Compose | Ubuntu 서버에서 PostgreSQL·Redis 기동 및 API migration 시도 | 부분 통과 | DB·Redis healthy 확인; file secret 소유권 불일치 재현 후 준비 절차 추가, 수정 후 migration 재검증 대기 |
+| Docker Compose | Ubuntu 서버에서 PostgreSQL·Redis 기동 및 API migration 시도 | 부분 통과 | DB·Redis healthy·secret 읽기 확인; Alembic `%` 보간 결함 재현 후 수정, PostgreSQL migration 재검증 대기 |
 
 검증된 세부 동작은 인증 기반 외에 Paper 주문 시작 gate, MOCK/KRX 제한, payload 결합 멱등성, ACKNOWLEDGED·OPEN·부분체결·취소·정정·UNKNOWN 전이, 중복 체결 제거, 취소·정정 경쟁, 늦은 원주문 체결의 자식 잔량 조정, 수량 불변조건, 원자적 포지션 원장, 낙관적 version 충돌과 인증된 주문 조회를 포함한다. 실제 키움 mapping·호가 가격정책·재동기화 snapshot·PostgreSQL 동시성은 미검증이므로 관련 표의 `계획` 또는 `부분 통과` 상태를 유지한다.
