@@ -43,13 +43,17 @@ export const authApi = {
   password(loginId: string, password: string) {
     return request<PasswordChallenge>("/api/v1/auth/login/password", {
       method: "POST",
-      body: JSON.stringify({ login_id: loginId, password }),
+      body: JSON.stringify({ schema_version: "1.0", login_id: loginId, password }),
     });
   },
   totp(challengeId: string, code: string) {
     return request<SessionData>("/api/v1/auth/login/totp", {
       method: "POST",
-      body: JSON.stringify({ challenge_id: challengeId, totp_code: code }),
+      body: JSON.stringify({
+        schema_version: "1.0",
+        challenge_id: challengeId,
+        totp_code: code,
+      }),
     });
   },
   logout(csrfToken: string) {

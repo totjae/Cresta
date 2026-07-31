@@ -39,6 +39,16 @@ describe("CrestaConsole authentication", () => {
     expect(await screen.findByRole("heading", { name: "대시보드" })).toBeInTheDocument();
     expect(screen.getByText("Console 인증 완료")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      schema_version: "1.0",
+      login_id: "admin",
+      password: "correct horse battery staple",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
+      schema_version: "1.0",
+      challenge_id: "challenge-1",
+      totp_code: "123456",
+    });
     expect(storageWrite).not.toHaveBeenCalled();
   });
 
