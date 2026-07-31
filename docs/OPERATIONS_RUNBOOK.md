@@ -7,7 +7,7 @@ Ubuntu 서버에서 Cresta를 안전하게 배포·운영하고, 장애·재시�
 ## 2. 적용 범위
 
 - `/home/totquf4171/cresta` Docker Compose 배포
-- Nginx HTTPS, 네트워크와 파일 권한
+- 호스트 Nginx HTTPS reverse proxy, 내부 Web 포트와 파일 권한
 - 서비스 시작·종료·업데이트·롤백
 - 모니터링, 경보, 백업과 복원
 - 장중 장애, 키움 연결 장애와 보안 사고
@@ -16,13 +16,39 @@ Ubuntu 서버에서 Cresta를 안전하게 배포·운영하고, 장애·재시�
 
 ### 3.1 배포 환경과 권한
 
+확정 대상 서버 기준:
+
+```yaml
+host:
+  os: Ubuntu Server
+  processor: Intel N100
+  memory_gib: 16
+  available_ssd_gib: 250
+```
+
+확정 서비스 진입점:
+
+```yaml
+public_url: https://trade.mihoservice.xyz
+internal_upstream: http://127.0.0.1:7788
+tls_termination: host_nginx
+```
+
+호스트 Nginx만 인터넷의 80·443 포트를 수신한다. Docker Compose의 Cresta Web gateway는 호스트 루프백 `127.0.0.1:7788`에만 바인딩하며, DB·Redis·API 포트는 호스트에 게시하지 않는다. 따라서 7788은 인터넷 방화벽에서 개방하지 않는다.
+
+N100 환경에서는 Scout·Core 모델을 서버에 직접 적재하지 않고 외부 모델 adapter 또는 mock adapter를 사용한다. 동시 감시 종목은 MVP 상한 3개를 유지하고, CPU 집약 분석 작업은 기본 동시 실행 1개로 제한한다.
+
+초기 저장공간 예산은 PostgreSQL 100GiB, 암호화 백업 50GiB, 로그 15GiB, 시험·진단 artifacts 10GiB, 이미지·빌드 cache 15GiB로 제한하고 최소 60GiB를 운영 여유 공간으로 남긴다. 실제 사용량에 따라 조정하되 여유 공간 20% 미만에서는 경고, 10% 미만에서는 신규매수와 고용량 수집을 차단한다.
+
 | ID | 요구사항 |
 | --- | --- |
 | OPS-001 | 배포 루트는 `/home/totquf4171/cresta`로 고정하고 앱·설정·비밀·데이터·로그·백업 디렉터리를 분리한다. |
 | OPS-002 | 컨테이너는 root가 아닌 전용 고정 UID/GID로 실행하고 이미지에는 비밀값을 포함하지 않는다. |
-| OPS-003 | 외부 공개 포트는 HTTPS 443만 기본 허용하고 DB·Redis·내부 worker 포트는 Docker 내부망에만 노출한다. |
+| OPS-003 | 공개 서비스 주소는 `https://trade.mihoservice.xyz`로 고정하고 인터넷에는 호스트 Nginx의 HTTPS 443만 노출한다. Cresta gateway는 `127.0.0.1:7788`에만 바인딩하며 DB·Redis·API·worker 포트는 Docker 내부망에만 둔다. |
 | OPS-004 | SSH 접근은 키 기반과 방화벽 허용 정책을 사용하며 Cresta Web 인증과 별도로 관리한다. |
 | OPS-005 | 운영 Compose는 `MOCK` 환경과 `live_trading_enabled=false`를 명시하고 실거래 secret이 발견되면 시작을 거부한다. |
+| OPS-006 | N100·16GiB 환경에서 API·Broker·Watch의 총 리소스 제한을 설정하고 PostgreSQL·OS를 위한 메모리 6GiB 이상을 예약한다. |
+| OPS-007 | 가용 SSD 20% 미만 경고와 10% 미만 거래·수집 차단 기준을 적용한다. |
 
 ### 3.2 서비스와 의존 순서
 
@@ -159,6 +185,7 @@ restore_drill: monthly
 - RPO/RTO는 운영 목표이며 거래 결과 보장을 의미하지 않는다.
 - 백업 복원본을 기존 서버와 동시에 같은 계좌의 Active worker로 실행하지 않는다.
 - TLS 인증서 만료 임박 시 갱신 실패 경보를 발생시키며 만료 후 HTTP 우회 접속을 열지 않는다.
+- 호스트 Nginx가 `Host`, `X-Forwarded-Proto`, `X-Forwarded-For`, `X-Request-Id`를 전달하지 않거나 HTTPS 원본을 보장하지 못하면 인증 서비스 공개를 중지한다.
 
 ## 5. 검증·인수 조건
 
@@ -167,10 +194,11 @@ restore_drill: monthly
 - 암호화 백업을 격리 환경에 복원하고 핵심 불변조건을 검증한다.
 - 동일 계좌 worker 이중 실행과 복원 서버 동시 실행이 차단된다.
 - 장 전·장 후 점검 결과와 장애 대응 이력이 감사 가능하다.
+- 외부에서는 `https://trade.mihoservice.xyz`로만 접근할 수 있고, 원격 호스트에서 서버의 7788 포트로 직접 접근할 수 없다.
 
 ## 6. 미결정·보류 항목
 
 - Docker 전용 UID/GID 값
 - 외부 백업 매체와 암호화 키 보관 위치
 - 경보 전달 채널과 야간 알림 정책
-- 도메인 이름과 TLS 인증서 발급 방식
+- TLS 인증서 발급·자동 갱신 도구와 갱신 실패 알림 방식

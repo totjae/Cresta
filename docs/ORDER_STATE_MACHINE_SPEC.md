@@ -203,6 +203,21 @@ WebSocket은 빠른 반영 경로이며 단독 진실 공급원이 아니다. �
 
 구체적인 스냅샷·버퍼·불일치 처리와 거래 게이트는 [계좌·주문 재동기화 명세](RECONCILIATION_SPEC.md)를 따른다.
 
+### 3.9 결정론적 Paper Broker
+
+키움 모의투자 연동 전 회귀시험은 외부 네트워크를 사용하지 않는 `PAPER` 계좌 simulator로 수행한다. simulator는 운영 API에서 임의 체결을 생성하는 기능을 제공하지 않고 Backend 시험·내부 service에서만 명시적 접수, 체결, 취소, 정정과 응답 유실 사건을 주입한다.
+
+| ID | 요구사항 |
+| --- | --- |
+| PAP-001 | Paper Broker는 `MOCK` 환경과 `PAPER` 계좌에서만 동작하고 실거래 환경 설정에서는 시작을 거부한다. |
+| PAP-002 | 프로세스 시작 시 거래 게이트 기본값은 `STARTING`이며 시험 또는 재동기화 절차가 명시적으로 `READY`로 바꾸기 전 주문을 생성하지 않는다. |
+| PAP-003 | 같은 idempotency key와 같은 payload는 기존 주문을 반환하고, 같은 key의 다른 payload는 충돌로 거부한다. |
+| PAP-004 | 체결 사건은 호출자가 제공한 고유 source key로 중복 제거하고 체결·주문 수량·포지션·원장 이벤트를 한 트랜잭션에서 반영한다. |
+| PAP-005 | Paper Broker의 취소·정정은 실제 상태 머신과 동일한 중간 상태를 거치며, 취소 대기 중 추가 체결을 먼저 반영한다. |
+| PAP-006 | `UNKNOWN` 또는 `RECONCILING` 주문이 있는 종목에는 동일 idempotency 재조회 외의 새 주문을 허용하지 않는다. |
+| PAP-007 | 첫 Paper Broker는 KRX, `BUY/SELL`, `LIMIT/MARKET`만 지원하며 NXT·SOR 요청은 `UNSUPPORTED_IN_MOCK`으로 거부한다. |
+| PAP-008 | Paper 주문 생성은 내부 service로만 제공하고 Web API는 인증된 주문·체결 조회만 제공한다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 취소 요청과 전량 체결이 경쟁하면 체결을 우선하고 취소 실패를 시스템 장애로 보지 않는다.

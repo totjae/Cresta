@@ -38,6 +38,8 @@
 | 문서 | 위치 | 작성·관리할 내용 |
 | --- | --- | --- |
 | 프로젝트 안내 | [README.md](README.md) | 프로젝트 소개, 실행 방법과 주요 문서 진입점 |
+| Backend 개발 안내 | [backend/README.md](backend/README.md) | FastAPI 개발 실행, migration과 관리자 생성 방법 |
+| Frontend 개발 안내 | [frontend/README.md](frontend/README.md) | Next.js Console 범위와 개발·시험·빌드 방법 |
 | 제품 요구사항 | [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md) | MVP 범위, 키움 모의투자, 행동별 실행 권한과 익일 보유 정책 |
 | 거래 세션 명세 | [docs/TRADING_SESSION_SPEC.md](docs/TRADING_SESSION_SPEC.md) | 장 전 점검, KRX·NXT 세션, 감시 주기, 신규매수와 장 마감 정책 |
 | 주문 실행 명세 | [docs/ORDER_EXECUTION_SPEC.md](docs/ORDER_EXECUTION_SPEC.md) | 주문 가격, 승인 범위, 미체결·부분체결·취소·재주문 정책 |

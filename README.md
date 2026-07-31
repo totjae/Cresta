@@ -2,15 +2,55 @@
 
 **Cresta — AI-Assisted Intraday Trading System**은 사용자가 선택한 국내 주식의 진입과 청산을 분석하고, 규칙 기반 리스크 엔진을 통해 주문을 통제하는 개인용 단기매매 시스템입니다.
 
-이 저장소는 제품 정의와 MVP 시스템 설계, 그리고 이를 검토하기 위한 반응형 Console 프로토타입을 포함합니다. 첫 제품 버전은 키움 REST API 모의투자 주문 연결을 목표로 하지만, 현재 화면은 실제 주문을 전송하지 않는 정적 데모입니다.
+이 저장소는 제품 명세, FastAPI Backend와 Next.js Console을 포함합니다. 첫 제품 버전은 키움 REST API 모의투자 주문 연결을 목표로 하며 실거래는 비활성화합니다.
 
-## 빠른 실행
+## 현재 구현 범위
+
+- FastAPI 기본 애플리케이션과 최소 공개 health endpoint
+- PostgreSQL용 Alembic 인증 기반 migration
+- ID·비밀번호·TOTP 로그인
+- 서버측 session, HttpOnly cookie, CSRF·Origin 검사와 로그아웃
+- 계정·IP 실패 제한, TOTP replay 차단과 고위험 행동 재인증 proof
+- 비밀번호 Argon2id hash, TOTP secret AES-GCM 암호화와 감사 로그
+- Next.js ID·비밀번호·TOTP 로그인, 세션 복구와 로그아웃 UI
+- 보호된 반응형 MOCK Console과 시스템 준비 상태 화면
+- 결정론적 Paper Broker 주문·부분체결·취소·정정·응답유실 상태 머신
+- 주문·체결·포지션 원장과 인증된 주문 조회 API
+- N100·16GiB 서버용 Docker Compose 자원 제한 초안
+
+Console 거래 화면, 주문가격 산정, 전체 Guard·재동기화·Watch·AI·키움 Adapter는 아직 구현되지 않았습니다.
+
+## Backend 개발 실행
 
 ```bash
-python3 -m http.server 8080
+cd backend
+python3.12 -m venv .venv
+. .venv/bin/activate
+pip install -e '.[test]'
+pytest
 ```
 
-브라우저에서 `http://localhost:8080`을 엽니다.
+DB migration과 관리자 생성은 TOTP 암호화 키 파일과 DB 연결을 안전하게 설정한 뒤 수행합니다.
+
+```bash
+alembic upgrade head
+cresta-admin create-admin --login-id <사용자ID>
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Frontend는 Node.js 24 기준으로 실행합니다.
+
+```bash
+cd frontend
+npm ci
+npm run typecheck
+npm test
+npm run build
+```
+
+`deploy/.env.example`은 키 이름과 비밀 파일 경로만 제공하며 실제 값은 `secrets/`에 생성해야 합니다. 현재 로컬 작업 환경에는 Docker가 없어 Compose 기동은 검증되지 않았습니다.
+
+운영 Web 진입점은 `https://trade.mihoservice.xyz`이며, Compose gateway는 `127.0.0.1:7788`에만 바인딩됩니다. 호스트 Nginx 예시는 `deploy/host-nginx.example.conf`에 있으며 7788 포트는 인터넷에 직접 개방하지 않습니다.
 
 ## 문서
 

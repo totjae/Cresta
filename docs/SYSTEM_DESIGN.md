@@ -33,7 +33,10 @@ Cresta MVP는 사용자가 등록한 국내주식 최대 3종목을 감시하고
 ## 2. 논리 아키텍처
 
 ```text
-Browser ─HTTPS─> Nginx ─> Console (Next.js)
+Browser ─HTTPS─> Host Nginx (trade.mihoservice.xyz)
+                       └─HTTP/loopback─> 127.0.0.1:7788 ─> Cresta gateway
+                                                               ├─> Console (Next.js)
+                                                               └─> FastAPI
                          └> API (FastAPI) ─> PostgreSQL/TimescaleDB
                                   │          Redis (cache/queue/lock)
 Market stream ─> Watch ─> Event Bus
@@ -51,6 +54,10 @@ Market stream ─> Watch ─> Event Bus
 | Console | 설정, 승인, 관찰, 비상정지 | 사용자 의도 생성 |
 
 의사결정 우선순위는 `Guard > 사용자 수동 명령 > 실제 계좌/주문 상태 > Core > Scout`로 고정한다.
+
+첫 Console 구현은 Next.js App Router와 TypeScript를 사용한다. 브라우저는 같은 origin의 `/api/v1`만 호출하고 세션 token은 `HttpOnly` cookie로, CSRF token은 React 메모리 상태로만 유지한다. 새로고침 시 `/api/v1/auth/session`으로 서버 세션을 다시 검증하고 새 CSRF token을 받는다. 미인증·만료 응답에서는 보호 화면 상태를 즉시 폐기하며 로그인 요청을 자동 재전송하지 않는다.
+
+첫 화면 범위는 2단계 로그인, 로그아웃, 보호된 Console shell, MOCK 환경·API 상태와 아직 구현되지 않은 Broker·거래 기능의 명시적 비활성 상태다. 실제 계좌·시세·주문 데이터를 흉내 낸 값을 운영 화면에 표시하지 않는다.
 
 ## 3. 핵심 흐름
 
@@ -126,7 +133,24 @@ SELECTED -> PRECHECK -> ENTRY_WATCH -> ENTRY_READY -> BUY_PENDING
 
 ## 8. 배포 단위와 관측성
 
-초기에는 `console`, `api`, `worker`, `postgres`, `redis`, `nginx`의 Docker Compose 구성을 사용한다. Watch/Broker worker는 API 프로세스와 분리한다. 메트릭은 시세 지연, 이벤트 큐 지연, 판단 시간, 주문 성공률, reconciliation 불일치, 활성 비상정지를 포함한다. 구조화 로그에는 비밀정보 없이 `correlation_id`, symbol, module, event_type을 담는다.
+초기에는 `console`, `api`, `worker`, `postgres`, `redis`, `nginx`의 Docker Compose 구성을 사용한다. Compose의 gateway는 `127.0.0.1:7788`에만 게시하고 호스트 Nginx가 `trade.mihoservice.xyz`의 TLS를 종료한다. Watch/Broker worker는 API 프로세스와 분리한다. 메트릭은 시세 지연, 이벤트 큐 지연, 판단 시간, 주문 성공률, reconciliation 불일치, 활성 비상정지를 포함한다. 구조화 로그에는 비밀정보 없이 `correlation_id`, symbol, module, event_type을 담는다.
+
+초기 구현 저장소 구조는 다음으로 고정한다.
+
+```text
+backend/                 FastAPI 애플리케이션·CLI·테스트
+  app/
+    api/                 HTTP endpoint
+    auth/                비밀번호·TOTP·세션
+    models/              SQLAlchemy 영속 모델
+    services/            도메인 서비스
+  migrations/            Alembic migration
+deploy/                  Docker Compose·Nginx·환경 예시
+frontend/                Next.js Console·인증 UI
+docs/                    기준 명세
+```
+
+Backend 기준은 Python 3.12, FastAPI, SQLAlchemy 2, Alembic, PostgreSQL과 Redis다. 서버가 Intel N100·메모리 16GiB이므로 로컬 LLM은 배포하지 않고 worker 동시성을 제한한다. 상세 자원·디스크 예산은 [배포·운영·장애복구 명세](OPERATIONS_RUNBOOK.md)를 따른다.
 
 ## 9. 단계별 구현
 
