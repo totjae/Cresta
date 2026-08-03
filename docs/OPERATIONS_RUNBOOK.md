@@ -231,6 +231,17 @@ sudo docker compose \
 
 성공 상태는 `ACCOUNT_VERIFIED`이며 이는 일회성 점검 결과다. 상시 Broker worker와 재동기화가 구현되기 전에는 `READY`를 의미하지 않는다.
 
+읽기 전용 계좌 스냅샷 대조는 migration 적용 후 다음 명령으로 실행한다.
+
+```bash
+sudo docker compose \
+  -f deploy/compose.yaml \
+  -f deploy/compose.kiwoom.yaml \
+  exec -T api cresta-admin kiwoom-reconcile-check
+```
+
+정상 대조도 상시 worker가 없으므로 `RECONCILING`을 반환한다. `HALTED` 또는 `DEGRADED`이면 신규 주문을 허용하지 않고 mismatch/error code만 진단 기록에 남긴다.
+
 `CRESTA_KIWOOM_ENABLED=true`는 세 secret이 준비되고 출구 IP를 별도로 확인한 뒤에만 적용한다. 이번 단계의 `CONFIGURED`는 파일 준비 상태이며 키움 인증·계좌조회 성공을 뜻하지 않는다.
 
 - 키움이나 네트워크 장애 시 Cresta가 시장 체결을 보장하지 않는다는 경고를 유지한다.

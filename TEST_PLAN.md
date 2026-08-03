@@ -82,6 +82,8 @@
 | T-REC-008 | REC-060~063 | 키움 앱에서 외부 주문 생성 | 외부 주문 생성·종목 차단, 전략 자동 편입 없음 | 계획 |
 | T-REC-009 | REC-030~034 | 같은 체결이 스냅샷과 WebSocket에 존재 | 중복 제거 후 수량 불변조건 유지 | 계획 |
 | T-REC-010 | REC-064~065 | 외부 포지션 편입·평균단가 불일치 | 필수 정책 승인, BROKER_BASIS와 차이 표시 | 계획 |
+| T-REC-011 | REC-070~071,076~077 | 읽기 전용 bootstrap 대조 성공·불일치·조회 실패 | READY 금지, 각각 RECONCILING·HALTED·DEGRADED와 run 보존 | 통과 (2026-08-03, 자동) |
+| T-REC-012 | REC-072~075 | 외부/내부 주문·포지션·체결 합계 조합 | 안정된 mismatch 코드, 자동 주문·Fill·포지션 수정 없음 | 통과 (2026-08-03, 자동) |
 
 ### 3.6 키움 Broker Adapter
 
@@ -107,6 +109,10 @@
 | T-KIW-018 | KIW-101 | `kiwoom-check` 성공·인증 실패·계좌 실패 | 안정된 상태·오류 코드와 종료코드, 비밀값 미출력 | 통과 (2026-08-03, 자동) |
 | T-KIW-019 | KIW-102~103 | 일회성 점검 종료 후 시스템 상태 조회 | API는 `READY`를 주장하지 않고 구성 상태만 유지 | 통과 (2026-08-03, 자동) |
 | T-KIW-020 | KIW-097~103 | 운영 서버의 MOCK token으로 `ka00001` 조회 후 10자리 secret 일치 점검 | 마스킹된 `ACCOUNT_VERIFIED`, 전체 계좌·token 미출력 | 통과 (2026-08-03, 실서버 수동) |
+| T-KIW-021 | KIW-104~106 | 세 snapshot API의 단일·다중 페이지와 중간 실패 | 공식 body/header, 전체 페이지 성공 전 결과 미사용 | 통과 (2026-08-03, 자동) |
+| T-KIW-022 | KIW-105 | 빈·반복 next-key와 20페이지 초과 | `KIWOOM_INVALID_PAGINATION`, 무한 호출 없음 | 통과 (2026-08-03, 자동) |
+| T-KIW-023 | KIW-107~109 | 정상·경계·비지원 주문/체결/잔고 fixture | 엄격 정규화, 비지원/수량 위반 fail-closed, Fill 미생성 | 통과 (2026-08-03, 자동) |
+| T-KIW-024 | KIW-110 | reconciliation CLI 성공·불일치·외부 실패 | 비밀 없는 요약과 안정된 종료코드 | 통과 (2026-08-03, 자동) |
 
 ### 3.7 Guard 리스크 및 비상정지
 
@@ -269,7 +275,7 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 60개 통과 | 인증·Paper·Watch, 키움 토큰/시세와 `ka00001` 10자리 계좌 검증·CLI 포함; WebSocket·주문 제외 |
+| Python 단위·API 시험 | `python -m pytest` | 73개 통과 | 인증·Paper·Watch, 키움 계좌 snapshot 연속조회·정규화·DB 대조·CLI 포함; WebSocket·주문 제외 |
 | Console component 시험 | `npm test` | 4개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃, Paper 조회 전용 화면 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
@@ -277,10 +283,10 @@
 | Console production dependency audit | `npm audit --omit=dev --audit-level=high` | 취약점 0건 | Next 하위 PostCSS·Sharp를 검증된 패치 버전으로 고정 |
 | 정적 검사 | `python -m ruff check app tests migrations` | 통과 | FastAPI dependency의 B008은 프레임워크 관용구로 제외 |
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
-| migration 왕복 | `alembic upgrade head`·`current`·`downgrade base` | 통과 | SQLite에서 인증·Paper·Watch schema와 `20260801_0003` head 검증; 신규 migration의 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
+| migration 왕복 | `alembic upgrade head`·`current`·`downgrade base` | 통과 | SQLite에서 reconciliation schema 포함 `20260803_0004` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
 | Docker Compose·HTTPS | Ubuntu 서버에서 전체 서비스 기동, migration, host Nginx·TLS 접속과 로그인 | 통과 | PostgreSQL·Redis healthy, secret 읽기, API·Frontend·gateway, HTTPS와 ID·비밀번호·TOTP 로그인 확인 |
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
 | Watch 상태 UI 변경 점검 | component·TypeScript·production build | 통과 | 인앱 브라우저의 로컬 URL 정책 차단으로 이번 변경의 추가 시각 점검은 미실행 |
 
-검증된 세부 동작은 인증·Paper 흐름 외에 Watch quote의 KRX/NXT 분리, payload 중복·충돌, 역순·순번 갭·누적량 역행, 명시적 복구 snapshot, 최신성·stream 품질, 키움 MOCK URL 강제, 메모리 토큰 단일 갱신, 401 1회 재인증, `ka10001` mapping과 `ka00001` 10자리 계좌 일치·마스킹 CLI를 포함한다. 실제 서버의 MOCK 인증·`ka10001` 시세·`ka00001` 계좌 일치는 2026-08-03 통과했다. WebSocket·분봉·지표·호가 가격정책·재동기화 snapshot·PostgreSQL 동시성은 미검증이다.
+검증된 세부 동작은 인증·Paper·Watch 외에 키움 MOCK URL 강제, 메모리 토큰 단일 갱신, 401 재인증, `ka10001`, `ka00001`, `ka10075`, `ka10076`, `kt00018` fixture mapping과 읽기 전용 대조를 포함한다. 실제 서버의 MOCK 인증·`ka10001` 시세·`ka00001` 계좌 일치는 2026-08-03 통과했다. 신규 계좌 snapshot API·WebSocket·분봉·지표·호가 가격정책·자동 복구·PostgreSQL 동시성은 미검증이다.

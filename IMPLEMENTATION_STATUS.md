@@ -21,19 +21,19 @@
 | 거래 세션과 감시 일정 | `docs/TRADING_SESSION_SPEC.md` | 명세 완료 | NXT는 키움 모의투자 검증 불가 |
 | 주문 가격과 미체결 처리 | `docs/ORDER_EXECUTION_SPEC.md` | 구현 중 | Paper 부분체결·취소·정정 구현, 호가·가격정책·timeout worker 미구현 |
 | 주문 상태 머신과 키움 매핑 | `docs/ORDER_STATE_MACHINE_SPEC.md` | 구현 중 | Paper 전이·수량 불변·멱등성 구현, 키움 이벤트 필드 매핑은 잠정 |
-| 계좌·주문 재동기화 | `docs/RECONCILIATION_SPEC.md` | 구현 중 | STARTING gate·UNKNOWN 종목 차단 구현, snapshot 대조 worker 미구현 |
+| 계좌·주문 재동기화 | `docs/RECONCILIATION_SPEC.md` | 구현 중 | 키움 미체결·당일체결·잔고 읽기 전용 snapshot 대조와 run/mismatch/gate 영속화 로컬 검증; 상시 worker·자동 복구 미구현 |
 | 시스템 아키텍처 | `docs/SYSTEM_DESIGN.md` | 구현 중 | Backend·Console·gateway 골격 구현, trading worker 미구현 |
 | HTTP/WebSocket API | `docs/API_SPEC.md` | 구현 중 | 인증·system health(키움 구성 상태 포함)·주문/체결·포지션·최신 quote 조회 구현, 거래 명령·WebSocket stream 미구현 |
 | UI 콘셉트 참고자료 | `stitch_cresta_ai_intraday_trading_system/` | 참고자료 | 실제 Console 구현물이 아님 |
-| 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | MOCK 인증·`ka10001`·`ka00001` 10자리 계좌 일치와 마스킹 CLI 실서버 통과; WebSocket·주문·상시 worker 미검증/미구현 |
+| 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | 인증·시세·계좌 일치 실서버 통과, `ka10075`·`ka10076`·`kt00018` 연속조회/정규화 로컬 검증; 신규 조회 실서버·WebSocket·주문 미검증/미구현 |
 | Guard 리스크·비상정지 | `docs/GUARD_RISK_SPEC.md` | 명세 완료 | MVP 기본값·허용범위 확정, 모의시험 후 조정 가능 |
 | 사용자 설정·적용 | `docs/CONFIGURATION_SPEC.md` | 명세 완료 | Web UI 연계 명세 완료, 코드 미구현 |
 | Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, Paper 읽기 전용 화면과 Watch stream 상태 표시 구현·로컬 검증, 주문 생성·승인·설정·상세 Watch 화면 미구현 |
 | 인증·세션·TOTP | `docs/SECURITY_SPEC.md` | 구현 중 | 로그인·세션·CSRF·실패제한·재인증 기반 17개 로컬 시험 통과, 복구·운영 검증 미완료 |
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 정규화·KRX/NXT 분리·중복/역순/갭·복구 snapshot·최신성 조회와 키움 REST 복구 snapshot mapping 로컬 검증, WebSocket 수신·분봉·지표 미구현 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 명세 완료 | 모델 제공자 미선정, mock interface 구현 가능 |
-| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 인증·Paper·Watch migration SQLite 왕복 및 기존 실서버 PostgreSQL migration 검증 완료, 신규 Watch migration 실서버 적용·PostgreSQL 동시성 시험 미완료 |
-| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 키움 secret overlay·실제 인증 완료, API source 실행 UID 소유권 보강; 실서버 이미지 재검증과 백업·경보·복구훈련 미완료 |
+| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | reconciliation run/mismatch `20260803_0004` 포함 SQLite migration 왕복 완료; 신규 migration 실서버 PostgreSQL 적용·동시성 시험 미완료 |
+| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 키움 secret overlay·실제 인증·API source UID 권한 실서버 검증 완료; 신규 reconciliation migration/CLI 실서버 검증과 백업·경보·복구훈련 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 명세 완료 | 키움 출구 IP·MOCK 인증·시세 실서버 확인 반영, 계좌·주문 외부 통합 게이트 유지 |
 | Backend·Docker 골격 | `docs/SYSTEM_DESIGN.md`, `docs/OPERATIONS_RUNBOOK.md` | 검증 완료 | API source UID `10001` 소유권·PostgreSQL·Redis·API·Frontend·gateway 기동과 HTTPS/내부 health 실서버 확인 |
 

@@ -233,6 +233,34 @@ reconciliation_run:
 - 외부 주문·포지션 수
 - `RECONCILING`, `DEGRADED`, `HALTED` 지속시간
 
+### 3.10 첫 키움 스냅샷 대조 단계
+
+첫 구현은 주문을 생성하거나 broker 값을 내부 포지션에 자동 덮어쓰지 않는 읽기 전용 대조 단계다.
+
+```text
+계좌 10자리 일치 확인
+→ 거래 게이트 RECONCILING
+→ ka10075 미체결 전체 페이지
+→ ka10076 당일 체결 전체 페이지
+→ kt00018 평가잔고 전체 페이지
+→ 내부 KIWOOM_MOCK_PRIMARY 미종료 주문·포지션과 비교
+→ run/mismatch 원자 저장
+→ 불일치 없음: RECONCILING(PERMANENT_WORKER_REQUIRED)
+→ 중요 불일치: HALTED(RECONCILIATION_MISMATCH)
+→ 조회 실패: DEGRADED(RECONCILIATION_FAILED)
+```
+
+| ID | 요구사항 |
+| --- | --- |
+| REC-070 | 계좌 alias는 `KIWOOM_MOCK_PRIMARY`, 환경은 `MOCK`, trigger는 `MANUAL_BOOTSTRAP`으로 고정한다. |
+| REC-071 | 대조 시작 전에 gate를 `RECONCILING`으로 저장하고 어떤 종료 경로에서도 `READY`로 전환하지 않는다. |
+| REC-072 | broker 미체결 주문과 내부 활성 주문은 broker 주문번호로 비교한다. 어느 한쪽에만 있거나 종목·방향·주문/잔여수량이 다르면 `CRITICAL` mismatch다. |
+| REC-073 | broker 보유수량과 내부 OPEN 포지션은 종목별로 비교한다. 외부 포지션, 내부 누락, 수량·평균단가 차이는 mismatch로 기록하며 자동 편입·수정하지 않는다. |
+| REC-074 | 당일 체결은 주문번호별 체결수량 합계와 내부 체결수량의 차이를 탐지하는 데만 사용하고 개별 Fill을 생성하지 않는다. |
+| REC-075 | 실행 결과는 snapshot 건수·mismatch 코드/심각도·시각·요청 API ID만 저장한다. 전체 계좌번호·token·원본 broker payload는 저장하지 않는다. |
+| REC-076 | mismatch가 없으면 run은 `SUCCEEDED`, gate는 `RECONCILING/PERMANENT_WORKER_REQUIRED`다. 하나 이상의 `CRITICAL` mismatch가 있으면 run은 `MISMATCH`, gate는 `HALTED/RECONCILIATION_MISMATCH`다. |
+| REC-077 | 조회·정규화·DB 반영이 실패하면 run은 `FAILED`, gate는 `DEGRADED/RECONCILIATION_FAILED`다. CLI는 안정된 오류 코드와 비밀이 없는 요약만 출력한다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 키움 조회 API 일부만 성공하면 성공한 스냅샷으로 전체 계좌를 확정하지 않는다.

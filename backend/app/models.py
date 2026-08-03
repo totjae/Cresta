@@ -158,6 +158,62 @@ class TradingGate(Base):
     }
 
 
+class ReconciliationRun(Base):
+    __tablename__ = "reconciliation_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('RUNNING','SUCCEEDED','MISMATCH','FAILED')",
+            name="ck_reconciliation_runs_state",
+        ),
+        CheckConstraint("mismatch_count >= 0", name="ck_reconciliation_runs_mismatch_count"),
+        CheckConstraint(
+            "critical_mismatch_count >= 0",
+            name="ck_reconciliation_runs_critical_count",
+        ),
+        Index("ix_reconciliation_runs_account_started", "account_alias", "started_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
+    environment: Mapped[str] = mapped_column(String(16), nullable=False, default="MOCK")
+    trigger: Mapped[str] = mapped_column(String(32), nullable=False)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="RUNNING")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    snapshot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    mismatch_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    critical_mismatch_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    broker_request_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    result_summary_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+
+class ReconciliationMismatch(Base):
+    __tablename__ = "reconciliation_mismatches"
+    __table_args__ = (
+        CheckConstraint(
+            "severity IN ('WARNING','CRITICAL')",
+            name="ck_reconciliation_mismatches_severity",
+        ),
+        CheckConstraint("state IN ('OPEN','RESOLVED')", name="ck_reconciliation_mismatches_state"),
+        Index("ix_reconciliation_mismatches_run", "run_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("reconciliation_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(16))
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="OPEN")
+    broker_value_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    internal_value_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class OrderIntent(Base):
     __tablename__ = "order_intents"
     __table_args__ = (

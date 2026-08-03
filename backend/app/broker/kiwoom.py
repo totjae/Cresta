@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -20,6 +20,10 @@ BASIC_QUOTE_PATH = "/api/dostk/stkinfo"
 BASIC_QUOTE_API_ID = "ka10001"
 ACCOUNT_PATH = "/api/dostk/acnt"
 ACCOUNT_API_ID = "ka00001"
+OPEN_ORDERS_API_ID = "ka10075"
+FILLS_API_ID = "ka10076"
+POSITIONS_API_ID = "kt00018"
+MAX_CONTINUATION_PAGES = 20
 KST = timezone(timedelta(hours=9))
 
 
@@ -33,6 +37,7 @@ class KiwoomAdapterError(Exception):
 
 class ResponseLike(Protocol):
     status_code: int
+    headers: Mapping[str, str]
 
     def json(self) -> Any: ...
 
@@ -58,6 +63,56 @@ class AccessToken:
 class AccountVerification:
     status: str
     masked_account: str
+
+
+@dataclass(frozen=True)
+class KiwoomPage:
+    payload: dict[str, Any]
+    continuation: bool
+    next_key: str | None
+
+
+@dataclass(frozen=True)
+class BrokerOpenOrder:
+    broker_order_id: str
+    symbol: str
+    side: str
+    requested_quantity: int
+    filled_quantity: int
+    remaining_quantity: int
+    limit_price: Decimal | None
+    order_time: str
+    market: str = "KRX"
+
+
+@dataclass(frozen=True)
+class BrokerFillSummary:
+    broker_order_id: str
+    symbol: str
+    side: str
+    quantity: int
+    price: Decimal
+    fee: Decimal
+    tax: Decimal
+    order_time: str
+    market: str = "KRX"
+
+
+@dataclass(frozen=True)
+class BrokerPosition:
+    symbol: str
+    quantity: int
+    available_quantity: int
+    average_price: Decimal
+    market: str = "KRX"
+
+
+@dataclass(frozen=True)
+class BrokerAccountSnapshot:
+    open_orders: tuple[BrokerOpenOrder, ...]
+    fills: tuple[BrokerFillSummary, ...]
+    positions: tuple[BrokerPosition, ...]
+    observed_at: datetime
 
 
 class KiwoomMockClient:
@@ -97,17 +152,58 @@ class KiwoomMockClient:
             self._token = None
 
     def request(self, *, api_id: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        return self._request_page(api_id=api_id, path=path, body=body).payload
+
+    def request_all_pages(
+        self, *, api_id: str, path: str, body: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        pages: list[dict[str, Any]] = []
+        next_key: str | None = None
+        seen_keys: set[str] = set()
+        for _ in range(MAX_CONTINUATION_PAGES):
+            continuation_headers = (
+                {"cont-yn": "Y", "next-key": next_key} if next_key is not None else {}
+            )
+            page = self._request_page(
+                api_id=api_id,
+                path=path,
+                body=body,
+                continuation_headers=continuation_headers,
+            )
+            pages.append(page.payload)
+            if not page.continuation:
+                return pages
+            if not page.next_key or page.next_key in seen_keys:
+                raise KiwoomAdapterError(
+                    "KIWOOM_INVALID_PAGINATION", "Kiwoom continuation key is invalid"
+                )
+            seen_keys.add(page.next_key)
+            next_key = page.next_key
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_PAGINATION", "Kiwoom continuation page limit exceeded"
+        )
+
+    def _request_page(
+        self,
+        *,
+        api_id: str,
+        path: str,
+        body: dict[str, Any],
+        continuation_headers: dict[str, str] | None = None,
+    ) -> KiwoomPage:
         if not path.startswith("/"):
             raise ValueError("Kiwoom API path must start with '/'")
         for attempt in range(2):
             token = self.get_access_token(force_refresh=attempt == 1)
+            headers = {
+                "Content-Type": "application/json;charset=UTF-8",
+                "api-id": api_id,
+                "authorization": f"Bearer {token}",
+            }
+            headers.update(continuation_headers or {})
             response = self._post(
                 path,
-                headers={
-                    "Content-Type": "application/json;charset=UTF-8",
-                    "api-id": api_id,
-                    "authorization": f"Bearer {token}",
-                },
+                headers=headers,
                 body=body,
             )
             if response.status_code == 401 and attempt == 0:
@@ -126,7 +222,13 @@ class KiwoomMockClient:
                     retryable=response.status_code >= 500,
                 )
             _require_success(payload)
-            return payload
+            continuation = _response_header(response, "cont-yn").upper() == "Y"
+            raw_next_key = _response_header(response, "next-key").strip()
+            return KiwoomPage(
+                payload=payload,
+                continuation=continuation,
+                next_key=raw_next_key or None,
+            )
         raise KiwoomAdapterError("KIWOOM_AUTH_FAILED", "Kiwoom authentication failed")
 
     def get_basic_quote(
@@ -177,6 +279,40 @@ class KiwoomMockClient:
         return AccountVerification(
             status="ACCOUNT_VERIFIED",
             masked_account=f"********{actual_account[-2:]}",
+        )
+
+    def get_account_snapshot(self) -> BrokerAccountSnapshot:
+        open_order_pages = self.request_all_pages(
+            api_id=OPEN_ORDERS_API_ID,
+            path=ACCOUNT_PATH,
+            body={"all_stk_tp": "0", "trde_tp": "0", "stk_cd": "", "stex_tp": "1"},
+        )
+        fill_pages = self.request_all_pages(
+            api_id=FILLS_API_ID,
+            path=ACCOUNT_PATH,
+            body={"stk_cd": "", "qry_tp": "0", "sell_tp": "0", "ord_no": "", "stex_tp": "1"},
+        )
+        position_pages = self.request_all_pages(
+            api_id=POSITIONS_API_ID,
+            path=ACCOUNT_PATH,
+            body={"qry_tp": "1", "dmst_stex_tp": "KRX"},
+        )
+        open_orders = tuple(
+            normalize_open_order(item) for item in _page_items(open_order_pages, "oso")
+        )
+        fills = tuple(normalize_fill(item) for item in _page_items(fill_pages, "cntr"))
+        positions = tuple(
+            position
+            for item in _page_items(position_pages, "acnt_evlt_remn_indv_tot")
+            if (position := normalize_position(item)) is not None
+        )
+        _require_unique(open_orders, "broker_order_id")
+        _require_unique(positions, "symbol")
+        return BrokerAccountSnapshot(
+            open_orders=open_orders,
+            fills=fills,
+            positions=positions,
+            observed_at=_as_utc(self._clock()),
         )
 
     def _issue_token(self) -> AccessToken:
@@ -286,6 +422,129 @@ def normalize_basic_quote(
     )
 
 
+def normalize_open_order(payload: dict[str, Any]) -> BrokerOpenOrder:
+    requested = _positive_int(payload.get("ord_qty"), "ord_qty")
+    remaining = _positive_int(payload.get("oso_qty"), "oso_qty")
+    if remaining > requested:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_RESPONSE", "Kiwoom open order remaining quantity is invalid"
+        )
+    raw_price = _non_negative_decimal(payload.get("ord_pric"), "ord_pric")
+    return BrokerOpenOrder(
+        broker_order_id=_broker_order_id(payload.get("ord_no")),
+        symbol=_domestic_symbol(payload.get("stk_cd")),
+        side=_order_side(payload),
+        requested_quantity=requested,
+        filled_quantity=requested - remaining,
+        remaining_quantity=remaining,
+        limit_price=raw_price if raw_price > 0 else None,
+        order_time=_hhmmss(payload.get("tm"), "tm"),
+    )
+
+
+def normalize_fill(payload: dict[str, Any]) -> BrokerFillSummary:
+    return BrokerFillSummary(
+        broker_order_id=_broker_order_id(payload.get("ord_no")),
+        symbol=_domestic_symbol(payload.get("stk_cd")),
+        side=_order_side(payload),
+        quantity=_positive_int(payload.get("cntr_qty"), "cntr_qty"),
+        price=_positive_decimal(payload.get("cntr_pric"), "cntr_pric"),
+        fee=_non_negative_decimal(payload.get("tdy_trde_cmsn", 0), "tdy_trde_cmsn"),
+        tax=_non_negative_decimal(payload.get("tdy_trde_tax", 0), "tdy_trde_tax"),
+        order_time=_hhmmss(payload.get("ord_tm"), "ord_tm"),
+    )
+
+
+def normalize_position(payload: dict[str, Any]) -> BrokerPosition | None:
+    quantity = _non_negative_int(payload.get("rmnd_qty"), "rmnd_qty")
+    available = _non_negative_int(payload.get("trde_able_qty"), "trde_able_qty")
+    if available > quantity:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_RESPONSE", "Kiwoom available position quantity is invalid"
+        )
+    if quantity == 0:
+        return None
+    return BrokerPosition(
+        symbol=_domestic_symbol(payload.get("stk_cd"), allow_stock_prefix=True),
+        quantity=quantity,
+        available_quantity=available,
+        average_price=_positive_decimal(payload.get("pur_pric"), "pur_pric"),
+    )
+
+
+def _page_items(pages: list[dict[str, Any]], field: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for page in pages:
+        value = page.get(field, [])
+        if value is None:
+            continue
+        if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+            raise KiwoomAdapterError(
+                "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} must be an object list"
+            )
+        items.extend(value)
+    return items
+
+
+def _require_unique(items: tuple[Any, ...], attribute: str) -> None:
+    values = [getattr(item, attribute) for item in items]
+    if len(values) != len(set(values)):
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {attribute} contains duplicates"
+        )
+
+
+def _response_header(response: ResponseLike, name: str) -> str:
+    headers = getattr(response, "headers", {})
+    for key, value in headers.items():
+        if str(key).casefold() == name.casefold():
+            return str(value)
+    return ""
+
+
+def _broker_order_id(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if not normalized.isdigit() or not 1 <= len(normalized) <= 10:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_RESPONSE", "Kiwoom broker order identifier is invalid"
+        )
+    return normalized
+
+
+def _domestic_symbol(value: Any, *, allow_stock_prefix: bool = False) -> str:
+    normalized = str(value or "").strip()
+    if allow_stock_prefix and len(normalized) == 7 and normalized.startswith("A"):
+        normalized = normalized[1:]
+    if len(normalized) != 6 or not normalized.isdigit():
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_RESPONSE", "Kiwoom domestic stock symbol is invalid"
+        )
+    return normalized
+
+
+def _order_side(payload: dict[str, Any]) -> str:
+    raw_code = str(payload.get("trde_tp", "")).strip()
+    raw_name = str(payload.get("io_tp_nm", "")).strip()
+    combined = f"{raw_code} {raw_name}"
+    if raw_code == "1" or "매도" in combined:
+        return "SELL"
+    if raw_code == "2" or "매수" in combined:
+        return "BUY"
+    raise KiwoomAdapterError(
+        "KIWOOM_UNSUPPORTED_RESPONSE", "Kiwoom order side cannot be interpreted safely"
+    )
+
+
+def _hhmmss(value: Any, field: str) -> str:
+    normalized = str(value or "").strip()
+    if len(normalized) != 6 or not normalized.isdigit():
+        raise KiwoomAdapterError("KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} must be HHmmss")
+    hour, minute, second = int(normalized[:2]), int(normalized[2:4]), int(normalized[4:])
+    if hour > 23 or minute > 59 or second > 59:
+        raise KiwoomAdapterError("KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} must be HHmmss")
+    return normalized
+
+
 def _json_object(response: ResponseLike) -> dict[str, Any]:
     try:
         payload = response.json()
@@ -312,7 +571,7 @@ def _require_success(payload: dict[str, Any]) -> None:
 
 def _absolute_decimal(value: Any, field: str) -> Decimal:
     try:
-        result = abs(Decimal(str(value).strip()))
+        result = abs(Decimal(_numeric_text(value)))
     except (InvalidOperation, AttributeError, ValueError) as exc:
         raise KiwoomAdapterError(
             "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} is invalid"
@@ -326,7 +585,7 @@ def _absolute_decimal(value: Any, field: str) -> Decimal:
 
 def _non_negative_int(value: Any, field: str) -> int:
     try:
-        result = int(str(value).strip())
+        result = int(_numeric_text(value))
     except (TypeError, ValueError) as exc:
         raise KiwoomAdapterError(
             "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} is invalid"
@@ -336,6 +595,42 @@ def _non_negative_int(value: Any, field: str) -> int:
             "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} must be non-negative"
         )
     return result
+
+
+def _positive_int(value: Any, field: str) -> int:
+    result = _non_negative_int(value, field)
+    if result == 0:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} must be positive"
+        )
+    return result
+
+
+def _non_negative_decimal(value: Any, field: str) -> Decimal:
+    try:
+        result = Decimal(_numeric_text(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} is invalid"
+        ) from exc
+    if result < 0:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} must be non-negative"
+        )
+    return result
+
+
+def _positive_decimal(value: Any, field: str) -> Decimal:
+    result = _non_negative_decimal(value, field)
+    if result == 0:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} must be positive"
+        )
+    return result
+
+
+def _numeric_text(value: Any) -> str:
+    return str(value).strip().replace(",", "")
 
 
 def _as_utc(value: datetime) -> datetime:

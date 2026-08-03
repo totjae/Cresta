@@ -65,6 +65,15 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | DB-015 | 주문 상태 변경은 기대 `version`을 조건으로 갱신하고 0행 갱신 시 최신 상태를 다시 읽어 재평가한다. |
 | DB-016 | `UNKNOWN`·`RECONCILING` 주문이 있는 종목의 새 주문 생성은 DB 거래 게이트에서도 거부한다. |
 
+### 3.3.1 첫 재동기화 저장 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-017 | `reconciliation_runs`는 account_alias, trigger, scope, state, 시작/완료/snapshot 시각, mismatch 집계, 요청 API ID JSON, correlation_id와 비밀 없는 요약 JSON을 저장한다. |
+| DB-018 | run state는 `RUNNING`, `SUCCEEDED`, `MISMATCH`, `FAILED`만 허용하며 종료 상태에는 completed_at이 필요하다. |
+| DB-019 | `reconciliation_mismatches`는 run FK, code, symbol, severity, state, broker/internal 비교 JSON과 생성/해결 시각을 저장한다. account/token과 원본 응답은 금지한다. |
+| DB-026 | mismatch severity는 `WARNING`, `CRITICAL`, state는 `OPEN`, `RESOLVED`로 제한하고 run 삭제 시 mismatch도 함께 삭제한다. |
+
 권장 트랜잭션 격리 수준은 일반 명령 `READ COMMITTED`와 명시적 행 잠금이며, 계좌 소유권·설정 활성화처럼 경합이 적고 중요도가 높은 작업은 `SERIALIZABLE` 또는 동등한 낙관적 재시도를 사용한다.
 
 ### 3.4 설정·승인·인증 제약

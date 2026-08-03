@@ -22,6 +22,7 @@ from app.broker.kiwoom import KiwoomAdapterError, KiwoomMockClient
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import RecoveryCode, TotpCredential, User
+from app.reconciliation import run_kiwoom_reconciliation
 
 
 def create_admin(login_id: str) -> int:
@@ -117,17 +118,62 @@ def check_kiwoom() -> int:
     return 0
 
 
+def reconcile_kiwoom() -> int:
+    settings = get_settings()
+    try:
+        with SessionLocal() as db:
+            result = run_kiwoom_reconciliation(db, KiwoomMockClient(settings))
+    except KiwoomAdapterError as exc:
+        print(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "environment": "MOCK",
+                    "status": "DEGRADED",
+                    "error_code": exc.code,
+                    "retryable": exc.retryable,
+                },
+                separators=(",", ":"),
+            )
+        )
+        return 3
+
+    print(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "environment": "MOCK",
+                "status": result.gate_status,
+                "reason": result.gate_reason,
+                "run_id": result.run_id,
+                "snapshot": {
+                    "open_orders": result.open_order_count,
+                    "fills": result.fill_count,
+                    "positions": result.position_count,
+                },
+                "mismatch_count": result.mismatch_count,
+                "critical_mismatch_count": result.critical_mismatch_count,
+            },
+            separators=(",", ":"),
+        )
+    )
+    return 4 if result.critical_mismatch_count else 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="cresta-admin")
     subparsers = parser.add_subparsers(dest="command", required=True)
     create = subparsers.add_parser("create-admin")
     create.add_argument("--login-id", required=True)
     subparsers.add_parser("kiwoom-check")
+    subparsers.add_parser("kiwoom-reconcile-check")
     args = parser.parse_args()
     if args.command == "create-admin":
         raise SystemExit(create_admin(args.login_id))
     if args.command == "kiwoom-check":
         raise SystemExit(check_kiwoom())
+    if args.command == "kiwoom-reconcile-check":
+        raise SystemExit(reconcile_kiwoom())
 
 
 if __name__ == "__main__":

@@ -316,7 +316,29 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 | KIW-100 | 로그·CLI·HTTP 응답에는 전체 계좌번호를 출력하지 않는다. 점검 성공 시 앞 8자리를 `*`로 가리고 마지막 분류 2자리만 표시할 수 있다. |
 | KIW-101 | `cresta-admin kiwoom-check`는 MOCK 설정 확인→토큰 발급→계좌조회→계좌 일치 검증 순으로 실행하며 성공 시 `ACCOUNT_VERIFIED`를 반환한다. App Key·Secret·token·전체 계좌번호는 출력하지 않는다. |
 | KIW-102 | 일회성 점검 프로세스의 `ACCOUNT_VERIFIED`는 해당 점검 시점의 결과다. 프로세스 종료 후 API 상태를 `AUTHENTICATED`나 `READY`로 유지하지 않는다. |
-| KIW-103 | Broker 준비 상태 순서는 `NOT_CONFIGURED → CONFIGURED → AUTHENTICATED → ACCOUNT_VERIFIED → RECONCILING → READY`이며, 어느 단계에서든 오류에 따라 `DEGRADED` 또는 `HALTED`로 전환할 수 있다. 이번 단계는 `ACCOUNT_VERIFIED`까지만 구현한다. |
+| KIW-103 | Broker 준비 상태 순서는 `NOT_CONFIGURED → CONFIGURED → AUTHENTICATED → ACCOUNT_VERIFIED → RECONCILING → READY`이며, 어느 단계에서든 오류에 따라 `DEGRADED` 또는 `HALTED`로 전환할 수 있다. 첫 스냅샷 대조 단계는 `RECONCILING`까지만 구현하고 상시 worker 전에는 `READY`를 금지한다. |
+
+### 3.16 모의투자 계좌 스냅샷과 연속조회
+
+2026-08-03 키움 공식 API 가이드에서 다음 MOCK/KRX 조회 계약을 확인했다.
+
+| 용도 | API ID | Method·URL | 요청 body | 주요 응답 |
+| --- | --- | --- | --- | --- |
+| 미체결 | `ka10075` | `POST /api/dostk/acnt` | `all_stk_tp=0`, `trde_tp=0`, `stk_cd=""`, `stex_tp=1` | `oso[]`: 주문번호·종목·주문/미체결수량·가격·매매구분·시간 |
+| 당일 체결 | `ka10076` | `POST /api/dostk/acnt` | `stk_cd=""`, `qry_tp=0`, `sell_tp=0`, `ord_no=""`, `stex_tp=1` | `cntr[]`: 주문번호·종목·체결가격/수량·수수료·세금·시간 |
+| 평가잔고 | `kt00018` | `POST /api/dostk/acnt` | `qry_tp=1`, `dmst_stex_tp=KRX` | `acnt_evlt_remn_indv_tot[]`: 종목·보유/매매가능수량·매입가 |
+
+참고 자료: <https://openapi.kiwoom.com/m/guide/apiguide?jobTpCode=08>
+
+| ID | 요구사항 |
+| --- | --- |
+| KIW-104 | Adapter는 위 세 조회를 MOCK의 KRX 전체 범위로만 호출하며 계좌번호를 request body나 결과 로그에 추가하지 않는다. 토큰에 귀속된 계좌는 `ka00001` 일치 검증으로 별도 확인한다. |
+| KIW-105 | 응답 header `cont-yn=Y`이면 `next-key`를 다음 요청의 동일 header에 전달한다. 빈 key·반복 key·20페이지 초과는 `KIWOOM_INVALID_PAGINATION`으로 중단한다. |
+| KIW-106 | 모든 페이지가 성공한 뒤에만 하나의 broker snapshot으로 사용한다. 중간 페이지 실패나 형식 오류가 있으면 부분 결과를 DB 운영 상태에 반영하지 않는다. |
+| KIW-107 | 종목은 숫자 6자리로 정규화하며 평가잔고의 주식 prefix `A`만 제거할 수 있다. ELW·ETN·신용·NXT/SOR와 해석 불가능한 매매구분은 첫 버전에서 fail-closed한다. |
+| KIW-108 | 주문·수량은 정수, 가격·금액은 부호와 0-padding을 제거한 `Decimal`로 검증한다. 보유·미체결·체결 수량의 음수, 미체결수량의 주문수량 초과, 매매가능수량의 보유수량 초과를 거부한다. |
+| KIW-109 | 당일 체결 응답에 독립된 체결번호가 없으므로 이번 단계는 주문번호별 체결 합계 비교에만 사용한다. 체결 원장 복원은 실시간 체결 고유키가 확인되기 전 수행하지 않는다. |
+| KIW-110 | `cresta-admin kiwoom-reconcile-check`는 계좌 일치 후 미체결·당일 체결·평가잔고 전체 페이지를 읽고 DB 원장과 대조한다. 비밀·전체 계좌번호·원본 payload는 출력하지 않는다. |
 
 ## 4. 오류·예외 또는 경계 조건
 

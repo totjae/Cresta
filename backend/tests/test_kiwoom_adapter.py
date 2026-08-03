@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from app.broker.kiwoom import KiwoomAdapterError, KiwoomMockClient, normalize_basic_quote
+from app.broker.kiwoom import (
+    ACCOUNT_PATH,
+    KiwoomAdapterError,
+    KiwoomMockClient,
+    normalize_basic_quote,
+    normalize_open_order,
+    normalize_position,
+)
 from app.config import Settings
 
 
@@ -16,6 +23,7 @@ from app.config import Settings
 class FakeResponse:
     status_code: int
     payload: Any
+    headers: dict[str, str] = field(default_factory=dict)
 
     def json(self) -> Any:
         if isinstance(self.payload, Exception):
@@ -51,7 +59,7 @@ def configured_settings(tmp_path: Path) -> Settings:
     )
 
 
-def token_response(token: str, expires: str = "20260801120000") -> FakeResponse:
+def token_response(token: str, expires: str = "20260804120000") -> FakeResponse:
     return FakeResponse(
         200,
         {
@@ -81,6 +89,60 @@ def quote_response() -> FakeResponse:
 
 def account_response(account: Any = "1234567890") -> FakeResponse:
     return FakeResponse(200, {"acctNo": account, "return_code": 0})
+
+
+def snapshot_responses() -> list[FakeResponse]:
+    return [
+        FakeResponse(
+            200,
+            {
+                "return_code": 0,
+                "oso": [
+                    {
+                        "ord_no": "1234567",
+                        "stk_cd": "005930",
+                        "ord_qty": "10",
+                        "oso_qty": "4",
+                        "ord_pric": "70000",
+                        "trde_tp": "2",
+                        "tm": "101500",
+                    }
+                ],
+            },
+        ),
+        FakeResponse(
+            200,
+            {
+                "return_code": 0,
+                "cntr": [
+                    {
+                        "ord_no": "1234567",
+                        "stk_cd": "005930",
+                        "cntr_qty": "6",
+                        "cntr_pric": "69900",
+                        "tdy_trde_cmsn": "10",
+                        "tdy_trde_tax": "0",
+                        "trde_tp": "2",
+                        "ord_tm": "101500",
+                    }
+                ],
+            },
+        ),
+        FakeResponse(
+            200,
+            {
+                "return_code": 0,
+                "acnt_evlt_remn_indv_tot": [
+                    {
+                        "stk_cd": "A005930",
+                        "rmnd_qty": "+0000000000010",
+                        "trde_able_qty": "+0000000000008",
+                        "pur_pric": "+000000000070000",
+                    }
+                ],
+            },
+        ),
+    ]
 
 
 def test_token_is_kst_parsed_memory_only_and_reused(tmp_path: Path) -> None:
@@ -201,6 +263,121 @@ def test_account_verification_rejects_eight_digit_prefix(tmp_path: Path) -> None
     with pytest.raises(KiwoomAdapterError) as invalid:
         client.verify_account()
     assert invalid.value.code == "KIWOOM_ACCOUNT_ID_INVALID"
+
+
+def test_account_snapshot_uses_official_contract_and_normalizes_all_sections(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 1, 1, 30, tzinfo=UTC)
+    http = FakeHttpClient([token_response("token"), *snapshot_responses()])
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http, clock=lambda: now)
+
+    snapshot = client.get_account_snapshot()
+
+    assert snapshot.observed_at == now
+    assert snapshot.open_orders[0].filled_quantity == 6
+    assert snapshot.open_orders[0].remaining_quantity == 4
+    assert snapshot.fills[0].quantity == 6
+    assert snapshot.positions[0].symbol == "005930"
+    assert snapshot.positions[0].available_quantity == 8
+    api_calls = http.calls[1:]
+    assert [call["headers"]["api-id"] for call in api_calls] == [
+        "ka10075",
+        "ka10076",
+        "kt00018",
+    ]
+    assert api_calls[0]["json"] == {
+        "all_stk_tp": "0",
+        "trde_tp": "0",
+        "stk_cd": "",
+        "stex_tp": "1",
+    }
+    assert api_calls[2]["json"] == {"qry_tp": "1", "dmst_stex_tp": "KRX"}
+
+
+def test_continuation_headers_are_forwarded_and_pages_are_combined(tmp_path: Path) -> None:
+    http = FakeHttpClient(
+        [
+            token_response("token"),
+            FakeResponse(
+                200, {"return_code": 0, "items": [1]}, {"cont-yn": "Y", "next-key": "page-2"}
+            ),
+            FakeResponse(200, {"return_code": 0, "items": [2]}),
+        ]
+    )
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http)
+
+    pages = client.request_all_pages(api_id="ka10075", path=ACCOUNT_PATH, body={})
+
+    assert [page["items"] for page in pages] == [[1], [2]]
+    assert http.calls[2]["headers"]["cont-yn"] == "Y"
+    assert http.calls[2]["headers"]["next-key"] == "page-2"
+
+
+def test_repeated_continuation_key_fails_closed(tmp_path: Path) -> None:
+    page = FakeResponse(200, {"return_code": 0}, {"cont-yn": "Y", "next-key": "same"})
+    http = FakeHttpClient([token_response("token"), page, page])
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http)
+
+    with pytest.raises(KiwoomAdapterError) as invalid:
+        client.request_all_pages(api_id="ka10075", path=ACCOUNT_PATH, body={})
+    assert invalid.value.code == "KIWOOM_INVALID_PAGINATION"
+
+
+def test_continuation_page_limit_fails_closed(tmp_path: Path) -> None:
+    pages = [
+        FakeResponse(
+            200,
+            {"return_code": 0},
+            {"cont-yn": "Y", "next-key": f"page-{index}"},
+        )
+        for index in range(1, 21)
+    ]
+    http = FakeHttpClient([token_response("token"), *pages])
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http)
+
+    with pytest.raises(KiwoomAdapterError) as limit:
+        client.request_all_pages(api_id="ka10075", path=ACCOUNT_PATH, body={})
+    assert limit.value.code == "KIWOOM_INVALID_PAGINATION"
+    assert len(http.calls) == 21
+
+
+def test_snapshot_normalization_rejects_unsafe_quantity_and_non_stock_symbol() -> None:
+    with pytest.raises(KiwoomAdapterError) as quantity:
+        normalize_open_order(
+            {
+                "ord_no": "1234567",
+                "stk_cd": "005930",
+                "ord_qty": "4",
+                "oso_qty": "5",
+                "ord_pric": "70000",
+                "trde_tp": "2",
+                "tm": "101500",
+            }
+        )
+    assert quantity.value.code == "KIWOOM_INVALID_RESPONSE"
+
+    with pytest.raises(KiwoomAdapterError) as unsupported:
+        normalize_position(
+            {
+                "stk_cd": "Q005930",
+                "rmnd_qty": "1",
+                "trde_able_qty": "1",
+                "pur_pric": "70000",
+            }
+        )
+    assert unsupported.value.code == "KIWOOM_INVALID_RESPONSE"
+
+
+def test_account_snapshot_rejects_duplicate_broker_order_identity(tmp_path: Path) -> None:
+    responses = snapshot_responses()
+    responses[0].payload["oso"].append(dict(responses[0].payload["oso"][0]))
+    http = FakeHttpClient([token_response("token"), *responses])
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http)
+
+    with pytest.raises(KiwoomAdapterError) as duplicate:
+        client.get_account_snapshot()
+    assert duplicate.value.code == "KIWOOM_INVALID_RESPONSE"
 
 
 def test_basic_quote_normalization_is_strict_and_deterministic() -> None:
