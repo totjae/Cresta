@@ -49,6 +49,7 @@ N100 환경에서는 Scout·Core 모델을 서버에 직접 적재하지 않고 
 | OPS-005 | 운영 Compose는 `MOCK` 환경과 `live_trading_enabled=false`를 명시하고 실거래 secret이 발견되면 시작을 거부한다. |
 | OPS-006 | N100·16GiB 환경에서 API·Broker·Watch의 총 리소스 제한을 설정하고 PostgreSQL·OS를 위한 메모리 6GiB 이상을 예약한다. |
 | OPS-007 | 가용 SSD 20% 미만 경고와 10% 미만 거래·수집 차단 기준을 적용한다. |
+| OPS-008 | API 이미지의 애플리케이션·migration 파일은 빌드 호스트의 소유권과 무관하게 실행 UID/GID `10001:10001`이 읽을 수 있도록 이미지에 복사한다. 임의의 root 실행으로 권한 오류를 우회하지 않는다. |
 
 Compose의 `file` 기반 secret은 호스트 파일을 bind mount하며 `uid`, `gid`, `mode` 재매핑을 지원하지 않는다. 따라서 최초 배포와 secret 교체 후 다음 사전 점검을 반드시 실행한다.
 
@@ -60,6 +61,13 @@ sudo docker compose -f deploy/compose.yaml run --rm api \
 ```
 
 준비 스크립트는 비밀 내용을 출력하지 않고 두 파일의 소유자를 `10001:10001`, 권한을 읽기 전용 `0400`으로 제한한다. 이 검사가 실패하면 migration, 관리자 생성과 API 시작을 진행하지 않는다.
+
+API 이미지 빌드 후에는 실행 사용자와 주요 소스의 읽기 가능 여부를 확인한다.
+
+```bash
+sudo docker compose -f deploy/compose.yaml run --rm --no-deps api \
+  sh -c 'test "$(id -u):$(id -g)" = "10001:10001" && test -r /app/app/broker/kiwoom.py'
+```
 
 ### 3.2 서비스와 의존 순서
 

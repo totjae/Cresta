@@ -33,9 +33,9 @@
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 정규화·KRX/NXT 분리·중복/역순/갭·복구 snapshot·최신성 조회와 키움 REST 복구 snapshot mapping 로컬 검증, WebSocket 수신·분봉·지표 미구현 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 명세 완료 | 모델 제공자 미선정, mock interface 구현 가능 |
 | DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 인증·Paper·Watch migration SQLite 왕복 및 기존 실서버 PostgreSQL migration 검증 완료, 신규 Watch migration 실서버 적용·PostgreSQL 동시성 시험 미완료 |
-| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 실서버 기반과 선택형 키움 Docker secret overlay 구현; 키움 secret 주입·실제 인증, 백업·경보·복구훈련 미완료 |
+| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 키움 secret overlay·실제 인증 완료, API source 실행 UID 소유권 보강; 실서버 이미지 재검증과 백업·경보·복구훈련 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 명세 완료 | 키움 출구 IP·MOCK 인증·시세 실서버 확인 반영, 계좌·주문 외부 통합 게이트 유지 |
-| Backend·Docker 골격 | `docs/SYSTEM_DESIGN.md`, `docs/OPERATIONS_RUNBOOK.md` | 검증 완료 | Backend·Frontend·gateway와 N100 자원 제한 반영, PostgreSQL·Redis·API·Frontend·gateway 실서버 기동 및 HTTPS 접속 확인 |
+| Backend·Docker 골격 | `docs/SYSTEM_DESIGN.md`, `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 기존 실서버 기동·HTTPS 확인 완료, API source를 UID `10001` 소유로 복사하도록 보강 후 실서버 재검증 필요 |
 
 ## 4. 구현 완료 조건
 

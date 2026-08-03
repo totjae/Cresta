@@ -8,10 +8,10 @@ RUN groupadd --gid 10001 cresta \
     && useradd --uid 10001 --gid cresta --create-home cresta
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
-COPY app ./app
-COPY alembic.ini ./
-COPY migrations ./migrations
+COPY --chown=10001:10001 pyproject.toml README.md ./
+COPY --chown=10001:10001 app ./app
+COPY --chown=10001:10001 alembic.ini ./
+COPY --chown=10001:10001 migrations ./migrations
 RUN python -m pip install --upgrade pip \
     && python -m pip install .
 
