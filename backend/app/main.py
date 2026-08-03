@@ -12,7 +12,8 @@ from app.api.orders import router as orders_router
 from app.api.positions import router as positions_router
 from app.api.quotes import router as quotes_router
 from app.api.system import router as system_router
-from app.auth.service import AuthenticationError, CsrfError
+from app.auth.service import AuthenticationError, CsrfError, ReauthProofError
+from app.broker.mock_order_test import MockOrderTestError
 from app.errors import ResourceNotFoundError
 from app.ids import uuid7
 
@@ -56,6 +57,34 @@ def create_app() -> FastAPI:
                 "error": {
                     "code": "CSRF_VALIDATION_FAILED",
                     "message": "요청을 확인할 수 없습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": False,
+                }
+            },
+        )
+
+    @application.exception_handler(ReauthProofError)
+    async def reauth_proof_error(request: Request, _: ReauthProofError) -> JSONResponse:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "code": "REAUTH_PROOF_INVALID",
+                    "message": "최근 TOTP 재인증을 확인할 수 없습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": False,
+                }
+            },
+        )
+
+    @application.exception_handler(MockOrderTestError)
+    async def mock_order_test_error(request: Request, exc: MockOrderTestError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": "키움 모의주문 연결 시험을 실행할 수 없습니다.",
                     "correlation_id": request.state.request_id,
                     "retryable": False,
                 }

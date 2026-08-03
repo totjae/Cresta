@@ -30,6 +30,10 @@ class CsrfError(Exception):
     pass
 
 
+class ReauthProofError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class SessionTokens:
     session_token: str
@@ -361,3 +365,31 @@ def create_reauth_proof(
     )
     db.commit()
     return raw_proof, expires_at
+
+
+def consume_reauth_proof(
+    db: Session,
+    *,
+    user: User,
+    raw_proof: str,
+    target_action: str,
+    target_id: str,
+    now: datetime | None = None,
+) -> ReauthProof:
+    current = now or utcnow()
+    proof = db.scalar(
+        select(ReauthProof)
+        .where(ReauthProof.proof_hash == token_hash(raw_proof))
+        .with_for_update()
+    )
+    if (
+        proof is None
+        or proof.user_id != user.id
+        or proof.target_action != target_action
+        or proof.target_id != target_id
+        or proof.consumed_at is not None
+        or as_utc(proof.expires_at) <= current
+    ):
+        raise ReauthProofError("REAUTH_PROOF_INVALID")
+    proof.consumed_at = current
+    return proof

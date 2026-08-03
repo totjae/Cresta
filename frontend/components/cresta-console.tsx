@@ -30,6 +30,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   authApi,
+  BrokerStatus,
   orderApi,
   OrderDetail,
   OrderSummary,
@@ -41,7 +42,7 @@ import {
 } from "../lib/api";
 
 type Screen = "boot" | "credentials" | "totp" | "console";
-type ConsolePage = "dashboard" | "positions" | "orders";
+type ConsolePage = "dashboard" | "positions" | "orders" | "system";
 
 const SAFE_AUTH_ERROR = "인증 정보를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.";
 
@@ -56,6 +57,10 @@ const navigation = [
   ["system", "시스템 상태", Activity, false],
   ["audit", "이력·감사", History, false],
 ] as const;
+
+const activeNavigation = navigation.map((item) =>
+  item[0] === "system" ? ([item[0], item[1], item[2], true] as const) : item,
+);
 
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
@@ -208,7 +213,7 @@ function ConsoleShell({
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
         <div className="sidebar-head"><Brand /><button className="mobile-close" onClick={() => setMenuOpen(false)} aria-label="메뉴 닫기"><X /></button></div>
         <nav aria-label="주요 메뉴">
-          {navigation.map(([id, label, Icon, enabled]) => (
+          {activeNavigation.map(([id, label, Icon, enabled]) => (
             <button
               key={id}
               className={page === id ? "selected" : ""}
@@ -235,6 +240,7 @@ function ConsoleShell({
           {page === "dashboard" && <DashboardPage session={session} health={health} />}
           {page === "orders" && <OrdersPage onSessionExpired={onSessionExpired} />}
           {page === "positions" && <PositionsPage onSessionExpired={onSessionExpired} />}
+          {page === "system" && <SystemPage session={session} onSessionExpired={onSessionExpired} />}
         </div>
       </main>
       <nav className="mobile-nav" aria-label="모바일 메뉴"><button className={page === "dashboard" ? "active" : ""} onClick={() => selectPage("dashboard")}><LayoutDashboard /><span>대시보드</span></button><button className={page === "positions" ? "active" : ""} onClick={() => selectPage("positions")}><WalletCards /><span>포지션</span></button><button className={page === "orders" ? "active" : ""} onClick={() => selectPage("orders")}><ListChecks /><span>주문</span></button><button onClick={() => setMenuOpen(true)}><Menu /><span>전체</span></button></nav>
@@ -266,6 +272,115 @@ function DashboardPage({ session, health }: { session: SessionData; health: Syst
       <article className="panel"><div className="panel-head"><div><ListChecks size={18} /><span>Paper 원장 요약</span></div><span className="status-pill neutral">READ ONLY</span></div><div className="metric-list"><div><span>전체 주문</span><strong>{health?.counts.orders ?? "—"}</strong></div><div><span>진행 주문</span><strong>{health?.counts.active_orders ?? "—"}</strong></div><div><span>보유 포지션</span><strong>{health?.counts.open_positions ?? "—"}</strong></div></div></article>
       <article className="panel activity-panel"><div className="panel-head"><div><Activity size={18} /><span>현재 연동 범위</span></div></div><div className="empty-state"><Radio size={26} /><h3>Paper 조회 전용</h3><p>주문·체결·포지션 조회만 활성화했습니다. 운영 Web에서는 임의 주문이나 체결을 만들 수 없습니다.</p></div></article>
     </section>
+  </>;
+}
+
+function SystemPage({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {
+  const [broker, setBroker] = useState<BrokerStatus | null>(null);
+  const [symbol, setSymbol] = useState("005930");
+  const [orderType, setOrderType] = useState<"MARKET" | "LIMIT">("MARKET");
+  const [limitPrice, setLimitPrice] = useState("");
+  const [targetId, setTargetId] = useState("");
+  const [totp, setTotp] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [createdOrderId, setCreatedOrderId] = useState("");
+
+  const loadBroker = useCallback(async (signal?: AbortSignal) => {
+    try { setBroker(await systemApi.broker(signal)); }
+    catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      if (reason instanceof ApiError && reason.status === 401) onSessionExpired();
+      else setMessage("키움 Broker 상태를 불러오지 못했습니다.");
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadBroker(controller.signal);
+    return () => controller.abort();
+  }, [loadBroker]);
+
+  const ready = broker?.state === "READY"
+    && broker.gate_status === "READY"
+    && broker.lease_valid
+    && broker.websocket_connected
+    && broker.subscriptions_ready;
+
+  function requestConfirmation(event: FormEvent) {
+    event.preventDefault();
+    setMessage("");
+    setCreatedOrderId("");
+    setTargetId(globalThis.crypto.randomUUID());
+  }
+
+  async function submitMockOrder(event: FormEvent) {
+    event.preventDefault();
+    if (!targetId) return;
+    setBusy(true); setMessage("");
+    try {
+      const reauth = await authApi.reauthTotp(
+        session.csrf_token,
+        totp,
+        "KIWOOM_MOCK_ORDER_TEST",
+        targetId,
+      );
+      const result = await systemApi.mockOrderTest(session.csrf_token, {
+        test_request_id: targetId,
+        symbol,
+        order_type: orderType,
+        limit_price: orderType === "LIMIT" ? limitPrice : null,
+        reauth_proof: reauth.reauth_proof,
+      });
+      setCreatedOrderId(result.order_id);
+      setMessage("모의주문 1주가 CREATED 상태로 등록되었습니다. Worker가 전송 결과를 처리합니다.");
+      setTargetId(""); setTotp("");
+      await loadBroker();
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 401) onSessionExpired();
+      else setMessage("모의주문을 등록하지 못했습니다. Broker 상태와 TOTP를 확인해 주세요.");
+      setTotp("");
+    } finally { setBusy(false); }
+  }
+
+  return <>
+    <PageHeading kicker="BROKER DIAGNOSTICS" title="시스템 상태" description="키움 모의투자 연결과 주문 전달 경로를 점검합니다." />
+    {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}{createdOrderId && <span className="mono"> 주문 ID: {createdOrderId}</span>}</div>}
+    <section className="dashboard-grid system-diagnostics">
+      <article className="panel">
+        <div className="panel-head"><div><Radio size={18} /><span>키움 Broker</span></div><OrderStatus status={broker?.state ?? "LOADING"} /></div>
+        <div className="metric-list">
+          <div><span>거래 Gate</span><strong>{broker?.gate_status ?? "—"}</strong></div>
+          <div><span>WebSocket</span><strong>{broker?.websocket_connected ? "CONNECTED" : "DISCONNECTED"}</strong></div>
+          <div><span>계좌 구독</span><strong>{broker?.subscriptions_ready ? "READY" : "NOT READY"}</strong></div>
+          <div><span>Lease</span><strong>{broker?.lease_valid ? "VALID" : "INVALID"}</strong></div>
+        </div>
+        <button className="secondary-button" onClick={() => void loadBroker()}><RefreshCw size={15} /> 상태 새로고침</button>
+      </article>
+      <article className="panel mock-order-panel">
+        <div className="panel-head"><div><ShieldCheck size={18} /><span>모의주문 연결 시험</span></div><span className="status-pill neutral">MOCK · 1주</span></div>
+        <p className="panel-description">실거래가 아닌 키움 모의투자 계좌에 KRX 매수 1주를 전송합니다. 주문은 체결이 아니라 CREATED 등록부터 시작합니다.</p>
+        <form className="diagnostic-form" onSubmit={requestConfirmation}>
+          <label htmlFor="mock-symbol">종목코드</label>
+          <input id="mock-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required />
+          <label htmlFor="mock-order-type">주문 유형</label>
+          <select id="mock-order-type" value={orderType} onChange={(event) => setOrderType(event.target.value as "MARKET" | "LIMIT")}>
+            <option value="MARKET">시장가</option><option value="LIMIT">지정가</option>
+          </select>
+          {orderType === "LIMIT" && <><label htmlFor="mock-limit-price">지정가</label><input id="mock-limit-price" inputMode="numeric" value={limitPrice} onChange={(event) => setLimitPrice(event.target.value.replace(/\D/g, ""))} min="1" required /></>}
+          <div className="diagnostic-summary"><span>환경 <b>MOCK</b></span><span>시장 <b>KRX</b></span><span>방향 <b>BUY</b></span><span>수량 <b>1주</b></span></div>
+          <button className="primary-button" type="submit" disabled={!ready || symbol.length !== 6}>모의주문 확인</button>
+          {!ready && <small className="field-hint">Worker, Gate, WebSocket과 구독이 모두 READY일 때만 실행할 수 있습니다.</small>}
+        </form>
+      </article>
+    </section>
+    {targetId && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="mock-confirm-title">
+      <span className="section-kicker">TOTP REAUTHENTICATION</span><h2 id="mock-confirm-title">키움 모의주문 1주 확인</h2>
+      <p>{symbol} 종목을 {orderType === "MARKET" ? "시장가" : `${Number(limitPrice).toLocaleString("ko-KR")}원 지정가`}로 1주 매수합니다.</p>
+      <form onSubmit={submitMockOrder}><label htmlFor="mock-totp">현재 TOTP 코드</label><input id="mock-totp" className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus />
+        <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setTargetId(""); setTotp(""); }} disabled={busy}>취소</button><button type="submit" className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "등록 중" : "모의주문 실행"}</button></div>
+      </form>
+    </section></div>}
   </>;
 }
 

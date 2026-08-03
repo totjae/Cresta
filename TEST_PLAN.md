@@ -154,6 +154,7 @@
 | T-UI-008 | UI-070~074 | EMERGENCY_LIQUIDATE 실행 | 영향 미리보기·강한 확인·지속 상태 표시 | 계획 |
 | T-UI-009 | UI-080~084 | 외부 주문 발견 | 격리·해결 선택과 거래 차단 범위 표시 | 계획 |
 | T-UI-010 | UI-090~093 | WebSocket 단절·복구 | 마지막 정상시각·재조회·상태 전환 표시 | 계획 |
+| T-UI-011 | UI-085~087, API-094~098 | 시스템 상태에서 MOCK 시장가 1주 시험 | Broker READY 후만 활성, TOTP 재인증·CSRF, CREATED를 체결로 표시하지 않음 | 통과 (2026-08-04, 자동 fixture) |
 | T-UI-011 | UI-100~105 | 데스크톱·태블릿·모바일·키보드 검사 | 반응형·포커스·대비·감소된 움직임 통과 | 부분 통과 |
 
 ### 3.10 인증 및 보안
@@ -256,6 +257,7 @@
 | T-KIW-036 | KIW-134, ORD-038 | polling 송신 결과 UNKNOWN | 다음 주문 미처리, 즉시 ORDER_OUTCOME_UNKNOWN 전체 재동기화, 식별 불가 시 HALTED | 통과 (2026-08-04, 자동) |
 | T-KIW-037 | KIW-135 | ACKNOWLEDGED·REJECTED 주문이 polling 대상에 함께 존재 | 기존 결과 주문 재송신 0회, CREATED만 대상 | 통과 (2026-08-04, 자동) |
 | T-KIW-038 | KIW-136, REC-080~082 | `00`·`04` 이벤트 수신 후 debounce 중 CREATED 주문 존재 | 즉시 RECONCILING, 대조 전 송신 0회, BROKER_EVENT 대조 성공 후에만 polling 재개 | 통과 (2026-08-04, 자동) |
+| T-KIW-039 | KIW-137, SEC-065, API-094~098 | Web MOCK 진단 주문 요청·proof 재사용·worker 비준비 | READY에서만 BUY 1주 CREATED·감사, proof 재사용 403, 비준비 409 | 통과 (2026-08-04, 자동) |
 | T-OPS-011 | OPS-003 | API 컨테이너 IP 변경 후 gateway를 재시작하지 않고 health·login 요청 | Docker DNS 재해석 후 새 API로 연결되고 502가 지속되지 않음 | 설정 계약 통과·실서버 대기 |
 
 ## 4. 시험 환경
@@ -290,8 +292,8 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 109개 통과 | 인증·Paper·Watch, 키움 snapshot·lease/fencing·WebSocket, PostgreSQL SKIP LOCKED FIFO polling, 재시작 상태 구분, UNKNOWN 즉시 재동기화, 계좌 이벤트 즉시 gate 차단 포함; 실제 모의주문 제외 |
-| Console component 시험 | `npm test` | 4개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃, Paper 조회 전용 화면 |
+| Python 단위·API 시험 | `python -m pytest` | 111개 통과 | 인증·Paper·Watch, 키움 snapshot·lease/fencing·WebSocket, FIFO polling, UNKNOWN 재동기화, MOCK Web 진단 주문·재인증 포함; 실제 모의주문 제외 |
+| Console component 시험 | `npm test` | 5개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃, Paper 조회, MOCK 주문 TOTP 재인증 화면 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
 | Console HTTP smoke | standalone server에 HTTP 요청 | 통과 | `/` 응답 200과 Cresta metadata 확인 |

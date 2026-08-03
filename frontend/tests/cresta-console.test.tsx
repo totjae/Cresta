@@ -119,3 +119,51 @@ describe("CrestaConsole authentication", () => {
     expect(await screen.findByText("Paper 포지션이 없습니다")).toBeInTheDocument();
   });
 });
+
+describe("Kiwoom MOCK browser diagnostic", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("queues one share only after TOTP reauthentication", async () => {
+    const brokerResponse = {
+      schema_version: "1.0", request_id: "broker-1", environment: "MOCK",
+      account_alias: "KIWOOM_MOCK_PRIMARY", state: "READY", gate_status: "READY",
+      gate_reason: "WORKER_HEALTHY", fencing_token: 8, lease_valid: true,
+      websocket_connected: true, subscriptions_ready: true,
+      last_heartbeat_at: "2026-08-04T01:00:00Z", last_reconciliation_at: "2026-08-04T01:00:00Z",
+      last_reconciliation_run_id: "run-1", last_error_code: null,
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-5", login_id: "admin", expires_at: "2026-08-04T09:00:00Z", csrf_token: "csrf-mock-order" });
+      if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
+      if (path === "/api/v1/system/broker") return jsonResponse(brokerResponse);
+      if (path === "/api/v1/auth/reauth/totp") return jsonResponse({ reauth_proof: "proof-memory-only", expires_at: "2026-08-04T01:05:00Z" });
+      if (path === "/api/v1/system/broker/mock-order-test") return jsonResponse({
+        schema_version: "1.0", request_id: "mock-1", result_type: "ORDER_QUEUED",
+        order_id: "order-1", status: "CREATED", environment: "MOCK",
+        account_alias: "KIWOOM_MOCK_PRIMARY", symbol: "005930", side: "BUY", requested_quantity: 1,
+      });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CrestaConsole />);
+
+    await user.click(await screen.findByRole("button", { name: /시스템 상태/ }));
+    expect(await screen.findByRole("heading", { name: "시스템 상태" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "모의주문 확인" }));
+    expect(await screen.findByRole("dialog", { name: "키움 모의주문 1주 확인" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("현재 TOTP 코드"), "123456");
+    await user.click(screen.getByRole("button", { name: "모의주문 실행" }));
+    expect(await screen.findByText(/CREATED 상태로 등록/)).toBeInTheDocument();
+
+    const reauthCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/auth/reauth/totp");
+    const orderCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/system/broker/mock-order-test");
+    expect(reauthCall?.[1]).toEqual(expect.objectContaining({ method: "POST", headers: expect.objectContaining({ "X-CSRF-Token": "csrf-mock-order" }) }));
+    expect(orderCall?.[1]).toEqual(expect.objectContaining({ method: "POST", headers: expect.objectContaining({ "X-CSRF-Token": "csrf-mock-order" }) }));
+    expect(JSON.parse(String(orderCall?.[1]?.body))).toEqual(expect.objectContaining({
+      symbol: "005930", order_type: "MARKET", limit_price: null,
+      confirmation: "KIWOOM_MOCK_ONE_SHARE", reauth_proof: "proof-memory-only",
+    }));
+  });
+});

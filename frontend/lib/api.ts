@@ -68,6 +68,37 @@ export type PositionSummary = {
   updated_at: string;
 };
 
+export type BrokerStatus = {
+  schema_version: "1.0";
+  request_id: string;
+  environment: "MOCK";
+  account_alias: string;
+  state: string;
+  gate_status: string | null;
+  gate_reason: string | null;
+  fencing_token: number | null;
+  lease_valid: boolean;
+  websocket_connected: boolean;
+  subscriptions_ready: boolean;
+  last_heartbeat_at: string | null;
+  last_reconciliation_at: string | null;
+  last_reconciliation_run_id: string | null;
+  last_error_code: string | null;
+};
+
+export type MockOrderTestResult = {
+  schema_version: "1.0";
+  request_id: string;
+  result_type: "ORDER_QUEUED";
+  order_id: string;
+  status: string;
+  environment: "MOCK";
+  account_alias: string;
+  symbol: string;
+  side: "BUY";
+  requested_quantity: 1;
+};
+
 type PasswordChallenge = {
   request_id: string;
   challenge_id: string;
@@ -119,6 +150,18 @@ export const authApi = {
       }),
     });
   },
+  reauthTotp(csrfToken: string, code: string, targetAction: string, targetId: string) {
+    return request<{ reauth_proof: string; expires_at: string }>("/api/v1/auth/reauth/totp", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        schema_version: "1.0",
+        totp_code: code,
+        target_action: targetAction,
+        target_id: targetId,
+      }),
+    });
+  },
   logout(csrfToken: string) {
     return request<{ status: string }>("/api/v1/auth/logout", {
       method: "POST",
@@ -130,6 +173,29 @@ export const authApi = {
 export const systemApi = {
   health(signal?: AbortSignal) {
     return request<SystemHealth>("/api/v1/system/health", { signal });
+  },
+  broker(signal?: AbortSignal) {
+    return request<BrokerStatus>("/api/v1/system/broker", { signal });
+  },
+  mockOrderTest(
+    csrfToken: string,
+    payload: {
+      test_request_id: string;
+      symbol: string;
+      order_type: "MARKET" | "LIMIT";
+      limit_price: string | null;
+      reauth_proof: string;
+    },
+  ) {
+    return request<MockOrderTestResult>("/api/v1/system/broker/mock-order-test", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        schema_version: "1.0",
+        ...payload,
+        confirmation: "KIWOOM_MOCK_ONE_SHARE",
+      }),
+    });
   },
 };
 

@@ -194,6 +194,29 @@ class BrokerStatusResponse(StrictModel):
     last_error_code: str | None
 
 
+class MockOrderTestRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    test_request_id: str = Field(min_length=16, max_length=128)
+    symbol: str = Field(pattern=r"^\d{6}$")
+    order_type: str = Field(pattern=r"^(MARKET|LIMIT)$")
+    limit_price: Decimal | None = Field(default=None, gt=0)
+    reauth_proof: str = Field(min_length=32, max_length=256)
+    confirmation: str = Field(pattern=r"^KIWOOM_MOCK_ONE_SHARE$")
+
+
+class MockOrderTestResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    result_type: str = "ORDER_QUEUED"
+    order_id: str
+    status: str
+    environment: str = "MOCK"
+    account_alias: str = "KIWOOM_MOCK_PRIMARY"
+    symbol: str
+    side: str = "BUY"
+    requested_quantity: int = 1
+
+
 class QuoteResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str

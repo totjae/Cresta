@@ -6,13 +6,16 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import AuthContext, get_auth_context
+from app.api.dependencies import AuthContext, get_auth_context, require_csrf
+from app.broker.mock_order_test import create_mock_order_test
 from app.broker.worker_state import get_broker_status
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import MarketStreamState, Position, TradingGate, TradingOrder
 from app.schemas import (
     BrokerStatusResponse,
+    MockOrderTestRequest,
+    MockOrderTestResponse,
     SystemCountResponse,
     SystemHealthResponse,
     TradingGateResponse,
@@ -129,4 +132,31 @@ def broker_status(
         last_reconciliation_at=status.last_reconciliation_at,
         last_reconciliation_run_id=status.last_reconciliation_run_id,
         last_error_code=status.last_error_code,
+    )
+
+
+@router.post("/broker/mock-order-test", response_model=MockOrderTestResponse)
+def mock_order_test(
+    payload: MockOrderTestRequest,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> MockOrderTestResponse:
+    request_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    order = create_mock_order_test(
+        db,
+        user=context.user,
+        payload=payload,
+        correlation_id=request.state.request_id,
+        request_ip=request_ip,
+        user_agent=user_agent,
+        settings=settings,
+    )
+    return MockOrderTestResponse(
+        request_id=request.state.request_id,
+        order_id=order.id,
+        status=order.status,
+        symbol=order.symbol,
     )

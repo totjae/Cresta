@@ -68,6 +68,7 @@
 | POST | `/risk/emergency-stop/release` | 재인증 후 비상정지 해제 |
 | GET | `/system/health` | 데이터·브로커·큐·DB 상태 |
 | GET | `/system/broker` | 키움 환경, 연결, 토큰 만료 예정, Active worker와 호출 제한 상태 |
+| POST | `/system/broker/mock-order-test` | TOTP 재인증 후 MOCK·KRX 매수 1주 연결 시험 주문 대기열 생성 |
 
 인증 API는 계정 존재·비밀번호 오류·TOTP 오류를 구분하지 않는 공통 오류를 반환한다. TOTP challenge와 재인증 증명은 1회용이며 URL이나 WebSocket query string으로 전달하지 않는다. 비밀번호·TOTP·복구 코드는 응답, 감사 이벤트와 애플리케이션 로그에 포함하지 않는다.
 
@@ -145,11 +146,16 @@ PATCH는 활성 설정을 직접 수정하지 않고 초안 version을 생성한
 | API-082 | 주문 목록은 수량 불변조건을 구성하는 주문·체결·취소·잔량과 `UNKNOWN`·`RECONCILING` 상태를 생략하지 않는다. |
 | API-083 | 주문 상세는 체결과 상태 이벤트를 시간순으로 제공하고 원주문·정정 관계 식별자를 유지한다. |
 | API-084 | 포지션 목록은 수량 0의 종료 포지션을 `state`로 구분하며 평균단가·version·기준시각을 제공한다. |
-| API-085 | 운영 Web API에는 Paper 주문·체결·게이트를 임의 생성하거나 변경하는 endpoint를 제공하지 않는다. |
+| API-085 | 운영 Web API에는 Paper 체결·게이트를 임의 생성하거나 변경하는 endpoint를 제공하지 않는다. 단, API-094~098의 제한된 키움 MOCK 연결 시험은 예외다. |
 | API-086 | `kiwoom_broker_status`는 기능 비활성 또는 secret 미준비 시 `NOT_CONFIGURED`, secret 파일 준비 시 `CONFIGURED`를 반환한다. 실제 인증과 연결 확인 전에는 `CONNECTED`를 반환하지 않는다. |
 | API-087 | `GET /system/broker`는 `KIWOOM_MOCK_PRIMARY`의 gate, worker 상태, lease 유효 여부, WebSocket·구독 상태와 최근 heartbeat·재동기화 시각을 반환한다. |
 | API-088 | Broker 상태 응답에는 worker owner ID, token, 전체 계좌번호, 자격증명, 원본 오류 메시지와 원본 WebSocket payload를 포함하지 않는다. |
 | API-089 | worker 레코드가 없거나 heartbeat가 lease 만료 기준을 넘으면 응답은 `READY`를 추론하지 않고 `NOT_STARTED` 또는 `STALE`을 표시한다. |
+| API-094 | MOCK 주문 시험은 `live_trading_enabled=false`, 키움 구성 `CONFIGURED`, worker·gate·lease·WebSocket·구독 전체 READY일 때만 `CREATED`를 생성한다. |
+| API-095 | 시험 주문은 `BUY`, `KRX`, 수량 1로 고정하고 6자리 종목코드와 `MARKET | LIMIT` 계약만 받는다. |
+| API-096 | 시험 요청은 `KIWOOM_MOCK_ORDER_TEST` 행동과 `test_request_id`에 결합된 1회용 TOTP 재인증 증명, CSRF header와 고정 확인문구를 요구한다. |
+| API-097 | 동일 시험 ID 재사용과 동일 종목의 활성 주문 보유 중 추가 시험을 거부한다. |
+| API-098 | 응답의 `ORDER_QUEUED/CREATED`는 주문 전송·접수·체결 성공을 의미하지 않으며 UI는 주문 원장을 다시 조회한다. |
 
 ### 3.6 Watch snapshot 조회 모델
 
