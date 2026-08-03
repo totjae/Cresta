@@ -68,7 +68,9 @@ Market stream ─> Watch ─> Event Bus
 3. Scout와 Core가 `BUY | WAIT | REJECT | RISK_BLOCK` 중 하나를 출력한다.
 4. Guard가 화이트리스트, 잔고, 노출 한도, 손실 한도, 스프레드, 중복 주문을 원자적으로 검사한다.
 5. 해당 행동이 승인형이면 유효시간과 가격 허용범위가 있는 승인 요청을 만들고, 자동형이면 승인 단계를 생략하며, 비활성형이면 실행하지 않는다.
-6. Broker가 idempotency key를 포함한 주문을 보내고 체결을 동기화한다.
+6. 검증된 주문을 PostgreSQL에 `CREATED`로 저장한다. Active Broker worker는 `READY` 상태에서 `FOR UPDATE SKIP LOCKED`로 가장 오래된 주문 한 건을 선택한다.
+7. worker는 현재 lease·fencing token·거래 gate를 재검증하고 `SUBMITTING`을 먼저 commit한 뒤 키움에 정확히 한 번 전송한다.
+8. 응답이 불명확하면 `UNKNOWN`으로 영속화하고 다음 주문을 중지한 뒤 즉시 전체 계좌 재동기화를 수행한다.
 
 ### 보유 및 청산
 
@@ -133,7 +135,7 @@ SELECTED -> PRECHECK -> ENTRY_WATCH -> ENTRY_READY -> BUY_PENDING
 
 ## 8. 배포 단위와 관측성
 
-초기에는 `console`, `api`, `worker`, `postgres`, `redis`, `nginx`의 Docker Compose 구성을 사용한다. Compose의 gateway는 `127.0.0.1:7788`에만 게시하고 호스트 Nginx가 `trade.mihoservice.xyz`의 TLS를 종료한다. Watch/Broker worker는 API 프로세스와 분리한다. 메트릭은 시세 지연, 이벤트 큐 지연, 판단 시간, 주문 성공률, reconciliation 불일치, 활성 비상정지를 포함한다. 구조화 로그에는 비밀정보 없이 `correlation_id`, symbol, module, event_type을 담는다.
+초기에는 `console`, `api`, `worker`, `postgres`, `redis`, `nginx`의 Docker Compose 구성을 사용한다. Compose의 gateway는 `127.0.0.1:7788`에만 게시하고 호스트 Nginx가 `trade.mihoservice.xyz`의 TLS를 종료한다. gateway는 Docker embedded DNS로 API·Frontend 서비스명을 주기적으로 다시 해석해 컨테이너 재생성 후 이전 IP를 유지하지 않는다. Watch/Broker worker는 API 프로세스와 분리한다. 메트릭은 시세 지연, 이벤트 큐 지연, 판단 시간, 주문 성공률, reconciliation 불일치, 활성 비상정지를 포함한다. 구조화 로그에는 비밀정보 없이 `correlation_id`, symbol, module, event_type을 담는다.
 
 초기 구현 저장소 구조는 다음으로 고정한다.
 

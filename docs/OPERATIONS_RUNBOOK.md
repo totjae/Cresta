@@ -265,7 +265,9 @@ sudo docker compose \
 
 2026-08-04 운영 서버에서 위 상태가 모두 정상이고 종료 코드가 0인 것을 확인했다. worker 재시작 후에도 `READY`로 복귀했으며 fencing token이 1에서 2로 증가했다. 이는 재시작 승계 검증이며 두 컨테이너의 동시 경쟁 시험을 대체하지 않는다.
 
-현재 배포 worker에는 키움 주문 polling이 연결되지 않았다. 주문 Adapter와 내부 단발 송신 서비스가 존재하더라도 DB 직접 조작이나 임시 CLI로 호출하지 않는다. 실제 모의주문 시험은 종목·수량·가격과 취소 계획을 정하고 사용자 확인을 받은 별도 절차로 수행한다.
+배포 worker는 `READY` 상태에서 내부 키움 MOCK 계좌의 검증된 `CREATED` 주문만 polling한다. 아직 주문 생성 API·Guard·승인 경로가 없으므로 DB 직접 조작이나 임시 CLI로 주문을 만들지 않는다. 실제 모의주문 시험은 종목·수량·가격과 취소 계획을 정하고 사용자 확인을 받은 별도 절차로 수행한다.
+
+Docker Compose에서 API 또는 Frontend 컨테이너만 재생성하면 고정 upstream 주소를 시작 시 한 번만 해석한 gateway Nginx가 이전 컨테이너 IP를 유지해 `502 Bad Gateway`를 반환할 수 있다. gateway는 Docker embedded DNS `127.0.0.11`을 짧은 유효기간으로 사용해 `api`·`frontend` 서비스명을 다시 해석해야 한다. 배포 후에는 `/healthz`와 로그인 session endpoint를 확인하며, 동적 해석이 적용되지 않은 이전 이미지에서는 Nginx를 함께 재시작한다.
 
 `CRESTA_KIWOOM_ENABLED=true`는 세 secret이 준비되고 출구 IP를 별도로 확인한 뒤에만 적용한다. 이번 단계의 `CONFIGURED`는 파일 준비 상태이며 키움 인증·계좌조회 성공을 뜻하지 않는다.
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -15,10 +15,12 @@ from app.broker.kiwoom import (
     KiwoomAdapterError,
 )
 from app.models import (
+    OrderIntent,
     Position,
     ReconciliationMismatch,
     ReconciliationRun,
     TradingGate,
+    TradingOrder,
 )
 from app.reconciliation import ACCOUNT_ALIAS, run_kiwoom_reconciliation
 
@@ -147,3 +149,79 @@ def test_adapter_failure_persists_failed_run_and_degraded_gate(db: Session) -> N
     assert gate is not None
     assert gate.status == "DEGRADED"
     assert gate.reason == "RECONCILIATION_FAILED"
+
+
+def _internal_order(db: Session, status: str, key: str) -> TradingOrder:
+    intent = OrderIntent(
+        account_alias=ACCOUNT_ALIAS,
+        environment="MOCK",
+        symbol="005930",
+        market="KRX",
+        side="BUY",
+        action="USER_APPROVED",
+        requested_quantity=1,
+        correlation_id=f"corr-{key}",
+    )
+    db.add(intent)
+    db.flush()
+    order = TradingOrder(
+        intent_id=intent.id,
+        order_group_id=intent.order_group_id,
+        account_alias=ACCOUNT_ALIAS,
+        environment="MOCK",
+        symbol="005930",
+        market="KRX",
+        side="BUY",
+        order_type="LIMIT",
+        limit_price=Decimal(70000),
+        requested_quantity=1,
+        remaining_quantity=1,
+        status=status,
+        idempotency_key=key,
+        request_hash="b" * 64,
+        trading_date=date(2026, 8, 4),
+        correlation_id=f"corr-{key}",
+    )
+    db.add(order)
+    db.commit()
+    return order
+
+
+@pytest.mark.parametrize("status", ["CREATED", "VALIDATING"])
+def test_unsent_order_is_not_expected_in_broker_snapshot(
+    db: Session, status: str
+) -> None:
+    _internal_order(db, status, f"{status.lower()}-not-visible")
+
+    result = run_kiwoom_reconciliation(
+        db,
+        SnapshotClient(empty_snapshot()),
+        trigger="WORKER_STARTUP",
+        clean_gate_reason="WORKER_VALIDATION_PENDING",
+    )
+
+    assert result.state == "SUCCEEDED"
+    assert result.mismatch_count == 0
+
+
+@pytest.mark.parametrize("status", ["SUBMITTING", "UNKNOWN"])
+def test_uncertain_sent_order_halts_without_automatic_resend(
+    db: Session, status: str
+) -> None:
+    _internal_order(db, status, f"uncertain-{status.lower()}")
+
+    result = run_kiwoom_reconciliation(
+        db,
+        SnapshotClient(empty_snapshot()),
+        trigger="ORDER_OUTCOME_UNKNOWN",
+    )
+
+    assert result.gate_status == "HALTED"
+    assert result.critical_mismatch_count == 1
+    mismatch = db.scalar(
+        select(ReconciliationMismatch).where(
+            ReconciliationMismatch.run_id == result.run_id
+        )
+    )
+    assert mismatch is not None
+    assert mismatch.code == "INTERNAL_ORDER_MISSING_BROKER"

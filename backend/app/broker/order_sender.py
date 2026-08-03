@@ -26,7 +26,7 @@ class OrderClient(Protocol):
     def place_order(self, request: KiwoomOrderRequest) -> KiwoomOrderAcknowledgement: ...
 
 
-class KiwoomOrderSenderError(Exception):
+class KiwoomOrderSenderError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
@@ -151,8 +151,50 @@ def send_new_order_once(
     if order.status != "CREATED":
         db.rollback()
         return KiwoomSendResult(order.id, order.status, order.broker_order_id, False)
+    return _send_locked_order(db, client, identity, order, observed_at=observed_at)
+
+
+def send_next_created_order(
+    db: Session,
+    client: OrderClient,
+    identity: LeaseIdentity,
+    *,
+    now: datetime | None = None,
+) -> KiwoomSendResult | None:
+    """Claim and send at most one FIFO Kiwoom MOCK order for the active worker."""
+    observed_at = now or datetime.now(UTC)
+    order = db.scalar(_next_created_order_statement())
+    if order is None:
+        db.rollback()
+        return None
+    return _send_locked_order(db, client, identity, order, observed_at=observed_at)
+
+
+def _next_created_order_statement():
+    return (
+        select(TradingOrder)
+        .where(
+            TradingOrder.account_alias == ACCOUNT_ALIAS,
+            TradingOrder.environment == "MOCK",
+            TradingOrder.status == "CREATED",
+        )
+        .order_by(TradingOrder.created_at, TradingOrder.id)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+
+
+def _send_locked_order(
+    db: Session,
+    client: OrderClient,
+    identity: LeaseIdentity,
+    order: TradingOrder,
+    *,
+    observed_at: datetime,
+) -> KiwoomSendResult:
     _require_worker_ready(db, identity, now=observed_at)
     request = _order_request(order)
+    order_id = order.id
     _transition(db, order, "VALIDATING", occurred_at=observed_at)
     _transition(db, order, "SUBMITTING", occurred_at=observed_at)
     db.commit()

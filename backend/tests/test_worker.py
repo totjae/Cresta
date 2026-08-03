@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -9,13 +10,24 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import worker as worker_module
-from app.broker.kiwoom import AccountVerification, BrokerAccountSnapshot
+from app.broker.kiwoom import (
+    AccountVerification,
+    BrokerAccountSnapshot,
+    KiwoomOrderAcknowledgement,
+    KiwoomOrderOutcomeUnknownError,
+    KiwoomOrderRequest,
+)
 from app.broker.worker_state import get_broker_status
 from app.config import Settings
-from app.models import ReconciliationRun
+from app.models import OrderIntent, ReconciliationRun, TradingOrder
+from app.reconciliation import ACCOUNT_ALIAS
 
 
 class SnapshotClient:
+    def __init__(self, order_outcome: object | None = None) -> None:
+        self.order_outcome = order_outcome or KiwoomOrderAcknowledgement("1234567", "KRX")
+        self.order_requests: list[KiwoomOrderRequest] = []
+
     def get_access_token(self) -> str:
         return "memory-only-token"
 
@@ -29,6 +41,13 @@ class SnapshotClient:
             positions=(),
             observed_at=datetime.now(UTC),
         )
+
+    def place_order(self, request: KiwoomOrderRequest) -> KiwoomOrderAcknowledgement:
+        self.order_requests.append(request)
+        if isinstance(self.order_outcome, Exception):
+            raise self.order_outcome
+        assert isinstance(self.order_outcome, KiwoomOrderAcknowledgement)
+        return self.order_outcome
 
 
 class ControlledWebSocket:
@@ -112,3 +131,87 @@ def test_worker_reaches_ready_only_after_websocket_and_clean_reconciliation(
     }
     assert observed["reconciliation_run_id"] is not None
     assert socket.closed is True
+
+
+def _queue_order(session_factory: sessionmaker[Session]) -> str:
+    with session_factory() as db:
+        intent = OrderIntent(
+            account_alias=ACCOUNT_ALIAS,
+            environment="MOCK",
+            symbol="005930",
+            market="KRX",
+            side="BUY",
+            action="USER_APPROVED",
+            requested_quantity=1,
+            correlation_id="corr-worker-order",
+        )
+        db.add(intent)
+        db.flush()
+        order = TradingOrder(
+            intent_id=intent.id,
+            order_group_id=intent.order_group_id,
+            account_alias=ACCOUNT_ALIAS,
+            environment="MOCK",
+            symbol="005930",
+            market="KRX",
+            side="BUY",
+            order_type="LIMIT",
+            limit_price=Decimal(70000),
+            requested_quantity=1,
+            remaining_quantity=1,
+            idempotency_key="worker-poll-order",
+            request_hash="c" * 64,
+            trading_date=date(2026, 8, 4),
+            correlation_id="corr-worker-order",
+        )
+        db.add(order)
+        db.commit()
+        return order.id
+
+
+def test_worker_unknown_order_immediately_reconciles_and_stops_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    session_factory: sessionmaker[Session],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(worker_module, "SessionLocal", session_factory)
+    order_id = _queue_order(session_factory)
+    client = SnapshotClient(
+        KiwoomOrderOutcomeUnknownError("KIWOOM_ORDER_OUTCOME_UNKNOWN", "unknown")
+    )
+    socket = ControlledWebSocket()
+    worker = worker_module.KiwoomBrokerWorker(
+        _configured_settings(tmp_path),
+        client=client,
+        websocket=socket,
+        owner_id="worker-owner-unknown",
+    )
+    observed: dict[str, object] = {}
+
+    def inspect_halted_then_stop() -> None:
+        with session_factory() as db:
+            status = get_broker_status(db)
+            order = db.get(TradingOrder, order_id)
+            latest_run = db.scalar(
+                select(ReconciliationRun).order_by(ReconciliationRun.started_at.desc())
+            )
+            assert order is not None
+            assert latest_run is not None
+            observed.update(
+                worker_state=status.state,
+                gate_status=status.gate_status,
+                order_status=order.status,
+                reconciliation_trigger=latest_run.trigger,
+            )
+        worker.stop()
+
+    socket.on_receive = inspect_halted_then_stop
+    assert asyncio.run(worker.run()) == 0
+
+    assert observed == {
+        "worker_state": "DEGRADED",
+        "gate_status": "HALTED",
+        "order_status": "UNKNOWN",
+        "reconciliation_trigger": "ORDER_OUTCOME_UNKNOWN",
+    }
+    assert len(client.order_requests) == 1

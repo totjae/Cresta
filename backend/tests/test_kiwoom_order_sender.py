@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from app.broker.kiwoom import (
@@ -15,7 +16,9 @@ from app.broker.kiwoom import (
 )
 from app.broker.order_sender import (
     KiwoomOrderSenderError,
+    _next_created_order_statement,
     send_new_order_once,
+    send_next_created_order,
 )
 from app.broker.worker_state import LeaseIdentity, acquire_lease, update_worker_state
 from app.models import OrderEvent, OrderIntent, TradingGate, TradingOrder
@@ -50,9 +53,16 @@ def ready_worker(db: Session) -> LeaseIdentity:
     return identity
 
 
-def persisted_order(db: Session) -> TradingOrder:
+def persisted_order(
+    db: Session,
+    *,
+    idempotency_key: str = "kiwoom-send-once",
+    account_alias: str = ACCOUNT_ALIAS,
+    status: str = "CREATED",
+    created_at: datetime | None = None,
+) -> TradingOrder:
     intent = OrderIntent(
-        account_alias=ACCOUNT_ALIAS,
+        account_alias=account_alias,
         environment="MOCK",
         symbol="005930",
         market="KRX",
@@ -66,7 +76,7 @@ def persisted_order(db: Session) -> TradingOrder:
     order = TradingOrder(
         intent_id=intent.id,
         order_group_id=intent.order_group_id,
-        account_alias=ACCOUNT_ALIAS,
+        account_alias=account_alias,
         environment="MOCK",
         symbol="005930",
         market="KRX",
@@ -75,10 +85,12 @@ def persisted_order(db: Session) -> TradingOrder:
         limit_price=Decimal(70000),
         requested_quantity=2,
         remaining_quantity=2,
-        idempotency_key="kiwoom-send-once",
+        status=status,
+        idempotency_key=idempotency_key,
         request_hash="a" * 64,
         trading_date=date(2026, 8, 4),
         correlation_id="corr-order-send",
+        **({"created_at": created_at} if created_at is not None else {}),
     )
     db.add(order)
     db.commit()
@@ -174,3 +186,63 @@ def test_sender_requires_current_ready_worker_before_state_change(db: Session) -
     assert blocked.value.code == "WORKER_LEASE_NOT_CURRENT"
     assert db.get(TradingOrder, order.id).status == "CREATED"
     assert client.requests == []
+
+
+def test_polling_sends_only_oldest_created_kiwoom_order(db: Session) -> None:
+    identity = ready_worker(db)
+    older = persisted_order(
+        db,
+        idempotency_key="polling-older",
+        created_at=datetime(2026, 8, 4, 0, 0, tzinfo=UTC),
+    )
+    newer = persisted_order(
+        db,
+        idempotency_key="polling-newer",
+        created_at=datetime(2026, 8, 4, 0, 1, tzinfo=UTC),
+    )
+    paper = persisted_order(
+        db,
+        idempotency_key="polling-paper",
+        account_alias="PAPER",
+        created_at=datetime(2026, 8, 3, 23, 59, tzinfo=UTC),
+    )
+    acknowledged = persisted_order(
+        db,
+        idempotency_key="polling-acknowledged",
+        status="ACKNOWLEDGED",
+        created_at=datetime(2026, 8, 3, 23, 58, tzinfo=UTC),
+    )
+    client = FakeOrderClient(KiwoomOrderAcknowledgement("1234567", "KRX"))
+
+    result = send_next_created_order(db, client, identity)
+
+    assert result is not None
+    assert result.order_id == older.id
+    assert result.status == "ACKNOWLEDGED"
+    assert len(client.requests) == 1
+    assert db.get(TradingOrder, newer.id).status == "CREATED"
+    assert db.get(TradingOrder, paper.id).status == "CREATED"
+    assert db.get(TradingOrder, acknowledged.id).status == "ACKNOWLEDGED"
+
+
+def test_polling_returns_none_without_created_kiwoom_order(db: Session) -> None:
+    identity = ready_worker(db)
+    persisted_order(
+        db,
+        idempotency_key="polling-terminal",
+        status="REJECTED",
+    )
+    client = FakeOrderClient(KiwoomOrderAcknowledgement("1234567", "KRX"))
+
+    result = send_next_created_order(db, client, identity)
+
+    assert result is None
+    assert client.requests == []
+
+
+def test_polling_query_uses_postgresql_skip_locked() -> None:
+    sql = str(
+        _next_created_order_statement().compile(dialect=postgresql.dialect())
+    ).upper()
+
+    assert "FOR UPDATE SKIP LOCKED" in sql

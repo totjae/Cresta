@@ -20,9 +20,7 @@ from app.models import (
 )
 
 ACCOUNT_ALIAS = "KIWOOM_MOCK_PRIMARY"
-ACTIVE_ORDER_STATES = {
-    "CREATED",
-    "VALIDATING",
+BROKER_VISIBLE_ORDER_STATES = {
     "SUBMITTING",
     "ACKNOWLEDGED",
     "OPEN",
@@ -39,6 +37,7 @@ RECONCILIATION_TRIGGERS = {
     "WEBSOCKET_RECONNECTED",
     "BROKER_EVENT",
     "PERIODIC",
+    "ORDER_OUTCOME_UNKNOWN",
 }
 
 
@@ -156,7 +155,7 @@ def compare_snapshot(db: Session, snapshot: BrokerAccountSnapshot) -> list[Misma
     internal_orders = db.scalars(
         select(TradingOrder).where(
             TradingOrder.account_alias == ACCOUNT_ALIAS,
-            TradingOrder.status.in_(ACTIVE_ORDER_STATES),
+            TradingOrder.status.in_(BROKER_VISIBLE_ORDER_STATES),
         )
     ).all()
     internal_by_broker = {

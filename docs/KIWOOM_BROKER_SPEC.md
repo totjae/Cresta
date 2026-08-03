@@ -395,6 +395,20 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 | KIW-127 | 같은 내부 주문이 `SUBMITTING`, `ACKNOWLEDGED`, `UNKNOWN` 또는 종료 상태이면 worker는 같은 매매 의도를 다시 송신하지 않는다. `SUBMITTING` 기록은 네트워크 호출 전에 commit한다. |
 | KIW-128 | 이번 단계의 주문 송신 서비스는 worker 내부에서만 호출 가능하며 HTTP API·Console·CLI에 모의주문 생성 명령을 노출하지 않는다. 실제 모의주문 통합시험은 사용자 지정 종목·수량·가격과 명시적 실행 확인 후 수행한다. |
 
+### 3.19 영속 주문 polling과 재시작 안전성
+
+상시 worker는 시작 재동기화가 끝나 `READY`가 된 뒤에만 `KIWOOM_MOCK_PRIMARY` 계좌의 `CREATED` 주문을 처리한다. 주문 생성 API와 Guard·승인 연결은 아직 제공하지 않으므로 정상 운영 DB에는 사용자가 명시적으로 생성한 키움 주문이 없다.
+
+| ID | 요구사항 |
+| --- | --- |
+| KIW-129 | Active worker는 `READY`일 때 PostgreSQL에서 계좌 별칭이 `KIWOOM_MOCK_PRIMARY`, 환경이 `MOCK`, 상태가 `CREATED`인 주문을 생성시각 순서로 한 건만 선택한다. |
+| KIW-130 | 선택 쿼리는 `FOR UPDATE SKIP LOCKED`를 사용하고 현재 lease owner·fencing token·거래 gate를 같은 트랜잭션에서 재검증한다. |
+| KIW-131 | 선택된 주문은 기존 단발 송신 서비스를 통해 `VALIDATING → SUBMITTING`을 먼저 commit한 뒤 키움에 정확히 한 번 전송한다. 한 polling cycle에서는 최대 한 건만 전송한다. |
+| KIW-132 | `CREATED`와 `VALIDATING`은 아직 Broker에 존재해야 하는 상태가 아니므로 계좌 snapshot 불일치 비교에서 제외한다. `SUBMITTING`부터는 Broker-visible 상태로 보고 식별 불가 시 fail-closed한다. |
+| KIW-133 | worker 재시작 시 `SUBMITTING`·`UNKNOWN` 주문은 자동 재전송하지 않고 시작 재동기화에서 불일치로 처리해 거래 gate를 `HALTED`로 유지한다. |
+| KIW-134 | 송신 결과가 `UNKNOWN`이면 worker는 polling을 중단하고 즉시 `ORDER_OUTCOME_UNKNOWN` trigger로 전체 계좌 재동기화를 수행한다. 결과를 유일하게 식별하지 못하면 자동 추정·편입하지 않는다. |
+| KIW-135 | `ACKNOWLEDGED` 또는 `REJECTED` 결과는 중복 송신하지 않는다. `ACKNOWLEDGED` 이후 실제 OPEN·체결 상태 반영은 Broker 이벤트 및 snapshot 상태 적용 단계에서 구현한다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 고정 IP가 맞더라도 키움 등록이 완료되지 않았으면 인증 성공으로 간주하지 않는다.

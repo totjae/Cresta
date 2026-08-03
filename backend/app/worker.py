@@ -11,6 +11,7 @@ from websockets.exceptions import WebSocketException
 
 from app.broker.kiwoom import KiwoomAdapterError, KiwoomMockClient
 from app.broker.kiwoom_ws import KiwoomAccountWebSocket, KiwoomWebSocketError
+from app.broker.order_sender import KiwoomSendResult, send_next_created_order
 from app.broker.worker_state import (
     LeaseIdentity,
     acquire_lease,
@@ -182,8 +183,19 @@ class KiwoomBrokerWorker:
         next_periodic = now + timedelta(seconds=self.settings.kiwoom_reconcile_interval_seconds)
         next_token_check = now + timedelta(seconds=self.settings.kiwoom_worker_heartbeat_seconds)
         event_due: datetime | None = None
+        order_dispatch_enabled = True
         while not self.stop_event.is_set() and not self.lease_lost.is_set():
             observed_at = datetime.now(UTC)
+            if order_dispatch_enabled:
+                dispatch_result = await self._dispatch_next_order()
+                if dispatch_result is not None and dispatch_result.status == "UNKNOWN":
+                    result = await self._reconcile("ORDER_OUTCOME_UNKNOWN")
+                    self._apply_reconciliation_result(result)
+                    order_dispatch_enabled = result.critical_mismatch_count == 0
+                    next_periodic = datetime.now(UTC) + timedelta(
+                        seconds=self.settings.kiwoom_reconcile_interval_seconds
+                    )
+                    continue
             if observed_at >= next_token_check:
                 current_token = await asyncio.to_thread(self.client.get_access_token)
                 if current_token != token_used:
@@ -208,6 +220,7 @@ class KiwoomBrokerWorker:
             if trigger is not None:
                 result = await self._reconcile(trigger)
                 self._apply_reconciliation_result(result)
+                order_dispatch_enabled = result.critical_mismatch_count == 0
                 next_periodic = datetime.now(UTC) + timedelta(
                     seconds=self.settings.kiwoom_reconcile_interval_seconds
                 )
@@ -221,6 +234,16 @@ class KiwoomBrokerWorker:
                 )
         if self.lease_lost.is_set():
             raise RuntimeError("WORKER_LEASE_LOST")
+
+    async def _dispatch_next_order(self) -> KiwoomSendResult | None:
+        if self.identity is None:
+            raise RuntimeError("WORKER_LEASE_LOST")
+
+        def execute() -> KiwoomSendResult | None:
+            with SessionLocal() as db:
+                return send_next_created_order(db, self.client, self.identity)
+
+        return await asyncio.to_thread(execute)
 
     async def _reconcile(self, trigger: str) -> ReconciliationResult:
         self._require_state(

@@ -251,6 +251,11 @@
 | T-KIW-031 | KIW-124~125, STM-004·023, ORD-035 | 주문 성공·업무거절·401·timeout·5xx·비 JSON 응답 | 성공만 ACK 후보, 업무거절만 REJECTED 후보, 불명확 오류는 UNKNOWN 후보, HTTP 재송신 없음 | 통과 (2026-08-04, 자동 fixture) |
 | T-KIW-032 | KIW-126 | 같은 TR의 연속 주문과 서로 다른 TR 호출 | TR별 최소 1초 간격과 주입 가능한 clock 기반 결정론적 검증 | 통과 (2026-08-04, 자동 clock) |
 | T-KIW-033 | KIW-127~128, STM-005, ORD-034·036 | 같은 내부 주문 재호출·SUBMITTING 중 crash 가정 | 최초 호출 전 상태 commit, 후속 호출 송신 0회, 공개 주문 명령 없음 | 통과 (2026-08-04, 자동) |
+| T-KIW-034 | KIW-129~131, STM-026, ORD-037 | READY worker polling에 여러 계좌·상태 주문 배치 | 대상 계좌 CREATED 중 가장 오래된 한 건만 선택·송신, 다른 주문 미변경 | 통과 (2026-08-04, 자동) |
+| T-KIW-035 | KIW-132~133, STM-025 | CREATED·SUBMITTING·UNKNOWN 주문별 worker 시작 대조 | CREATED는 Broker 불일치 아님, SUBMITTING·UNKNOWN은 fail-closed, 자동 재송신 0회 | 통과 (2026-08-04, 자동) |
+| T-KIW-036 | KIW-134, ORD-038 | polling 송신 결과 UNKNOWN | 다음 주문 미처리, 즉시 ORDER_OUTCOME_UNKNOWN 전체 재동기화, 식별 불가 시 HALTED | 통과 (2026-08-04, 자동) |
+| T-KIW-037 | KIW-135 | ACKNOWLEDGED·REJECTED 주문이 polling 대상에 함께 존재 | 기존 결과 주문 재송신 0회, CREATED만 대상 | 통과 (2026-08-04, 자동) |
+| T-OPS-011 | OPS-003 | API 컨테이너 IP 변경 후 gateway를 재시작하지 않고 health·login 요청 | Docker DNS 재해석 후 새 API로 연결되고 502가 지속되지 않음 | 설정 계약 통과·실서버 대기 |
 
 ## 4. 시험 환경
 
@@ -284,7 +289,7 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 99개 통과 | 인증·Paper·Watch, 키움 snapshot·DB 대조, lease/fencing, WebSocket 계약, worker READY gate, 주문 TR·limiter·ACK/REJECTED/UNKNOWN 내부 송신 포함; 실제 모의주문 제외 |
+| Python 단위·API 시험 | `python -m pytest` | 108개 통과 | 인증·Paper·Watch, 키움 snapshot·lease/fencing·WebSocket, PostgreSQL SKIP LOCKED FIFO polling, 재시작 상태 구분과 UNKNOWN 즉시 재동기화 포함; 실제 모의주문 제외 |
 | Console component 시험 | `npm test` | 4개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃, Paper 조회 전용 화면 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
@@ -298,4 +303,4 @@
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
 | Watch 상태 UI 변경 점검 | component·TypeScript·production build | 통과 | 인앱 브라우저의 로컬 URL 정책 차단으로 이번 변경의 추가 시각 점검은 미실행 |
 
-검증된 세부 동작은 인증·Paper·Watch 외에 키움 MOCK URL 강제, 메모리 token 단일 갱신, 일반 조회의 401 재인증, 계좌 snapshot, WebSocket worker 안전 게이트, 주문 TR·1초 limiter·ACK/REJECTED/UNKNOWN 내부 송신을 포함한다. 실제 서버의 MOCK 인증·시세·계좌 일치는 2026-08-03, 빈 계좌의 snapshot 대조와 상시 WebSocket worker의 READY 진입·재시작 후 fencing token 증가는 2026-08-04 통과했다. 분봉·지표·호가 가격정책·실제 모의주문·PostgreSQL 다중 worker 경쟁은 실서버 미검증이다.
+검증된 세부 동작은 인증·Paper·Watch 외에 키움 MOCK 인증·snapshot, WebSocket worker 안전 게이트, 주문 TR·limiter·FIFO polling·ACK/REJECTED/UNKNOWN과 즉시 재동기화를 포함한다. 실제 서버의 MOCK 인증·시세·계좌 일치는 2026-08-03, 빈 계좌 대조와 worker READY·재시작 fencing은 2026-08-04 통과했다. Docker DNS gateway 설정은 로컬 계약만 통과했으며 서버의 API 재생성 후 무중단 재해석, 분봉·지표·Guard 가격정책·실제 모의주문·PostgreSQL 다중 worker 경쟁은 미검증이다.

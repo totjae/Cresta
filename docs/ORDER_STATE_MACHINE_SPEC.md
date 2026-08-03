@@ -95,7 +95,9 @@ SUBMITTING 또는 CANCEL_PENDING 또는 REPLACE_PENDING
 | STM-021 | `UNKNOWN` 상태에서는 같은 매매 의도를 다시 전송하지 않는다. |
 | STM-022 | `UNKNOWN` 주문이 있는 종목은 추가 주문을 잠그고 키움 조회로 대조한다. |
 | STM-023 | 명시적인 `return_code != 0` 업무 거절만 `REJECTED` 후보이며 HTTP 401·timeout·연결 오류·5xx·응답 파싱/필드 오류는 `UNKNOWN` 후보로 처리한다. |
-| STM-023 | 재동기화가 끝나지 않으면 `RECONCILING`을 유지하고 사용자에게 경보한다. |
+| STM-024 | 재동기화가 끝나지 않으면 `RECONCILING`을 유지하고 사용자에게 경보한다. |
+| STM-025 | worker 시작 시 `CREATED`는 미송신 대기 주문으로 유지할 수 있지만 `SUBMITTING`·`UNKNOWN`은 재전송하지 않고 Broker 대조 대상으로 처리한다. |
+| STM-026 | polling은 한 cycle에 한 주문만 `CREATED`에서 가져오며 DB row lock과 Active worker fencing을 모두 통과해야 한다. |
 
 ### 3.5 키움 API 매핑
 
