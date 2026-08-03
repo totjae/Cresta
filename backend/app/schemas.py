@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,6 +52,59 @@ class ReauthResponse(StrictModel):
     target_action: str
     target_id: str
     expires_at: datetime
+
+
+ExecutionMode = Literal["AUTOMATIC", "MANUAL_APPROVAL", "DISABLED"]
+
+
+class ExecutionPolicyPayload(StrictModel):
+    buy: ExecutionMode
+    partial_sell: ExecutionMode
+    full_sell: ExecutionMode
+    take_profit: ExecutionMode
+    fixed_stop_loss: ExecutionMode
+    trailing_stop: ExecutionMode
+    end_of_day_liquidation: ExecutionMode
+    emergency_exit: ExecutionMode
+
+
+class ExecutionPolicyDraftRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    policy: ExecutionPolicyPayload
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ExecutionPolicyActivateRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    reauth_proof: str = Field(min_length=32, max_length=256)
+
+
+class ExecutionPolicyVersionResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    version_id: str
+    sequence: int
+    state: str
+    source: str = "USER_DEFAULT"
+    policy: ExecutionPolicyPayload
+    reason: str
+    created_at: datetime
+    validated_at: datetime | None
+    activated_at: datetime | None
+
+
+class ExecutionPolicyResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    active_version_id: str | None
+    source: str
+    policy: ExecutionPolicyPayload
+
+
+class ExecutionPolicyHistoryResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[ExecutionPolicyVersionResponse]
 
 
 class MessageResponse(StrictModel):

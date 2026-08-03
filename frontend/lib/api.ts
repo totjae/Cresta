@@ -5,6 +5,33 @@ export type SessionData = {
   csrf_token: string;
 };
 
+export type ExecutionMode = "AUTOMATIC" | "MANUAL_APPROVAL" | "DISABLED";
+export type ExecutionPolicy = {
+  buy: ExecutionMode;
+  partial_sell: ExecutionMode;
+  full_sell: ExecutionMode;
+  take_profit: ExecutionMode;
+  fixed_stop_loss: ExecutionMode;
+  trailing_stop: ExecutionMode;
+  end_of_day_liquidation: ExecutionMode;
+  emergency_exit: ExecutionMode;
+};
+export type ExecutionPolicyCurrent = {
+  active_version_id: string | null;
+  source: "SAFE_DEFAULT" | "USER_DEFAULT";
+  policy: ExecutionPolicy;
+};
+export type ExecutionPolicyVersion = {
+  version_id: string;
+  sequence: number;
+  state: string;
+  policy: ExecutionPolicy;
+  reason: string;
+  created_at: string;
+  validated_at: string | null;
+  activated_at: string | null;
+};
+
 export type SystemHealth = {
   schema_version: "1.0";
   request_id: string;
@@ -195,6 +222,29 @@ export const systemApi = {
         ...payload,
         confirmation: "KIWOOM_MOCK_ONE_SHARE",
       }),
+    });
+  },
+};
+
+export const settingsApi = {
+  executionPolicy(signal?: AbortSignal) {
+    return request<ExecutionPolicyCurrent>("/api/v1/settings/execution-policy", { signal });
+  },
+  createDraft(csrfToken: string, policy: ExecutionPolicy, reason: string) {
+    return request<ExecutionPolicyVersion>("/api/v1/settings/execution-policy/drafts", {
+      method: "POST", headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({ schema_version: "1.0", policy, reason }),
+    });
+  },
+  validate(csrfToken: string, versionId: string) {
+    return request<ExecutionPolicyVersion>(`/api/v1/settings/execution-policy/${encodeURIComponent(versionId)}/validate`, {
+      method: "POST", headers: { "X-CSRF-Token": csrfToken },
+    });
+  },
+  activate(csrfToken: string, versionId: string, reauthProof: string) {
+    return request<ExecutionPolicyVersion>(`/api/v1/settings/execution-policy/${encodeURIComponent(versionId)}/activate`, {
+      method: "POST", headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({ schema_version: "1.0", reauth_proof: reauthProof }),
     });
   },
 };

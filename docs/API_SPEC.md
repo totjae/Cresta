@@ -236,3 +236,11 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `approval.req
 - OpenAPI 기준 파일은 `docs/generated/openapi-v1.json`에 생성하며 CI에서 구현과 차이를 검사한다. 첫 버전은 별도 SDK를 배포하지 않고 Console 내부 TypeScript client만 생성한다.
 - WebSocket replay 이벤트는 10분 보존하고 범위를 벗어나면 REST snapshot을 요구한다.
 - Console은 배포 시점의 Chrome·Edge·Safari 최신 2개 주요 버전을 지원한다. HTTPS 응답은 Nginx에서 gzip 또는 Brotli를 사용하되 실시간 이벤트는 지연 우선으로 압축을 강제하지 않는다.
+
+### 8.1 실행 권한 설정 API 1차 구현 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| API-043 | 실행 권한은 `GET /settings/execution-policy`, `POST /settings/execution-policy/drafts`, `POST /settings/execution-policy/{id}/validate`, `POST /settings/execution-policy/{id}/activate`, `GET /settings/execution-policy/history`로 관리한다. |
+| API-044 | 실행 권한 활성화 요청은 CSRF, 공백이 아닌 변경 사유, 대상 버전에 결합된 TOTP 재인증 증명을 요구한다. |
+| API-045 | API는 활성 버전이 없을 때 안전 기본값과 `active_version_id=null`을 반환하며 이를 영속 활성화로 표현하지 않는다. |

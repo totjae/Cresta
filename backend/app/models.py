@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -134,6 +135,45 @@ class AuditLog(Base):
     correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
     metadata_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class ConfigurationVersion(Base):
+    __tablename__ = "configuration_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope", "target_id", "category", "sequence", name="uq_configuration_sequence"
+        ),
+        CheckConstraint(
+            "state IN ('DRAFT','VALIDATED','ACTIVE','SUPERSEDED')",
+            name="ck_configuration_versions_state",
+        ),
+        CheckConstraint("sequence > 0", name="ck_configuration_versions_sequence_positive"),
+        Index(
+            "uq_configuration_active_target",
+            "scope",
+            "target_id",
+            "category",
+            unique=True,
+            sqlite_where=text("state = 'ACTIVE'"),
+            postgresql_where=text("state = 'ACTIVE'"),
+        ),
+        Index("ix_configuration_target_created", "target_id", "category", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="DRAFT")
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    base_active_version_id: Mapped[str | None] = mapped_column(String(36))
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class TradingGate(Base):

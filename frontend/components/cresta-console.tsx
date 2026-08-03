@@ -31,18 +31,21 @@ import {
   ApiError,
   authApi,
   BrokerStatus,
+  ExecutionMode,
+  ExecutionPolicy,
   orderApi,
   OrderDetail,
   OrderSummary,
   positionApi,
   PositionSummary,
   SessionData,
+  settingsApi,
   systemApi,
   SystemHealth,
 } from "../lib/api";
 
 type Screen = "boot" | "credentials" | "totp" | "console";
-type ConsolePage = "dashboard" | "positions" | "orders" | "system";
+type ConsolePage = "dashboard" | "positions" | "orders" | "settings" | "system";
 
 const SAFE_AUTH_ERROR = "인증 정보를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.";
 
@@ -59,7 +62,9 @@ const navigation = [
 ] as const;
 
 const activeNavigation = navigation.map((item) =>
-  item[0] === "system" ? ([item[0], item[1], item[2], true] as const) : item,
+  item[0] === "system" || item[0] === "settings"
+    ? ([item[0], item[1], item[2], true] as const)
+    : item,
 );
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -240,6 +245,7 @@ function ConsoleShell({
           {page === "dashboard" && <DashboardPage session={session} health={health} />}
           {page === "orders" && <OrdersPage onSessionExpired={onSessionExpired} />}
           {page === "positions" && <PositionsPage onSessionExpired={onSessionExpired} />}
+          {page === "settings" && <SettingsPage session={session} onSessionExpired={onSessionExpired} />}
           {page === "system" && <SystemPage session={session} onSessionExpired={onSessionExpired} />}
         </div>
       </main>
@@ -272,6 +278,86 @@ function DashboardPage({ session, health }: { session: SessionData; health: Syst
       <article className="panel"><div className="panel-head"><div><ListChecks size={18} /><span>Paper 원장 요약</span></div><span className="status-pill neutral">READ ONLY</span></div><div className="metric-list"><div><span>전체 주문</span><strong>{health?.counts.orders ?? "—"}</strong></div><div><span>진행 주문</span><strong>{health?.counts.active_orders ?? "—"}</strong></div><div><span>보유 포지션</span><strong>{health?.counts.open_positions ?? "—"}</strong></div></div></article>
       <article className="panel activity-panel"><div className="panel-head"><div><Activity size={18} /><span>현재 연동 범위</span></div></div><div className="empty-state"><Radio size={26} /><h3>Paper 조회 전용</h3><p>주문·체결·포지션 조회만 활성화했습니다. 운영 Web에서는 임의 주문이나 체결을 만들 수 없습니다.</p></div></article>
     </section>
+  </>;
+}
+
+const executionActions: Array<[keyof ExecutionPolicy, string, string]> = [
+  ["buy", "일반 매수", "AI BUY 판단의 신규 진입"],
+  ["partial_sell", "부분매도", "보유 수량 일부 청산"],
+  ["full_sell", "전량매도", "일반 전량 청산"],
+  ["take_profit", "목표수익 매도", "목표수익 도달 시 청산"],
+  ["fixed_stop_loss", "고정 손절", "손절 가격 도달 시 즉시 청산"],
+  ["trailing_stop", "추적 손절", "고점 대비 하락 시 수익 보호"],
+  ["end_of_day_liquidation", "장 마감 청산", "익일 보유 금지 정책 청산"],
+  ["emergency_exit", "긴급 청산", "Guard 긴급 위험 청산"],
+];
+
+function SettingsPage({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {
+  const [policy, setPolicy] = useState<ExecutionPolicy | null>(null);
+  const [source, setSource] = useState("");
+  const [activeVersion, setActiveVersion] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [pendingVersion, setPendingVersion] = useState("");
+  const [totp, setTotp] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const loadPolicy = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const result = await settingsApi.executionPolicy(signal);
+      setPolicy(result.policy); setSource(result.source); setActiveVersion(result.active_version_id);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("실행 권한 설정을 불러오지 못했습니다.");
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => { const controller = new AbortController(); void loadPolicy(controller.signal); return () => controller.abort(); }, [loadPolicy]);
+
+  async function validateChanges(event: FormEvent) {
+    event.preventDefault();
+    if (!policy) return;
+    setBusy(true); setMessage("");
+    try {
+      const draft = await settingsApi.createDraft(session.csrf_token, policy, reason);
+      const validated = await settingsApi.validate(session.csrf_token, draft.version_id);
+      setPendingVersion(validated.version_id);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("변경안을 검증하지 못했습니다. 변경 사유와 설정값을 확인해 주세요.");
+    } finally { setBusy(false); }
+  }
+
+  async function activate(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setMessage("");
+    try {
+      const proof = await authApi.reauthTotp(session.csrf_token, totp, "EXECUTION_POLICY_ACTIVATE", pendingVersion);
+      await settingsApi.activate(session.csrf_token, pendingVersion, proof.reauth_proof);
+      setPendingVersion(""); setTotp(""); setReason("");
+      await loadPolicy();
+      setMessage("행동별 실행 권한이 새 활성 버전으로 적용되었습니다.");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("설정을 활성화하지 못했습니다. TOTP 또는 버전 충돌을 확인해 주세요.");
+      setTotp("");
+    } finally { setBusy(false); }
+  }
+
+  return <>
+    <PageHeading kicker="EXECUTION POLICY" title="전략·설정" description="AI 행동마다 자동·승인·비활성 실행 권한을 독립적으로 관리합니다." />
+    {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
+    <section className="panel execution-policy-panel">
+      <div className="panel-head"><div><Settings2 size={18} /><span>행동별 실행 권한</span></div><span className={`status-pill ${source === "USER_DEFAULT" ? "ok" : "neutral"}`}>{source || "LOADING"}</span></div>
+      <div className="policy-version-note">활성 버전: <b className="mono">{activeVersion ?? "안전 기본값 · 미저장"}</b></div>
+      {policy && <form onSubmit={validateChanges}>
+        <div className="execution-policy-list">{executionActions.map(([key, label, description]) => <div className="execution-policy-row" key={key}><div><strong>{label}</strong><small>{description}</small></div><select aria-label={`${label} 실행 모드`} value={policy[key]} onChange={(event) => setPolicy({ ...policy, [key]: event.target.value as ExecutionMode })}><option value="AUTOMATIC">자동 실행</option><option value="MANUAL_APPROVAL">사용자 승인</option><option value="DISABLED">비활성</option></select></div>)}</div>
+        <label className="reason-field" htmlFor="execution-policy-reason">변경 사유<input id="execution-policy-reason" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required placeholder="자동화 범위를 변경하는 이유" /></label>
+        <button className="primary-button" disabled={busy || !reason.trim()}>{busy ? "검증 중" : "변경안 검증"}</button>
+      </form>}
+    </section>
+    {pendingVersion && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="policy-confirm-title"><span className="section-kicker">TOTP REAUTHENTICATION</span><h2 id="policy-confirm-title">실행 권한 활성화</h2><p>검증된 버전만 운영에 적용됩니다. 자동 실행 항목은 이후 건별 TOTP 없이 Guard 검사 후 실행됩니다.</p><form onSubmit={activate}><label htmlFor="policy-totp">현재 TOTP 코드</label><input id="policy-totp" className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus /><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setPendingVersion(""); setTotp(""); }} disabled={busy}>취소</button><button type="submit" className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "적용 중" : "활성화"}</button></div></form></section></div>}
   </>;
 }
 

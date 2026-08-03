@@ -180,3 +180,10 @@ market_snapshots(symbol, market, observed_at desc)
 
 - 실제 거래량 기준 파티션 크기와 자동 보관 스케줄
 - 암호화 백업의 서버 외부 보관 매체
+
+### 6.1 실행 권한 설정 저장 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-026 | `configuration_versions`는 scope, target, category, sequence, state, payload hash와 생성·검증·활성화 시각을 저장하고 동일 대상·범주의 `ACTIVE` 행을 하나로 제한한다. |
+| DB-027 | 실행 권한 payload는 정규화된 JSON과 SHA-256 해시로 저장하고 `ACTIVE` 또는 `SUPERSEDED` 행을 API로 수정하지 않는다. |

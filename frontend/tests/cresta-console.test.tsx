@@ -167,3 +167,45 @@ describe("Kiwoom MOCK browser diagnostic", () => {
     }));
   });
 });
+
+describe("execution policy settings", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("validates and activates independent action modes with TOTP", async () => {
+    const safePolicy = {
+      buy: "MANUAL_APPROVAL", partial_sell: "MANUAL_APPROVAL", full_sell: "MANUAL_APPROVAL",
+      take_profit: "MANUAL_APPROVAL", fixed_stop_loss: "AUTOMATIC", trailing_stop: "AUTOMATIC",
+      end_of_day_liquidation: "AUTOMATIC", emergency_exit: "AUTOMATIC",
+    };
+    let active = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-6", login_id: "admin", expires_at: "2026-08-04T09:00:00Z", csrf_token: "csrf-policy" });
+      if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
+      if (path === "/api/v1/settings/execution-policy" && !init?.method) return jsonResponse({ active_version_id: active ? "policy-1" : null, source: active ? "USER_DEFAULT" : "SAFE_DEFAULT", policy: { ...safePolicy, buy: active ? "AUTOMATIC" : "MANUAL_APPROVAL" } });
+      if (path.endsWith("/drafts")) return jsonResponse({ version_id: "policy-1", sequence: 1, state: "DRAFT", policy: safePolicy, reason: "모의 자동화", created_at: "2026-08-04T01:00:00Z", validated_at: null, activated_at: null });
+      if (path.endsWith("/validate")) return jsonResponse({ version_id: "policy-1", sequence: 1, state: "VALIDATED", policy: safePolicy, reason: "모의 자동화", created_at: "2026-08-04T01:00:00Z", validated_at: "2026-08-04T01:01:00Z", activated_at: null });
+      if (path === "/api/v1/auth/reauth/totp") return jsonResponse({ reauth_proof: "policy-proof", expires_at: "2026-08-04T01:05:00Z" });
+      if (path.endsWith("/activate")) { active = true; return jsonResponse({ version_id: "policy-1", sequence: 1, state: "ACTIVE", policy: safePolicy, reason: "모의 자동화", created_at: "2026-08-04T01:00:00Z", validated_at: "2026-08-04T01:01:00Z", activated_at: "2026-08-04T01:02:00Z" }); }
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CrestaConsole />);
+
+    await user.click(await screen.findByRole("button", { name: /전략·설정/ }));
+    expect(await screen.findByText("안전 기본값 · 미저장")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("일반 매수 실행 모드"), "AUTOMATIC");
+    await user.type(screen.getByLabelText("변경 사유"), "모의 자동화");
+    await user.click(screen.getByRole("button", { name: "변경안 검증" }));
+    expect(await screen.findByRole("dialog", { name: "실행 권한 활성화" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("현재 TOTP 코드"), "123456");
+    await user.click(screen.getByRole("button", { name: "활성화" }));
+    expect(await screen.findByText(/새 활성 버전으로 적용/)).toBeInTheDocument();
+    expect(await screen.findByText("policy-1")).toBeInTheDocument();
+    const proofCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/auth/reauth/totp");
+    expect(JSON.parse(String(proofCall?.[1]?.body))).toEqual(expect.objectContaining({
+      target_action: "EXECUTION_POLICY_ACTIVATE", target_id: "policy-1",
+    }));
+  });
+});
