@@ -269,6 +269,7 @@ reconciliation_run:
 | REC-079 | worker가 실행한 clean 대조도 reconciliation 함수 단독으로 READY를 만들지 않는다. 호출자가 현재 lease·LOGIN·구독을 재검증한 뒤 별도 transaction에서 READY를 확정한다. |
 | REC-080 | `00`·`04` 실시간 이벤트는 직접 주문·체결·포지션 변경 근거가 아니라 REST 대조 trigger로만 사용한다. 1초 안의 연속 이벤트는 하나로 합칠 수 있다. |
 | REC-081 | 주기·이벤트 대조 중 mismatch는 즉시 `HALTED`, 조회 실패는 `DEGRADED`로 전환하며 이전 READY 상태를 보존하지 않는다. |
+| REC-082 | `00`·`04` 이벤트를 수신하면 debounce 대기를 시작하는 즉시 gate를 `RECONCILING/BROKER_EVENT_PENDING`으로 전환하고 신규 주문 polling을 중지한다. 병합 대기 중 연속 이벤트는 대기 시각을 무한히 늘리지 않으며, REST 대조가 mismatch 없이 완료된 후에만 polling을 재개한다. |
 
 ## 4. 오류·예외 또는 경계 조건
 

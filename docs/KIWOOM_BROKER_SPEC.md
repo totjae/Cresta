@@ -408,6 +408,7 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 | KIW-133 | worker 재시작 시 `SUBMITTING`·`UNKNOWN` 주문은 자동 재전송하지 않고 시작 재동기화에서 불일치로 처리해 거래 gate를 `HALTED`로 유지한다. |
 | KIW-134 | 송신 결과가 `UNKNOWN`이면 worker는 polling을 중단하고 즉시 `ORDER_OUTCOME_UNKNOWN` trigger로 전체 계좌 재동기화를 수행한다. 결과를 유일하게 식별하지 못하면 자동 추정·편입하지 않는다. |
 | KIW-135 | `ACKNOWLEDGED` 또는 `REJECTED` 결과는 중복 송신하지 않는다. `ACKNOWLEDGED` 이후 실제 OPEN·체결 상태 반영은 Broker 이벤트 및 snapshot 상태 적용 단계에서 구현한다. |
+| KIW-136 | Active worker가 계좌 실시간 `00`·`04` 이벤트를 수신하면 원본 payload를 영속화하거나 직접 체결로 적용하지 않고, 즉시 주문 송신 gate를 닫은 뒤 debounce된 `BROKER_EVENT` REST 대조를 실행한다. |
 
 ## 4. 오류·예외 또는 경계 조건
 

@@ -21,11 +21,11 @@
 | 거래 세션과 감시 일정 | `docs/TRADING_SESSION_SPEC.md` | 명세 완료 | NXT는 키움 모의투자 검증 불가 |
 | 주문 가격과 미체결 처리 | `docs/ORDER_EXECUTION_SPEC.md` | 구현 중 | Paper 상태 처리와 키움 영속 CREATED polling·ACK/REJECTED/UNKNOWN·즉시 대조 구현; Guard·가격정책·실제 모의주문 미검증 |
 | 주문 상태 머신과 키움 매핑 | `docs/ORDER_STATE_MACHINE_SPEC.md` | 구현 중 | Paper 전이·수량 불변·멱등성 구현, 키움 이벤트 필드 매핑은 잠정 |
-| 계좌·주문 재동기화 | `docs/RECONCILIATION_SPEC.md` | 구현 중 | snapshot 대조와 상시 worker READY·재시작 fencing은 실서버 통과; 이벤트 장애주입 미검증 |
+| 계좌·주문 재동기화 | `docs/RECONCILIATION_SPEC.md` | 구현 중 | snapshot 대조와 상시 worker READY·재시작 fencing은 실서버 통과; `00`·`04` 이벤트 즉시 gate 차단·debounce·BROKER_EVENT 대조 로컬 통과, 실제 체결·장애주입 미검증 |
 | 시스템 아키텍처 | `docs/SYSTEM_DESIGN.md` | 구현 중 | Backend·Console·동적 DNS gateway·키움 worker polling 구현, Watch/AI/Guard worker 미구현 |
 | HTTP/WebSocket API | `docs/API_SPEC.md` | 구현 중 | 인증·system health(키움 구성 상태 포함)·주문/체결·포지션·최신 quote 조회 구현, 거래 명령·WebSocket stream 미구현 |
 | UI 콘셉트 참고자료 | `stitch_cresta_ai_intraday_trading_system/` | 참고자료 | 실제 Console 구현물이 아님 |
-| 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | 인증·snapshot·worker는 실서버 통과; 주문 Adapter·limiter·FIFO polling·UNKNOWN 즉시 대조 자동시험 통과, 실제 모의주문 미검증 |
+| 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | 인증·snapshot·worker는 실서버 통과; 주문 Adapter·limiter·FIFO polling·UNKNOWN 즉시 대조·계좌 이벤트 pending gate 자동시험 통과, 실제 모의주문 미검증 |
 | Guard 리스크·비상정지 | `docs/GUARD_RISK_SPEC.md` | 명세 완료 | MVP 기본값·허용범위 확정, 모의시험 후 조정 가능 |
 | 사용자 설정·적용 | `docs/CONFIGURATION_SPEC.md` | 명세 완료 | Web UI 연계 명세 완료, 코드 미구현 |
 | Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, Paper 읽기 전용 화면과 Watch stream 상태 표시 구현·로컬 검증, 주문 생성·승인·설정·상세 Watch 화면 미구현 |

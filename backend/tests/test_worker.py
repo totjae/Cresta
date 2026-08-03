@@ -68,6 +68,35 @@ class ControlledWebSocket:
         self.closed = True
 
 
+class AccountEventWebSocket:
+    def __init__(self) -> None:
+        self.opened_with: str | None = None
+        self.closed = False
+        self.on_first_event = None
+        self.on_pending = None
+        self._event_sent = False
+        self._pending_inspected = False
+
+    async def open(self, token: str) -> None:
+        self.opened_with = token
+
+    async def receive(self) -> str:
+        if not self._event_sent:
+            self._event_sent = True
+            assert self.on_first_event is not None
+            self.on_first_event()
+            return "ACCOUNT_EVENT"
+        if not self._pending_inspected:
+            self._pending_inspected = True
+            assert self.on_pending is not None
+            self.on_pending()
+        await asyncio.sleep(0.05)
+        return "OTHER"
+
+    async def close(self) -> None:
+        self.closed = True
+
+
 def _configured_settings(tmp_path: Path) -> Settings:
     files = []
     for name, value in (("key", "k"), ("secret", "s"), ("account", "1234567811")):
@@ -215,3 +244,68 @@ def test_worker_unknown_order_immediately_reconciles_and_stops_dispatch(
         "reconciliation_trigger": "ORDER_OUTCOME_UNKNOWN",
     }
     assert len(client.order_requests) == 1
+
+
+def test_account_event_closes_gate_until_broker_reconciliation_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+    session_factory: sessionmaker[Session],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(worker_module, "SessionLocal", session_factory)
+    client = SnapshotClient()
+    socket = AccountEventWebSocket()
+    worker = worker_module.KiwoomBrokerWorker(
+        _configured_settings(tmp_path),
+        client=client,
+        websocket=socket,
+        owner_id="worker-owner-account-event",
+    )
+    observed: dict[str, object] = {}
+
+    socket.on_first_event = lambda: _queue_order(session_factory)
+
+    def inspect_pending() -> None:
+        with session_factory() as db:
+            status = get_broker_status(db)
+            observed.update(
+                pending_state=status.state,
+                pending_gate=status.gate_status,
+                pending_reason=status.gate_reason,
+                requests_before_reconciliation=len(client.order_requests),
+            )
+
+    socket.on_pending = inspect_pending
+
+    original_place_order = client.place_order
+
+    def place_order_after_reconciliation(
+        request: KiwoomOrderRequest,
+    ) -> KiwoomOrderAcknowledgement:
+        with session_factory() as db:
+            latest_run = db.scalar(
+                select(ReconciliationRun).order_by(ReconciliationRun.started_at.desc())
+            )
+            status = get_broker_status(db)
+            assert latest_run is not None
+            observed.update(
+                trigger_before_send=latest_run.trigger,
+                gate_before_send=status.gate_status,
+            )
+        result = original_place_order(request)
+        worker.stop()
+        return result
+
+    monkeypatch.setattr(client, "place_order", place_order_after_reconciliation)
+
+    assert asyncio.run(worker.run()) == 0
+
+    assert observed == {
+        "pending_state": "RECONCILING",
+        "pending_gate": "RECONCILING",
+        "pending_reason": "BROKER_EVENT_PENDING",
+        "requests_before_reconciliation": 0,
+        "trigger_before_send": "BROKER_EVENT",
+        "gate_before_send": "READY",
+    }
+    assert len(client.order_requests) == 1
+    assert socket.closed is True

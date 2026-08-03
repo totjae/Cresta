@@ -255,6 +255,7 @@
 | T-KIW-035 | KIW-132~133, STM-025 | CREATED·SUBMITTING·UNKNOWN 주문별 worker 시작 대조 | CREATED는 Broker 불일치 아님, SUBMITTING·UNKNOWN은 fail-closed, 자동 재송신 0회 | 통과 (2026-08-04, 자동) |
 | T-KIW-036 | KIW-134, ORD-038 | polling 송신 결과 UNKNOWN | 다음 주문 미처리, 즉시 ORDER_OUTCOME_UNKNOWN 전체 재동기화, 식별 불가 시 HALTED | 통과 (2026-08-04, 자동) |
 | T-KIW-037 | KIW-135 | ACKNOWLEDGED·REJECTED 주문이 polling 대상에 함께 존재 | 기존 결과 주문 재송신 0회, CREATED만 대상 | 통과 (2026-08-04, 자동) |
+| T-KIW-038 | KIW-136, REC-080~082 | `00`·`04` 이벤트 수신 후 debounce 중 CREATED 주문 존재 | 즉시 RECONCILING, 대조 전 송신 0회, BROKER_EVENT 대조 성공 후에만 polling 재개 | 통과 (2026-08-04, 자동) |
 | T-OPS-011 | OPS-003 | API 컨테이너 IP 변경 후 gateway를 재시작하지 않고 health·login 요청 | Docker DNS 재해석 후 새 API로 연결되고 502가 지속되지 않음 | 설정 계약 통과·실서버 대기 |
 
 ## 4. 시험 환경
@@ -289,7 +290,7 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 108개 통과 | 인증·Paper·Watch, 키움 snapshot·lease/fencing·WebSocket, PostgreSQL SKIP LOCKED FIFO polling, 재시작 상태 구분과 UNKNOWN 즉시 재동기화 포함; 실제 모의주문 제외 |
+| Python 단위·API 시험 | `python -m pytest` | 109개 통과 | 인증·Paper·Watch, 키움 snapshot·lease/fencing·WebSocket, PostgreSQL SKIP LOCKED FIFO polling, 재시작 상태 구분, UNKNOWN 즉시 재동기화, 계좌 이벤트 즉시 gate 차단 포함; 실제 모의주문 제외 |
 | Console component 시험 | `npm test` | 4개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃, Paper 조회 전용 화면 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
@@ -303,4 +304,4 @@
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
 | Watch 상태 UI 변경 점검 | component·TypeScript·production build | 통과 | 인앱 브라우저의 로컬 URL 정책 차단으로 이번 변경의 추가 시각 점검은 미실행 |
 
-검증된 세부 동작은 인증·Paper·Watch 외에 키움 MOCK 인증·snapshot, WebSocket worker 안전 게이트, 주문 TR·limiter·FIFO polling·ACK/REJECTED/UNKNOWN과 즉시 재동기화를 포함한다. 실제 서버의 MOCK 인증·시세·계좌 일치는 2026-08-03, 빈 계좌 대조와 worker READY·재시작 fencing은 2026-08-04 통과했다. Docker DNS gateway 설정은 로컬 계약만 통과했으며 서버의 API 재생성 후 무중단 재해석, 분봉·지표·Guard 가격정책·실제 모의주문·PostgreSQL 다중 worker 경쟁은 미검증이다.
+검증된 세부 동작은 인증·Paper·Watch 외에 키움 MOCK 인증·snapshot, WebSocket worker 안전 게이트, 계좌 이벤트 수신 즉시 polling 차단과 debounce된 REST 대조, 주문 TR·limiter·FIFO polling·ACK/REJECTED/UNKNOWN과 즉시 재동기화를 포함한다. 실제 서버의 MOCK 인증·시세·계좌 일치는 2026-08-03, 빈 계좌 대조와 worker READY·재시작 fencing은 2026-08-04 통과했다. Docker DNS gateway 설정은 로컬 계약만 통과했으며 서버의 API 재생성 후 무중단 재해석, 분봉·지표·Guard 가격정책·실제 모의주문·PostgreSQL 다중 worker 경쟁은 미검증이다.

@@ -229,6 +229,14 @@ class KiwoomBrokerWorker:
             except TimeoutError:
                 continue
             if event == "ACCOUNT_EVENT" and event_due is None:
+                self._require_state(
+                    "RECONCILING",
+                    websocket_connected=True,
+                    subscriptions_ready=True,
+                    gate_status="RECONCILING",
+                    gate_reason="BROKER_EVENT_PENDING",
+                )
+                order_dispatch_enabled = False
                 event_due = datetime.now(UTC) + timedelta(
                     seconds=self.settings.kiwoom_event_debounce_seconds
                 )
