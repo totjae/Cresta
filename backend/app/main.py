@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
+from app.api.decisions import router as decisions_router
 from app.api.orders import router as orders_router
 from app.api.positions import router as positions_router
 from app.api.quotes import router as quotes_router
@@ -18,6 +19,7 @@ from app.broker.mock_order_test import MockOrderTestError
 from app.errors import ResourceNotFoundError
 from app.execution_policy import ExecutionPolicyError
 from app.ids import uuid7
+from app.mock_ai import MockDecisionError
 
 logger = logging.getLogger("cresta.api")
 
@@ -109,6 +111,20 @@ def create_app() -> FastAPI:
             },
         )
 
+    @application.exception_handler(MockDecisionError)
+    async def mock_decision_error(request: Request, exc: MockDecisionError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": "Mock AI 판단을 생성할 수 없습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": False,
+                }
+            },
+        )
+
     @application.exception_handler(RequestValidationError)
     async def validation_error(request: Request, _: RequestValidationError) -> JSONResponse:
         return JSONResponse(
@@ -157,6 +173,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     application.include_router(auth_router, prefix="/api/v1")
+    application.include_router(decisions_router, prefix="/api/v1")
     application.include_router(orders_router, prefix="/api/v1")
     application.include_router(positions_router, prefix="/api/v1")
     application.include_router(quotes_router, prefix="/api/v1")

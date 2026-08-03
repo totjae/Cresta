@@ -223,6 +223,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid #82b4ff; outline-
 .execution-policy-row small { margin-top: 5px; color: var(--muted); font-size: 9px; }
 .execution-policy-row select, .reason-field input { width: 100%; min-height: 42px; padding: 0 12px; border: 1px solid #31425e; border-radius: 7px; background: #081225; color: var(--text); }
 .reason-field { display: grid; gap: 8px; margin-bottom: 14px; color: #9eabc0; font-size: 10px; font-weight: 700; }
+.decision-warning { border-color: #705a2f; color: #e5c071; }
+.decision-control { margin-bottom: 16px; }
+.decision-control .diagnostic-form { max-width: 650px; }
+.decision-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.decision-card .decision-action { display: flex; align-items: baseline; gap: 12px; margin: 18px 0; }
+.decision-action strong { color: #8bb8ff; font: 800 25px/1 ui-monospace, monospace; }
+.decision-action span, .decision-card > small { color: var(--muted); font-size: 9px; }
+.decision-card dl { margin: 0; }
+.decision-card dl div { display: flex; justify-content: space-between; gap: 14px; padding: 9px 0; border-top: 1px solid #25354d; }
+.decision-card dt { color: var(--muted); font-size: 9px; }
+.decision-card dd { overflow: hidden; margin: 0; color: #cdd8e8; font-size: 9px; text-overflow: ellipsis; }
+.reason-codes { color: #87a6d0; font: 9px/1.6 ui-monospace, monospace; }
 .mobile-nav, .scrim { display: none; }
 
 @media (max-width: 1100px) {
@@ -285,6 +297,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #82b4ff; outline-
   .diagnostic-form { grid-template-columns: 1fr; }
   .diagnostic-summary { grid-template-columns: repeat(2, 1fr); }
   .execution-policy-row { grid-template-columns: 1fr; gap: 9px; }
+  .decision-grid { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

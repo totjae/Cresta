@@ -175,3 +175,13 @@ core_output:
 - 첫 Scout·Core 모델 제공자와 모델 식별자
 - 실제 모의매매 결과에 따른 점수·검토 임계값
 - 뉴스·공시는 첫 버전 AI 입력에서 제외하고 위험 경고를 위한 별도 신뢰 데이터 공급원이 정해진 뒤 추가한다.
+
+### 6.1 결정론적 Mock 판단 1차 구현 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| AI-070 | 첫 구현은 외부 모델 대신 `deterministic-mock-v1`을 사용하며 동일 market snapshot과 설정 버전에서 동일 Scout·Core 출력을 생성한다. |
+| AI-071 | 진단 판단은 `MarketStreamState.current_snapshot_id`가 가리키는 불변 snapshot만 입력으로 사용하고 품질·최신성·거래상태가 부적합하면 `RISK_BLOCK`을 기록한다. |
+| AI-072 | 진단 판단은 최신 활성 실행 권한 버전을 읽어 `DISABLED`, `APPROVAL_REQUIRED`, `GUARD_BLOCKED`, `NO_ACTION` 중 하나의 실행 결과만 기록한다. |
+| AI-073 | Guard와 승인 서비스가 구현되기 전에는 `AUTOMATIC`과 `MANUAL_APPROVAL` 모두 주문·승인 리소스를 생성하지 않으며 실행 결과로 미구현 안전 차단을 명시한다. |
+| AI-074 | 같은 `evaluation_request_id`는 하나의 판단만 생성하며 모델·snapshot·설정 버전·구조화 출력·유효시간을 저장한다. |

@@ -107,6 +107,57 @@ class ExecutionPolicyHistoryResponse(StrictModel):
     items: list[ExecutionPolicyVersionResponse]
 
 
+class MockDecisionRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    evaluation_request_id: str = Field(min_length=16, max_length=64)
+    symbol: str = Field(pattern=r"^\d{6}$")
+    market: Literal["KRX", "NXT"] = "KRX"
+
+
+class ScoutOutputResponse(StrictModel):
+    trend_state: str
+    volume_state: str
+    volatility_state: str
+    entry_score: int
+    exit_risk_score: int
+    core_review_required: bool
+    suggested_review: str
+    reason_codes: list[str]
+
+
+class CoreOutputResponse(StrictModel):
+    action: str
+    confidence: Decimal
+    risk_level: str
+    sell_ratio: Decimal | None
+    reason_codes: list[str]
+
+
+class DecisionResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    decision_id: str
+    evaluation_request_id: str
+    symbol: str
+    market: str
+    input_snapshot_id: str
+    model_id: str
+    prompt_version: str
+    scout: ScoutOutputResponse
+    core: CoreOutputResponse
+    configuration_version_id: str | None
+    execution_mode: str | None
+    execution_outcome: str
+    valid_until: datetime
+    created_at: datetime
+
+
+class DecisionListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[DecisionResponse]
+
+
 class MessageResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str

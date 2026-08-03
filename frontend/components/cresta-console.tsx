@@ -31,6 +31,8 @@ import {
   ApiError,
   authApi,
   BrokerStatus,
+  decisionApi,
+  DecisionData,
   ExecutionMode,
   ExecutionPolicy,
   orderApi,
@@ -45,7 +47,7 @@ import {
 } from "../lib/api";
 
 type Screen = "boot" | "credentials" | "totp" | "console";
-type ConsolePage = "dashboard" | "positions" | "orders" | "settings" | "system";
+type ConsolePage = "dashboard" | "positions" | "orders" | "decisions" | "settings" | "system";
 
 const SAFE_AUTH_ERROR = "인증 정보를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.";
 
@@ -62,7 +64,7 @@ const navigation = [
 ] as const;
 
 const activeNavigation = navigation.map((item) =>
-  item[0] === "system" || item[0] === "settings"
+  item[0] === "system" || item[0] === "settings" || item[0] === "decisions"
     ? ([item[0], item[1], item[2], true] as const)
     : item,
 );
@@ -245,6 +247,7 @@ function ConsoleShell({
           {page === "dashboard" && <DashboardPage session={session} health={health} />}
           {page === "orders" && <OrdersPage onSessionExpired={onSessionExpired} />}
           {page === "positions" && <PositionsPage onSessionExpired={onSessionExpired} />}
+          {page === "decisions" && <DecisionsPage session={session} onSessionExpired={onSessionExpired} />}
           {page === "settings" && <SettingsPage session={session} onSessionExpired={onSessionExpired} />}
           {page === "system" && <SystemPage session={session} onSessionExpired={onSessionExpired} />}
         </div>
@@ -358,6 +361,45 @@ function SettingsPage({ session, onSessionExpired }: { session: SessionData; onS
       </form>}
     </section>
     {pendingVersion && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="policy-confirm-title"><span className="section-kicker">TOTP REAUTHENTICATION</span><h2 id="policy-confirm-title">실행 권한 활성화</h2><p>검증된 버전만 운영에 적용됩니다. 자동 실행 항목은 이후 건별 TOTP 없이 Guard 검사 후 실행됩니다.</p><form onSubmit={activate}><label htmlFor="policy-totp">현재 TOTP 코드</label><input id="policy-totp" className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus /><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setPendingVersion(""); setTotp(""); }} disabled={busy}>취소</button><button type="submit" className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "적용 중" : "활성화"}</button></div></form></section></div>}
+  </>;
+}
+
+function DecisionsPage({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {
+  const [items, setItems] = useState<DecisionData[]>([]);
+  const [symbol, setSymbol] = useState("005930");
+  const [market, setMarket] = useState<"KRX" | "NXT">("KRX");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try { setItems((await decisionApi.list(signal)).items); }
+    catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("AI 판단 기록을 불러오지 못했습니다.");
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [load]);
+
+  async function evaluate(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setMessage("");
+    try {
+      const decision = await decisionApi.mockEvaluate(session.csrf_token, symbol, market);
+      setItems((current) => [decision, ...current.filter((item) => item.decision_id !== decision.decision_id)]);
+      setMessage(`Mock 판단이 ${decision.core.action} / ${decision.execution_outcome}으로 기록되었습니다.`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("최신 영속 시세 snapshot이 없거나 판단 입력이 안전 기준을 충족하지 못했습니다.");
+    } finally { setBusy(false); }
+  }
+
+  return <>
+    <PageHeading kicker="MOCK SCOUT · CORE" title="AI 판단" description="결정론적 Mock 모델로 판단 계약과 실행 권한 분기를 검증합니다." />
+    <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> 이 화면의 판단은 주문이나 승인을 생성하지 않습니다. AUTOMATIC도 Guard 미구현 상태에서는 차단됩니다.</div>
+    {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
+    <section className="panel decision-control"><div className="panel-head"><div><Bot size={18} /><span>최신 snapshot 진단</span></div><span className="status-pill neutral">deterministic-mock-v1</span></div><form className="diagnostic-form" onSubmit={evaluate}><label htmlFor="decision-symbol">종목코드</label><input id="decision-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required /><label htmlFor="decision-market">시장</label><select id="decision-market" value={market} onChange={(event) => setMarket(event.target.value as "KRX" | "NXT")}><option value="KRX">KRX</option><option value="NXT">NXT</option></select><button className="primary-button" disabled={busy || symbol.length !== 6}>{busy ? "판단 중" : "Mock 판단 실행"}</button></form></section>
+    <section className="decision-grid">{items.length === 0 ? <article className="panel empty-state"><Bot size={26} /><h3>저장된 AI 판단이 없습니다</h3><p>최신 시세 snapshot이 준비된 종목으로 진단을 실행하세요.</p></article> : items.map((item) => <article className="panel decision-card" key={item.decision_id}><div className="panel-head"><div><Bot size={17} /><span>{item.symbol} · {item.market}</span></div><OrderStatus status={item.execution_outcome} /></div><div className="decision-action"><strong>{item.core.action}</strong><span>confidence {Number(item.core.confidence).toFixed(2)}</span></div><dl><div><dt>Scout</dt><dd>{item.scout.trend_state} · {item.scout.entry_score}점</dd></div><div><dt>실행 모드</dt><dd>{item.execution_mode ?? "해당 없음"}</dd></div><div><dt>설정 버전</dt><dd className="mono">{item.configuration_version_id ?? "SAFE_DEFAULT"}</dd></div><div><dt>snapshot</dt><dd className="mono">{item.input_snapshot_id}</dd></div></dl><p className="reason-codes">{item.core.reason_codes.join(" · ")}</p><small>{formatDateTime(item.created_at)} · {item.model_id}</small></article>)}</section>
   </>;
 }
 
@@ -540,7 +582,7 @@ function OrderDetailPanel({ detail, onClose }: { detail: OrderDetail; onClose: (
 }
 
 function OrderStatus({ status }: { status: string }) {
-  const risk = status === "UNKNOWN" || status === "RECONCILING";
+  const risk = status === "UNKNOWN" || status === "RECONCILING" || status === "GUARD_BLOCKED";
   const complete = status === "FILLED" || status === "OPEN";
   return <span className={`order-status ${risk ? "risk" : complete ? "complete" : "neutral"}`}>{status}</span>;
 }

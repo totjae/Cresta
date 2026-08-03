@@ -187,3 +187,10 @@ market_snapshots(symbol, market, observed_at desc)
 | --- | --- |
 | DB-026 | `configuration_versions`는 scope, target, category, sequence, state, payload hash와 생성·검증·활성화 시각을 저장하고 동일 대상·범주의 `ACTIVE` 행을 하나로 제한한다. |
 | DB-027 | 실행 권한 payload는 정규화된 JSON과 SHA-256 해시로 저장하고 `ACTIVE` 또는 `SUPERSEDED` 행을 API로 수정하지 않는다. |
+
+### 6.2 AI 판단 저장 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-028 | `decisions`는 고유 evaluation request, 입력 snapshot, 모델·프롬프트·스키마 버전, Scout/Core 출력, 실행 권한 버전·모드와 실행 결과를 저장한다. |
+| DB-029 | 판단 유효시간·confidence·reason code와 JSON 출력은 검증된 값만 저장하며 API에서 기존 판단을 수정·삭제하지 않는다. |

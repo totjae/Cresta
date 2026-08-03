@@ -176,6 +176,53 @@ class ConfigurationVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Decision(Base):
+    __tablename__ = "decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('BUY','WAIT','REJECT','RISK_BLOCK','HOLD','TIGHTEN_STOP',"
+            "'PARTIAL_SELL','FULL_SELL','EMERGENCY_EXIT')",
+            name="ck_decisions_action",
+        ),
+        CheckConstraint(
+            "execution_mode IS NULL OR execution_mode IN "
+            "('AUTOMATIC','MANUAL_APPROVAL','DISABLED')",
+            name="ck_decisions_execution_mode",
+        ),
+        CheckConstraint(
+            "execution_outcome IN ('NO_ACTION','DISABLED','APPROVAL_REQUIRED','GUARD_BLOCKED')",
+            name="ck_decisions_execution_outcome",
+        ),
+        Index("ix_decisions_symbol_created", "symbol", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    evaluation_request_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    input_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("market_snapshots.id"), nullable=False, index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    market: Mapped[str] = mapped_column(String(16), nullable=False)
+    decision_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    model_provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    scout_output_json: Mapped[str] = mapped_column(Text, nullable=False)
+    core_output_json: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason_codes_json: Mapped[str] = mapped_column(Text, nullable=False)
+    valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    configuration_version_id: Mapped[str | None] = mapped_column(String(36))
+    execution_mode: Mapped[str | None] = mapped_column(String(24))
+    execution_outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    validation_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class TradingGate(Base):
     __tablename__ = "trading_gates"
     __table_args__ = (

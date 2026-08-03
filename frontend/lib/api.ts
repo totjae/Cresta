@@ -31,6 +31,22 @@ export type ExecutionPolicyVersion = {
   validated_at: string | null;
   activated_at: string | null;
 };
+export type DecisionData = {
+  decision_id: string;
+  evaluation_request_id: string;
+  symbol: string;
+  market: string;
+  input_snapshot_id: string;
+  model_id: string;
+  prompt_version: string;
+  scout: { trend_state: string; entry_score: number; reason_codes: string[] };
+  core: { action: string; confidence: string; risk_level: string; reason_codes: string[] };
+  configuration_version_id: string | null;
+  execution_mode: string | null;
+  execution_outcome: string;
+  valid_until: string;
+  created_at: string;
+};
 
 export type SystemHealth = {
   schema_version: "1.0";
@@ -245,6 +261,20 @@ export const settingsApi = {
     return request<ExecutionPolicyVersion>(`/api/v1/settings/execution-policy/${encodeURIComponent(versionId)}/activate`, {
       method: "POST", headers: { "X-CSRF-Token": csrfToken },
       body: JSON.stringify({ schema_version: "1.0", reauth_proof: reauthProof }),
+    });
+  },
+};
+
+export const decisionApi = {
+  list(signal?: AbortSignal) {
+    return request<{ items: DecisionData[] }>("/api/v1/decisions", { signal });
+  },
+  mockEvaluate(csrfToken: string, symbol: string, market: "KRX" | "NXT") {
+    return request<DecisionData>("/api/v1/decisions/mock-evaluate", {
+      method: "POST", headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        schema_version: "1.0", evaluation_request_id: globalThis.crypto.randomUUID(), symbol, market,
+      }),
     });
   },
 };

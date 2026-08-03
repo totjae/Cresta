@@ -244,3 +244,11 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `approval.req
 | API-043 | 실행 권한은 `GET /settings/execution-policy`, `POST /settings/execution-policy/drafts`, `POST /settings/execution-policy/{id}/validate`, `POST /settings/execution-policy/{id}/activate`, `GET /settings/execution-policy/history`로 관리한다. |
 | API-044 | 실행 권한 활성화 요청은 CSRF, 공백이 아닌 변경 사유, 대상 버전에 결합된 TOTP 재인증 증명을 요구한다. |
 | API-045 | API는 활성 버전이 없을 때 안전 기본값과 `active_version_id=null`을 반환하며 이를 영속 활성화로 표현하지 않는다. |
+
+### 8.2 Mock AI 진단 API 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| API-099 | `POST /decisions/mock-evaluate`는 CSRF와 고유 요청 ID를 요구하고 최신 영속 snapshot으로 진단 판단 하나를 생성한다. |
+| API-100 | `GET /decisions`와 `GET /decisions/{id}`는 모델·snapshot·설정 버전·Scout/Core 출력·실행 모드와 안전 차단 결과를 반환한다. |
+| API-101 | Mock 진단 API는 주문·승인·설정·시장 snapshot을 변경하지 않으며 시세가 없거나 오래되면 주문 가능 행동을 반환하지 않는다. |
