@@ -263,6 +263,10 @@ sudo docker compose \
 
 정상 출력은 `state=READY`, `gate_status=READY`, `lease_valid=true`, `websocket_connected=true`, `subscriptions_ready=true`다. status 명령은 READY가 아니면 종료 코드 5를 반환한다. 실제 token·전체 계좌번호·owner ID는 출력하지 않는다. worker를 이중 기동해도 lease를 가진 하나만 키움에 연결하며 대기 인스턴스는 직접 조회하지 않는다.
 
+2026-08-04 운영 서버에서 위 상태가 모두 정상이고 종료 코드가 0인 것을 확인했다. worker 재시작 후에도 `READY`로 복귀했으며 fencing token이 1에서 2로 증가했다. 이는 재시작 승계 검증이며 두 컨테이너의 동시 경쟁 시험을 대체하지 않는다.
+
+현재 배포 worker에는 키움 주문 polling이 연결되지 않았다. 주문 Adapter와 내부 단발 송신 서비스가 존재하더라도 DB 직접 조작이나 임시 CLI로 호출하지 않는다. 실제 모의주문 시험은 종목·수량·가격과 취소 계획을 정하고 사용자 확인을 받은 별도 절차로 수행한다.
+
 `CRESTA_KIWOOM_ENABLED=true`는 세 secret이 준비되고 출구 IP를 별도로 확인한 뒤에만 적용한다. 이번 단계의 `CONFIGURED`는 파일 준비 상태이며 키움 인증·계좌조회 성공을 뜻하지 않는다.
 
 - 키움이나 네트워크 장애 시 Cresta가 시장 체결을 보장하지 않는다는 경고를 유지한다.

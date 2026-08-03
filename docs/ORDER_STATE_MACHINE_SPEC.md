@@ -38,6 +38,8 @@ REJECTED | UNKNOWN | RECONCILING
 | STM-001 | 사용자 승인 완료를 주문 접수 또는 체결로 간주하지 않는다. |
 | STM-002 | Guard 재검사는 승인 후 주문 생성 직전에 다시 수행한다. |
 | STM-003 | 키움 REST 성공 응답은 체결 완료가 아니라 주문 접수 확인으로 처리한다. |
+| STM-004 | 키움 신규주문 성공 응답의 숫자 7자리 `ord_no`를 확인한 경우에만 `SUBMITTING → ACKNOWLEDGED`로 전이한다. |
+| STM-005 | `SUBMITTING`은 HTTP 호출 전에 영속화하며 해당 상태가 이미 존재하면 자동 재송신하지 않는다. |
 
 ### 3.2 정상 상태 전이
 
@@ -92,6 +94,7 @@ SUBMITTING 또는 CANCEL_PENDING 또는 REPLACE_PENDING
 | STM-020 | 네트워크 시간초과와 응답 유실은 `REJECTED`로 처리하지 않는다. |
 | STM-021 | `UNKNOWN` 상태에서는 같은 매매 의도를 다시 전송하지 않는다. |
 | STM-022 | `UNKNOWN` 주문이 있는 종목은 추가 주문을 잠그고 키움 조회로 대조한다. |
+| STM-023 | 명시적인 `return_code != 0` 업무 거절만 `REJECTED` 후보이며 HTTP 401·timeout·연결 오류·5xx·응답 파싱/필드 오류는 `UNKNOWN` 후보로 처리한다. |
 | STM-023 | 재동기화가 끝나지 않으면 `RECONCILING`을 유지하고 사용자에게 경보한다. |
 
 ### 3.5 키움 API 매핑

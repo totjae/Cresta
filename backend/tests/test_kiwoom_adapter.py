@@ -3,15 +3,23 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from app.broker.kiwoom import (
     ACCOUNT_PATH,
     KiwoomAdapterError,
+    KiwoomCancelRequest,
     KiwoomMockClient,
+    KiwoomOrderOutcomeUnknownError,
+    KiwoomOrderRateLimiter,
+    KiwoomOrderRejectedError,
+    KiwoomOrderRequest,
+    KiwoomReplaceRequest,
     normalize_basic_quote,
     normalize_open_order,
     normalize_position,
@@ -437,3 +445,176 @@ def test_non_json_response_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(KiwoomAdapterError) as invalid:
         client.get_basic_quote("005930", trading_status="TRADING", received_at=now)
     assert invalid.value.code == "KIWOOM_INVALID_RESPONSE"
+
+
+def test_new_buy_and_sell_orders_use_official_contract(tmp_path: Path) -> None:
+    http = FakeHttpClient(
+        [
+            token_response("token"),
+            FakeResponse(200, {"return_code": 0, "ord_no": "1234567", "dmst_stex_tp": "KRX"}),
+            FakeResponse(200, {"return_code": 0, "ord_no": "1234568", "dmst_stex_tp": "KRX"}),
+        ]
+    )
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http)
+
+    buy = client.place_order(
+        KiwoomOrderRequest("005930", "BUY", 2, "LIMIT", Decimal(70000))
+    )
+    sell = client.place_order(
+        KiwoomOrderRequest("005930", "SELL", 1, "MARKET", None)
+    )
+
+    assert buy.broker_order_id == "1234567"
+    assert sell.broker_order_id == "1234568"
+    assert http.calls[1]["headers"]["api-id"] == "kt10000"
+    assert http.calls[1]["json"] == {
+        "dmst_stex_tp": "KRX",
+        "stk_cd": "005930",
+        "ord_qty": "2",
+        "ord_uv": "70000",
+        "trde_tp": "0",
+        "cond_uv": "",
+    }
+    assert http.calls[2]["headers"]["api-id"] == "kt10001"
+    assert http.calls[2]["json"]["ord_uv"] == ""
+    assert http.calls[2]["json"]["trde_tp"] == "3"
+
+
+def test_replace_and_cancel_orders_use_official_contract(tmp_path: Path) -> None:
+    http = FakeHttpClient(
+        [
+            token_response("token"),
+            FakeResponse(
+                200,
+                {
+                    "return_code": 0,
+                    "ord_no": "2234567",
+                    "base_orig_ord_no": "1234567",
+                    "mdfy_qty": "+000000000002",
+                    "dmst_stex_tp": "KRX",
+                },
+            ),
+            FakeResponse(
+                200,
+                {
+                    "return_code": 0,
+                    "ord_no": "3234567",
+                    "base_orig_ord_no": "1234567",
+                    "cncl_qty": "+000000000000",
+                },
+            ),
+        ]
+    )
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http)
+
+    replaced = client.replace_order(
+        KiwoomReplaceRequest("1234567", "005930", 2, Decimal(70100))
+    )
+    cancelled = client.cancel_order(KiwoomCancelRequest("1234567", "005930"))
+
+    assert replaced.affected_quantity == 2
+    assert cancelled.affected_quantity == 0
+    assert http.calls[1]["headers"]["api-id"] == "kt10002"
+    assert http.calls[1]["json"]["mdfy_qty"] == "2"
+    assert http.calls[2]["headers"]["api-id"] == "kt10003"
+    assert http.calls[2]["json"]["cncl_qty"] == "0"
+
+
+@pytest.mark.parametrize(
+    "order_request,code",
+    [
+        (KiwoomOrderRequest("005930", "BUY", 1, "LIMIT", Decimal(70000), "NXT"), "UNSUPPORTED_IN_MOCK"),
+        (KiwoomOrderRequest("A00593", "BUY", 1, "LIMIT", Decimal(70000)), "KIWOOM_INVALID_SYMBOL"),
+        (KiwoomOrderRequest("005930", "BUY", 0, "LIMIT", Decimal(70000)), "KIWOOM_INVALID_ORDER_QUANTITY"),
+        (KiwoomOrderRequest("005930", "BUY", 1, "LIMIT", Decimal("70000.5")), "KIWOOM_INVALID_ORDER_PRICE"),
+        (KiwoomOrderRequest("005930", "BUY", 1, "MARKET", Decimal(70000)), "KIWOOM_INVALID_ORDER_PRICE"),
+    ],
+)
+def test_invalid_new_order_is_blocked_before_http(
+    tmp_path: Path, order_request: KiwoomOrderRequest, code: str
+) -> None:
+    http = FakeHttpClient([])
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http)
+
+    with pytest.raises(KiwoomAdapterError) as invalid:
+        client.place_order(order_request)
+
+    assert invalid.value.code == code
+    assert http.calls == []
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        FakeResponse(401, {}),
+        FakeResponse(500, {}),
+        FakeResponse(200, ValueError("not json")),
+        FakeResponse(200, {"return_code": 0, "ord_no": "bad", "dmst_stex_tp": "KRX"}),
+    ],
+)
+def test_ambiguous_order_response_is_not_retried(
+    tmp_path: Path, response: FakeResponse
+) -> None:
+    http = FakeHttpClient([token_response("token"), response])
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http)
+
+    with pytest.raises(KiwoomOrderOutcomeUnknownError):
+        client.place_order(
+            KiwoomOrderRequest("005930", "BUY", 1, "LIMIT", Decimal(70000))
+        )
+
+    order_calls = [call for call in http.calls if call["url"].endswith("/api/dostk/ordr")]
+    assert len(order_calls) == 1
+
+
+def test_explicit_order_rejection_is_distinct_and_not_retried(tmp_path: Path) -> None:
+    http = FakeHttpClient(
+        [token_response("token"), FakeResponse(200, {"return_code": 8030, "return_msg": "secret"})]
+    )
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http)
+
+    with pytest.raises(KiwoomOrderRejectedError) as rejected:
+        client.place_order(
+            KiwoomOrderRequest("005930", "BUY", 1, "LIMIT", Decimal(70000))
+        )
+
+    assert rejected.value.code == "KIWOOM_ORDER_REJECTED"
+    assert "secret" not in rejected.value.message
+    assert len(http.calls) == 2
+
+
+def test_order_timeout_is_unknown_and_not_retried(tmp_path: Path) -> None:
+    class TimeoutHttpClient(FakeHttpClient):
+        def post(self, url: str, **kwargs: Any) -> FakeResponse:
+            self.calls.append({"url": url, **kwargs})
+            if url.endswith("/api/dostk/ordr"):
+                raise httpx.ReadTimeout("timed out")
+            return self.responses.pop(0)
+
+    http = TimeoutHttpClient([token_response("token")])
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http)
+
+    with pytest.raises(KiwoomOrderOutcomeUnknownError):
+        client.place_order(
+            KiwoomOrderRequest("005930", "BUY", 1, "LIMIT", Decimal(70000))
+        )
+
+    order_calls = [call for call in http.calls if call["url"].endswith("/api/dostk/ordr")]
+    assert len(order_calls) == 1
+
+
+def test_order_rate_limiter_waits_per_tr_with_injected_clock() -> None:
+    now = [10.0]
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    limiter = KiwoomOrderRateLimiter(monotonic=lambda: now[0], sleep=sleep)
+
+    limiter.wait("kt10000")
+    limiter.wait("kt10000")
+    limiter.wait("kt10001")
+
+    assert sleeps == [1.0]

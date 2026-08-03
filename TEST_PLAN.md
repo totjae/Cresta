@@ -243,10 +243,14 @@
 | T-OPS-009 | OPS-002 | host secret이 `0600` 사용자 소유인 상태와 준비 스크립트 실행 후 API 읽기 검사 | 준비 전 API 접근 실패, 실행 후 `10001:10001`·`0400`이며 migration에서 읽기 성공 | 실서버 부분 통과 |
 | T-OPS-010 | OPS-008 | 제한된 host 권한에서 API 이미지 빌드 후 UID와 source import 검사 | 컨테이너는 `10001:10001`이며 `/app/app/broker/kiwoom.py`를 읽고 import 가능 | 통과 (2026-08-03, 실서버 수동) |
 | T-KIW-025 | KIW-111~112, DB-027~029 | 같은 계좌에서 worker 두 개가 동시에 lease 획득 | 하나만 획득하고 만료·fencing 전에는 승계 불가 | 단위 통과 |
-| T-KIW-026 | KIW-113~115 | LOGIN·REG·재동기화 단계별 성공/실패 | 모두 성공한 현재 lease owner만 READY, 실패는 fail-closed | 단위 통과 |
+| T-KIW-026 | KIW-113~115 | LOGIN·REG·재동기화 단계별 성공/실패 | 모두 성공한 현재 lease owner만 READY, 실패는 fail-closed | 통과 (단위·2026-08-04 실서버) |
 | T-KIW-027 | KIW-114, KIW-116 | PING과 `00`·`04` 이벤트 수신 | PING echo, 계좌 이벤트를 REST 대조 trigger로 분류 | 단위 통과·실서버 대기 |
-| T-KIW-028 | KIW-117~119 | token 교체·단절·lease 상실·종료 | 재로그인·backoff·READY 해제·소유 lease만 해제 | 부분 단위 통과·장애주입 대기 |
+| T-KIW-028 | KIW-117~119 | token 교체·단절·lease 상실·종료 | 재로그인·backoff·READY 해제·소유 lease만 해제 | 재시작·fencing 실서버 통과, 장애주입 대기 |
 | T-KIW-029 | KIW-120, API-087~089 | CLI·HTTP Broker 상태 조회 | 연결 상태 제공, owner/token/계좌/원문 오류 미노출 | 단위 통과 |
+| T-KIW-030 | KIW-121~123 | 매수·매도·정정·취소 공식 fixture와 잘못된 시장·종목·수량·가격 | 정확한 TR/body, KRX·7자리 주문번호 검증, 부적합 요청 송신 전 차단 | 통과 (2026-08-04, 자동) |
+| T-KIW-031 | KIW-124~125, STM-004·023, ORD-035 | 주문 성공·업무거절·401·timeout·5xx·비 JSON 응답 | 성공만 ACK 후보, 업무거절만 REJECTED 후보, 불명확 오류는 UNKNOWN 후보, HTTP 재송신 없음 | 통과 (2026-08-04, 자동 fixture) |
+| T-KIW-032 | KIW-126 | 같은 TR의 연속 주문과 서로 다른 TR 호출 | TR별 최소 1초 간격과 주입 가능한 clock 기반 결정론적 검증 | 통과 (2026-08-04, 자동 clock) |
+| T-KIW-033 | KIW-127~128, STM-005, ORD-034·036 | 같은 내부 주문 재호출·SUBMITTING 중 crash 가정 | 최초 호출 전 상태 commit, 후속 호출 송신 0회, 공개 주문 명령 없음 | 통과 (2026-08-04, 자동) |
 
 ## 4. 시험 환경
 
@@ -280,7 +284,7 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 80개 통과 | 인증·Paper·Watch, 키움 snapshot·DB 대조, lease/fencing, WebSocket 계약, worker READY gate와 상태 CLI/API 포함; 주문 송신 제외 |
+| Python 단위·API 시험 | `python -m pytest` | 99개 통과 | 인증·Paper·Watch, 키움 snapshot·DB 대조, lease/fencing, WebSocket 계약, worker READY gate, 주문 TR·limiter·ACK/REJECTED/UNKNOWN 내부 송신 포함; 실제 모의주문 제외 |
 | Console component 시험 | `npm test` | 4개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃, Paper 조회 전용 화면 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
@@ -294,4 +298,4 @@
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
 | Watch 상태 UI 변경 점검 | component·TypeScript·production build | 통과 | 인앱 브라우저의 로컬 URL 정책 차단으로 이번 변경의 추가 시각 점검은 미실행 |
 
-검증된 세부 동작은 인증·Paper·Watch 외에 키움 MOCK URL 강제, 메모리 token 단일 갱신, 401 재인증, 5개 REST API mapping, 읽기 전용 대조와 WebSocket worker 안전 게이트를 포함한다. 실제 서버의 MOCK 인증·시세·계좌 일치는 2026-08-03, 빈 계좌의 미체결·체결·잔고 snapshot 대조는 2026-08-04 통과했다. 상시 WebSocket worker·분봉·지표·호가 가격정책·주문 송신·PostgreSQL 다중 worker 경쟁은 실서버 미검증이다.
+검증된 세부 동작은 인증·Paper·Watch 외에 키움 MOCK URL 강제, 메모리 token 단일 갱신, 일반 조회의 401 재인증, 계좌 snapshot, WebSocket worker 안전 게이트, 주문 TR·1초 limiter·ACK/REJECTED/UNKNOWN 내부 송신을 포함한다. 실제 서버의 MOCK 인증·시세·계좌 일치는 2026-08-03, 빈 계좌의 snapshot 대조와 상시 WebSocket worker의 READY 진입·재시작 후 fencing token 증가는 2026-08-04 통과했다. 분봉·지표·호가 가격정책·실제 모의주문·PostgreSQL 다중 worker 경쟁은 실서버 미검증이다.

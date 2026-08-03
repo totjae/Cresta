@@ -369,19 +369,45 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 | KIW-119 | 종료 신호를 받으면 신규 작업을 중지하고 WebSocket과 소유 lease를 해제한다. 다른 owner의 lease나 gate는 수정하지 않는다. |
 | KIW-120 | `cresta-admin kiwoom-worker-status`와 `GET /api/v1/system/broker`는 owner UUID·token·계좌번호 없이 worker 상태, lease 유효 여부, fencing token, 연결·구독, 최근 heartbeat·재동기화와 안전한 오류 코드만 반환한다. |
 
+### 3.18 모의투자 주문 송신 계약
+
+2026-08-04 키움 공식 국내주식 주문 가이드에서 다음 REST 계약을 확인했다.
+
+| 기능 | API ID | Method·URL | 핵심 요청 필드 | 성공 응답 필드 |
+| --- | --- | --- | --- | --- |
+| 매수 | `kt10000` | `POST /api/dostk/ordr` | `dmst_stex_tp`, `stk_cd`, `ord_qty`, `ord_uv`, `trde_tp`, `cond_uv` | `ord_no`, `dmst_stex_tp` |
+| 매도 | `kt10001` | `POST /api/dostk/ordr` | 매수와 동일 | `ord_no`, `dmst_stex_tp` |
+| 정정 | `kt10002` | `POST /api/dostk/ordr` | `dmst_stex_tp`, `orig_ord_no`, `stk_cd`, `mdfy_qty`, `mdfy_uv`, `mdfy_cond_uv` | `ord_no`, `base_orig_ord_no`, `mdfy_qty`, `dmst_stex_tp` |
+| 취소 | `kt10003` | `POST /api/dostk/ordr` | `dmst_stex_tp`, `orig_ord_no`, `stk_cd`, `cncl_qty` | `ord_no`, `base_orig_ord_no`, `cncl_qty` |
+
+첫 송신 단계는 KRX 현금주문 중 `LIMIT`과 `MARKET`만 활성화한다. `LIMIT`은 `trde_tp=0`과 양의 정수 `ord_uv`, `MARKET`은 `trde_tp=3`과 빈 `ord_uv`를 사용한다. 정정·취소 Adapter 계약은 고정하되 영속 상태 전이 연결은 후속 단계에서 활성화한다.
+
+참고 자료: <https://openapi.kiwoom.com/m/guide/apiguide?jobTpCode=13>
+
+| ID | 요구사항 |
+| --- | --- |
+| KIW-121 | 주문 Adapter는 `MOCK`, KRX, 숫자 6자리 종목, 양의 수량과 `LIMIT/MARKET`만 허용하며 NXT·SOR·신용·조건부 주문을 송신 전에 거부한다. |
+| KIW-122 | 신규 매수·매도는 각각 `kt10000`·`kt10001`을 사용하고 성공 응답의 `ord_no`가 숫자 7자리가 아니거나 `dmst_stex_tp`가 KRX가 아니면 정상 접수로 간주하지 않는다. |
+| KIW-123 | `kt10002` 정정과 `kt10003` 취소는 원주문번호가 숫자 7자리일 때만 호출하며 성공 응답의 새 주문번호와 모주문번호를 모두 검증한다. |
+| KIW-124 | 주문성 REST 호출은 전송 전에 유효 token을 확보한 뒤 정확히 한 번만 HTTP 요청한다. HTTP 401, timeout, 연결 종료, 5xx, 비 JSON 또는 필수 필드 누락은 자동 재전송하지 않고 결과 불명확 오류로 반환한다. |
+| KIW-125 | `return_code != 0`인 명시적 업무 거절은 `REJECTED` 후보로 분류하고, 송신 여부를 판별할 수 없는 전송·응답 오류는 `UNKNOWN` 후보로 분류한다. 원문 오류 메시지나 비밀값은 영속화하지 않는다. |
+| KIW-126 | 주문 호출은 Active worker가 소유한 단일 in-process limiter를 통과하며 계좌·token·TR별 최소 1초 간격을 지킨다. limiter 대기는 송신 횟수에 포함하지 않는다. |
+| KIW-127 | 같은 내부 주문이 `SUBMITTING`, `ACKNOWLEDGED`, `UNKNOWN` 또는 종료 상태이면 worker는 같은 매매 의도를 다시 송신하지 않는다. `SUBMITTING` 기록은 네트워크 호출 전에 commit한다. |
+| KIW-128 | 이번 단계의 주문 송신 서비스는 worker 내부에서만 호출 가능하며 HTTP API·Console·CLI에 모의주문 생성 명령을 노출하지 않는다. 실제 모의주문 통합시험은 사용자 지정 종목·수량·가격과 명시적 실행 확인 후 수행한다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 고정 IP가 맞더라도 키움 등록이 완료되지 않았으면 인증 성공으로 간주하지 않는다.
 - 토큰 갱신 중 기존 토큰이 유효하더라도 두 worker가 동시에 갱신하지 않는다.
 - Active worker가 비정상 종료되어 lease가 만료될 때까지 대기 worker는 주문하지 않는다.
-- 키움 응답 시간초과는 주문 실패를 의미하지 않으므로 같은 주문을 즉시 재전송하지 않는다.
+- 키움 주문성 응답의 시간초과·401·5xx·비 JSON은 주문 실패를 의미하지 않을 수 있으므로 같은 주문을 즉시 재전송하지 않는다.
 - 모의투자 NXT 시세를 표시할 때 `주문 불가·분석용`임을 명확히 표시한다.
 - secret 파일 권한 또는 소유자가 예상과 다르면 Broker 서비스를 시작하지 않는다.
 - `/home/totquf4171/cresta`가 없는 경우 자동으로 상위 홈 전체를 변경하지 않고 배포 절차에서 명시적으로 생성한다.
 
 ## 5. 검증·인수 조건
 
-2026-08-03 운영 서버에서 고정 출구 IP, MOCK 인증, `ka10001`, `ka00001` 10자리 일치와 마스킹 출력을 확인했다. 전체 계좌번호와 자격증명은 시험 기록에 남기지 않았다.
+2026-08-03 운영 서버에서 고정 출구 IP, MOCK 인증, `ka10001`, `ka00001` 10자리 일치와 마스킹 출력을 확인했다. 2026-08-04에는 상시 worker가 `READY/WORKER_HEALTHY`에 도달하고 재시작 후 fencing token이 증가하는 것을 확인했다. 전체 계좌번호와 자격증명은 시험 기록에 남기지 않았다.
 
 - `180.68.4.149` 출구에서 모의투자 인증과 계좌 조회가 성공한다.
 - 등록되지 않은 출구 IP에서 인증 실패 시 신규 주문이 차단된다.

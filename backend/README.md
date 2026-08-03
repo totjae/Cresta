@@ -18,6 +18,6 @@ cresta-admin kiwoom-worker-status
 cresta-worker kiwoom
 ```
 
-`cresta-worker kiwoom`은 PostgreSQL lease를 획득한 한 프로세스만 LOGIN·`00`/`04` 구독과 REST 재동기화를 수행한다. WebSocket과 clean 대조가 모두 정상일 때만 `READY`다. 외부 주문·포지션을 자동 편입하지 않으며 실제 주문도 전송하지 않는다.
+`cresta-worker kiwoom`은 PostgreSQL lease를 획득한 한 프로세스만 LOGIN·`00`/`04` 구독과 REST 재동기화를 수행한다. WebSocket과 clean 대조가 모두 정상일 때만 `READY`다. 키움 주문 Adapter와 worker 내부 단발 송신 서비스는 자동시험 범위로 존재하지만 polling·공개 생성 경로가 없어 현재 worker는 실제 모의주문을 전송하지 않는다. 외부 주문·포지션도 자동 편입하지 않는다.
 
 운영 시작 전 `CRESTA_DATABASE_URL`, `CRESTA_TOTP_ENCRYPTION_KEY`와 HTTPS cookie 설정을 비밀 파일 또는 안전한 환경 주입으로 제공해야 한다. 운영 Origin은 `https://trade.mihoservice.xyz`이며 호스트 Nginx가 `127.0.0.1:7788`의 Compose gateway로 전달한다.

@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
@@ -23,6 +24,11 @@ ACCOUNT_API_ID = "ka00001"
 OPEN_ORDERS_API_ID = "ka10075"
 FILLS_API_ID = "ka10076"
 POSITIONS_API_ID = "kt00018"
+ORDER_PATH = "/api/dostk/ordr"
+BUY_ORDER_API_ID = "kt10000"
+SELL_ORDER_API_ID = "kt10001"
+REPLACE_ORDER_API_ID = "kt10002"
+CANCEL_ORDER_API_ID = "kt10003"
 MAX_CONTINUATION_PAGES = 20
 KST = timezone(timedelta(hours=9))
 
@@ -33,6 +39,14 @@ class KiwoomAdapterError(Exception):
         self.code = code
         self.message = message
         self.retryable = retryable
+
+
+class KiwoomOrderRejectedError(KiwoomAdapterError):
+    """The broker explicitly rejected an order request before acknowledgement."""
+
+
+class KiwoomOrderOutcomeUnknownError(KiwoomAdapterError):
+    """The client cannot prove whether a side-effecting request reached the broker."""
 
 
 class ResponseLike(Protocol):
@@ -115,6 +129,71 @@ class BrokerAccountSnapshot:
     observed_at: datetime
 
 
+@dataclass(frozen=True)
+class KiwoomOrderRequest:
+    symbol: str
+    side: str
+    quantity: int
+    order_type: str
+    limit_price: Decimal | None
+    market: str = "KRX"
+
+
+@dataclass(frozen=True)
+class KiwoomReplaceRequest:
+    original_order_id: str
+    symbol: str
+    quantity: int
+    limit_price: Decimal
+    market: str = "KRX"
+
+
+@dataclass(frozen=True)
+class KiwoomCancelRequest:
+    original_order_id: str
+    symbol: str
+    quantity: int = 0
+    market: str = "KRX"
+
+
+@dataclass(frozen=True)
+class KiwoomOrderAcknowledgement:
+    broker_order_id: str
+    market: str
+    original_order_id: str | None = None
+    affected_quantity: int | None = None
+
+
+class KiwoomOrderRateLimiter:
+    """Serial in-process limiter for one account/token owner, keyed by order TR."""
+
+    def __init__(
+        self,
+        *,
+        interval_seconds: float = 1.0,
+        monotonic: Callable[[], float] | None = None,
+        sleep: Callable[[float], None] | None = None,
+    ) -> None:
+        if interval_seconds <= 0:
+            raise ValueError("Order rate limit interval must be positive")
+        self._interval = interval_seconds
+        self._monotonic = monotonic or time.monotonic
+        self._sleep = sleep or time.sleep
+        self._last_started: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def wait(self, api_id: str) -> None:
+        with self._lock:
+            now = self._monotonic()
+            previous = self._last_started.get(api_id)
+            if previous is not None:
+                delay = self._interval - (now - previous)
+                if delay > 0:
+                    self._sleep(delay)
+                    now = self._monotonic()
+            self._last_started[api_id] = now
+
+
 class KiwoomMockClient:
     """Fail-closed Kiwoom MOCK REST client with an in-memory access token."""
 
@@ -124,6 +203,7 @@ class KiwoomMockClient:
         *,
         http_client: HttpClientLike | None = None,
         clock: Callable[[], datetime] | None = None,
+        order_rate_limiter: KiwoomOrderRateLimiter | None = None,
     ) -> None:
         settings.validate_safety()
         if settings.kiwoom_configuration_status() != "CONFIGURED":
@@ -133,6 +213,7 @@ class KiwoomMockClient:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._token: AccessToken | None = None
         self._token_lock = threading.Lock()
+        self._order_rate_limiter = order_rate_limiter or KiwoomOrderRateLimiter()
 
     def get_access_token(self, *, force_refresh: bool = False) -> str:
         with self._token_lock:
@@ -315,6 +396,100 @@ class KiwoomMockClient:
             observed_at=_as_utc(self._clock()),
         )
 
+    def place_order(self, request: KiwoomOrderRequest) -> KiwoomOrderAcknowledgement:
+        body = _new_order_body(request)
+        api_id = BUY_ORDER_API_ID if request.side == "BUY" else SELL_ORDER_API_ID
+        payload = self._request_order_once(api_id=api_id, body=body)
+        return _normalize_order_ack(payload)
+
+    def replace_order(
+        self, request: KiwoomReplaceRequest
+    ) -> KiwoomOrderAcknowledgement:
+        _validate_market_symbol(request.market, request.symbol)
+        _validate_broker_order_id(request.original_order_id)
+        if request.quantity < 0:
+            raise KiwoomAdapterError(
+                "KIWOOM_INVALID_ORDER_QUANTITY", "Replacement quantity cannot be negative"
+            )
+        price = _positive_integer_price(request.limit_price)
+        payload = self._request_order_once(
+            api_id=REPLACE_ORDER_API_ID,
+            body={
+                "dmst_stex_tp": "KRX",
+                "orig_ord_no": request.original_order_id,
+                "stk_cd": request.symbol,
+                "mdfy_qty": str(request.quantity),
+                "mdfy_uv": price,
+                "mdfy_cond_uv": "",
+            },
+        )
+        return _normalize_child_order_ack(
+            payload,
+            original_order_id=request.original_order_id,
+            quantity_field="mdfy_qty",
+            require_market=True,
+        )
+
+    def cancel_order(
+        self, request: KiwoomCancelRequest
+    ) -> KiwoomOrderAcknowledgement:
+        _validate_market_symbol(request.market, request.symbol)
+        _validate_broker_order_id(request.original_order_id)
+        if request.quantity < 0:
+            raise KiwoomAdapterError(
+                "KIWOOM_INVALID_ORDER_QUANTITY", "Cancellation quantity cannot be negative"
+            )
+        payload = self._request_order_once(
+            api_id=CANCEL_ORDER_API_ID,
+            body={
+                "dmst_stex_tp": "KRX",
+                "orig_ord_no": request.original_order_id,
+                "stk_cd": request.symbol,
+                "cncl_qty": str(request.quantity),
+            },
+        )
+        return _normalize_child_order_ack(
+            payload,
+            original_order_id=request.original_order_id,
+            quantity_field="cncl_qty",
+            require_market=False,
+        )
+
+    def _request_order_once(self, *, api_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        token = self.get_access_token()
+        self._order_rate_limiter.wait(api_id)
+        headers = {
+            "Content-Type": "application/json;charset=UTF-8",
+            "api-id": api_id,
+            "authorization": f"Bearer {token}",
+        }
+        try:
+            response = self._post(ORDER_PATH, headers=headers, body=body)
+        except KiwoomAdapterError as exc:
+            raise KiwoomOrderOutcomeUnknownError(
+                "KIWOOM_ORDER_OUTCOME_UNKNOWN",
+                "Kiwoom order outcome is unknown after a transport failure",
+            ) from exc
+        if response.status_code == 401:
+            self.invalidate_token()
+        if response.status_code >= 400:
+            raise KiwoomOrderOutcomeUnknownError(
+                "KIWOOM_ORDER_OUTCOME_UNKNOWN",
+                f"Kiwoom order outcome is unknown after HTTP {response.status_code}",
+            )
+        try:
+            payload = _json_object(response)
+        except KiwoomAdapterError as exc:
+            raise KiwoomOrderOutcomeUnknownError(
+                "KIWOOM_ORDER_OUTCOME_UNKNOWN",
+                "Kiwoom order outcome is unknown because the response is invalid",
+            ) from exc
+        if payload.get("return_code") != 0:
+            raise KiwoomOrderRejectedError(
+                "KIWOOM_ORDER_REJECTED", "Kiwoom explicitly rejected the order"
+            )
+        return payload
+
     def _issue_token(self) -> AccessToken:
         app_key, app_secret, _ = self.settings.load_kiwoom_credentials()
         response = self._post(
@@ -371,6 +546,134 @@ class KiwoomMockClient:
             raise KiwoomAdapterError(
                 "KIWOOM_CONNECTION_ERROR", "Kiwoom connection failed", retryable=True
             ) from exc
+
+
+def _validate_market_symbol(market: str, symbol: str) -> None:
+    if market != "KRX":
+        raise KiwoomAdapterError(
+            "UNSUPPORTED_IN_MOCK", "Kiwoom MOCK orders support KRX only"
+        )
+    if not symbol.isdigit() or len(symbol) != 6:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_SYMBOL", "Domestic symbol must be six digits"
+        )
+
+
+def _validate_broker_order_id(value: str) -> None:
+    if not value.isdigit() or len(value) != 7:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_ORDER_ID", "Kiwoom order identifier must be seven digits"
+        )
+
+
+def _positive_integer_price(value: Decimal) -> str:
+    if value <= 0 or value != value.to_integral_value():
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_ORDER_PRICE", "Order price must be a positive integer"
+        )
+    return format(value, "f")
+
+
+def _new_order_body(request: KiwoomOrderRequest) -> dict[str, Any]:
+    _validate_market_symbol(request.market, request.symbol)
+    if request.side not in {"BUY", "SELL"}:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_ORDER_SIDE", "Order side must be BUY or SELL"
+        )
+    if request.quantity <= 0:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_ORDER_QUANTITY", "Order quantity must be positive"
+        )
+    if request.order_type == "LIMIT":
+        if request.limit_price is None:
+            raise KiwoomAdapterError(
+                "KIWOOM_INVALID_ORDER_PRICE", "Limit order price is required"
+            )
+        price, trade_type = _positive_integer_price(request.limit_price), "0"
+    elif request.order_type == "MARKET":
+        if request.limit_price is not None:
+            raise KiwoomAdapterError(
+                "KIWOOM_INVALID_ORDER_PRICE", "Market order must not include a price"
+            )
+        price, trade_type = "", "3"
+    else:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_ORDER_TYPE", "Order type must be LIMIT or MARKET"
+        )
+    return {
+        "dmst_stex_tp": "KRX",
+        "stk_cd": request.symbol,
+        "ord_qty": str(request.quantity),
+        "ord_uv": price,
+        "trde_tp": trade_type,
+        "cond_uv": "",
+    }
+
+
+def _normalize_order_ack(payload: dict[str, Any]) -> KiwoomOrderAcknowledgement:
+    broker_order_id = payload.get("ord_no")
+    market = payload.get("dmst_stex_tp")
+    if not isinstance(broker_order_id, str) or not isinstance(market, str):
+        raise KiwoomOrderOutcomeUnknownError(
+            "KIWOOM_ORDER_OUTCOME_UNKNOWN", "Kiwoom order acknowledgement is incomplete"
+        )
+    try:
+        _validate_broker_order_id(broker_order_id)
+    except KiwoomAdapterError as exc:
+        raise KiwoomOrderOutcomeUnknownError(
+            "KIWOOM_ORDER_OUTCOME_UNKNOWN", "Kiwoom order acknowledgement is invalid"
+        ) from exc
+    if market != "KRX":
+        raise KiwoomOrderOutcomeUnknownError(
+            "KIWOOM_ORDER_OUTCOME_UNKNOWN", "Kiwoom order market is invalid"
+        )
+    return KiwoomOrderAcknowledgement(broker_order_id=broker_order_id, market=market)
+
+
+def _normalize_child_order_ack(
+    payload: dict[str, Any],
+    *,
+    original_order_id: str,
+    quantity_field: str,
+    require_market: bool,
+) -> KiwoomOrderAcknowledgement:
+    broker_order_id = payload.get("ord_no")
+    if not isinstance(broker_order_id, str):
+        raise KiwoomOrderOutcomeUnknownError(
+            "KIWOOM_ORDER_OUTCOME_UNKNOWN", "Kiwoom child order acknowledgement is incomplete"
+        )
+    try:
+        _validate_broker_order_id(broker_order_id)
+    except KiwoomAdapterError as exc:
+        raise KiwoomOrderOutcomeUnknownError(
+            "KIWOOM_ORDER_OUTCOME_UNKNOWN", "Kiwoom child order acknowledgement is invalid"
+        ) from exc
+    response_market = payload.get("dmst_stex_tp")
+    if require_market and response_market != "KRX":
+        raise KiwoomOrderOutcomeUnknownError(
+            "KIWOOM_ORDER_OUTCOME_UNKNOWN", "Kiwoom child order market is invalid"
+        )
+    if response_market not in {None, "KRX"}:
+        raise KiwoomOrderOutcomeUnknownError(
+            "KIWOOM_ORDER_OUTCOME_UNKNOWN", "Kiwoom child order market is invalid"
+        )
+    response_original = payload.get("base_orig_ord_no")
+    if response_original != original_order_id:
+        raise KiwoomOrderOutcomeUnknownError(
+            "KIWOOM_ORDER_OUTCOME_UNKNOWN", "Kiwoom original order identifier does not match"
+        )
+    try:
+        affected_quantity = _non_negative_int(payload.get(quantity_field), quantity_field)
+    except KiwoomAdapterError as exc:
+        raise KiwoomOrderOutcomeUnknownError(
+            "KIWOOM_ORDER_OUTCOME_UNKNOWN", "Kiwoom affected quantity is invalid"
+        ) from exc
+    return KiwoomOrderAcknowledgement(
+        broker_order_id=broker_order_id,
+        market="KRX",
+        original_order_id=response_original,
+        affected_quantity=affected_quantity,
+    )
 
 
 def normalize_basic_quote(
