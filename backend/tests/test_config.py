@@ -44,7 +44,11 @@ def test_live_environment_is_rejected() -> None:
 
 def test_kiwoom_configuration_requires_enabled_readable_nonempty_secrets(tmp_path: Path) -> None:
     paths = []
-    for name, value in (("app_key", "key"), ("app_secret", "secret"), ("account", "12345678")):
+    for name, value in (
+        ("app_key", "key"),
+        ("app_secret", "secret"),
+        ("account", "1234567890"),
+    ):
         path = tmp_path / name
         path.write_text(value, encoding="utf-8")
         paths.append(str(path))
@@ -63,7 +67,7 @@ def test_kiwoom_configuration_requires_enabled_readable_nonempty_secrets(tmp_pat
     assert disabled.kiwoom_configuration_status() == "NOT_CONFIGURED"
     assert Settings(kiwoom_enabled=True).kiwoom_configuration_status() == "NOT_CONFIGURED"
     assert configured.kiwoom_configuration_status() == "CONFIGURED"
-    assert configured.load_kiwoom_credentials() == ("key", "secret", "12345678")
+    assert configured.load_kiwoom_credentials() == ("key", "secret", "1234567890")
 
 
 def test_kiwoom_live_endpoint_is_rejected() -> None:

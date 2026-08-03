@@ -210,6 +210,19 @@ sudo chmod 0400 /home/totquf4171/cresta/secrets/kiwoom_mock_app_key \
 
 세 파일을 만든 뒤에는 `sudo deploy/prepare-secrets.sh`로 기존 DB·TOTP secret과 함께 권한을 검사·적용할 수 있다. 키움 파일이 하나라도 존재하면 세 파일 모두 비어 있지 않아야 통과한다.
 
+`kiwoom_mock_account_id`는 키움 `ka00001`이 반환하는 분류값 포함 숫자 10자리와 정확히 같아야 한다. 8자리 기본계좌만 저장한 기존 배포는 점검 전에 10자리 값으로 교체한다. 전체 계좌번호를 터미널 출력이나 작업 기록에 남기지 않는다.
+
+계좌 부트스트랩 점검:
+
+```bash
+sudo docker compose \
+  -f deploy/compose.yaml \
+  -f deploy/compose.kiwoom.yaml \
+  exec -T api cresta-admin kiwoom-check
+```
+
+성공 상태는 `ACCOUNT_VERIFIED`이며 이는 일회성 점검 결과다. 상시 Broker worker와 재동기화가 구현되기 전에는 `READY`를 의미하지 않는다.
+
 `CRESTA_KIWOOM_ENABLED=true`는 세 secret이 준비되고 출구 IP를 별도로 확인한 뒤에만 적용한다. 이번 단계의 `CONFIGURED`는 파일 준비 상태이며 키움 인증·계좌조회 성공을 뜻하지 않는다.
 
 - 키움이나 네트워크 장애 시 Cresta가 시장 체결을 보장하지 않는다는 경고를 유지한다.

@@ -25,7 +25,7 @@
 | 시스템 아키텍처 | `docs/SYSTEM_DESIGN.md` | 구현 중 | Backend·Console·gateway 골격 구현, trading worker 미구현 |
 | HTTP/WebSocket API | `docs/API_SPEC.md` | 구현 중 | 인증·system health(키움 구성 상태 포함)·주문/체결·포지션·최신 quote 조회 구현, 거래 명령·WebSocket stream 미구현 |
 | UI 콘셉트 참고자료 | `stitch_cresta_ai_intraday_trading_system/` | 참고자료 | 실제 Console 구현물이 아님 |
-| 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | 공식 계약 확인, MOCK URL 강제·메모리 토큰·401 단일 재인증·`ka10001` 정규화 10개 자동시험 통과; 실제 인증·계좌·WebSocket·주문과 출구 IP 확인 필요 |
+| 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | MOCK 인증·`ka10001` 실제 서버 통과, `ka00001` 10자리 계좌 일치·마스킹 점검 CLI 로컬 검증 완료; 실제 계좌 점검·WebSocket·주문·상시 worker 미검증/미구현 |
 | Guard 리스크·비상정지 | `docs/GUARD_RISK_SPEC.md` | 명세 완료 | MVP 기본값·허용범위 확정, 모의시험 후 조정 가능 |
 | 사용자 설정·적용 | `docs/CONFIGURATION_SPEC.md` | 명세 완료 | Web UI 연계 명세 완료, 코드 미구현 |
 | Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, Paper 읽기 전용 화면과 Watch stream 상태 표시 구현·로컬 검증, 주문 생성·승인·설정·상세 Watch 화면 미구현 |
@@ -34,7 +34,7 @@
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 명세 완료 | 모델 제공자 미선정, mock interface 구현 가능 |
 | DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 인증·Paper·Watch migration SQLite 왕복 및 기존 실서버 PostgreSQL migration 검증 완료, 신규 Watch migration 실서버 적용·PostgreSQL 동시성 시험 미완료 |
 | 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 실서버 기반과 선택형 키움 Docker secret overlay 구현; 키움 secret 주입·실제 인증, 백업·경보·복구훈련 미완료 |
-| 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 명세 완료 | 내부 구현 시작 가능, 외부 통합 게이트 유지 |
+| 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 명세 완료 | 키움 출구 IP·MOCK 인증·시세 실서버 확인 반영, 계좌·주문 외부 통합 게이트 유지 |
 | Backend·Docker 골격 | `docs/SYSTEM_DESIGN.md`, `docs/OPERATIONS_RUNBOOK.md` | 검증 완료 | Backend·Frontend·gateway와 N100 자원 제한 반영, PostgreSQL·Redis·API·Frontend·gateway 실서버 기동 및 HTTPS 접속 확인 |
 
 ## 4. 구현 완료 조건
@@ -50,5 +50,5 @@
 
 ## 5. 미결정·보류 항목
 
-- 키움 모의투자 계정과 API 사용신청 완료 여부
+- 키움 모의투자 계정·API 사용신청·고정 출구 IP와 REST 인증·시세 조회는 실제 서버 확인 완료, 10자리 계좌 일치 검증 필요
 - NXT/SOR 실거래 검증 환경

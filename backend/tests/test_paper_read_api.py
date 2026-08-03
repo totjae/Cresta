@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pyotp
 from fastapi.testclient import TestClient
@@ -49,6 +50,33 @@ def test_paper_read_models_require_auth_and_report_empty_state(client: TestClien
     positions = client.get("/api/v1/positions")
     assert positions.status_code == 200
     assert positions.json()["items"] == []
+
+
+def test_system_health_caps_kiwoom_at_configured_without_runtime_worker(
+    client: TestClient,
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    secret_paths = []
+    for name, value in (
+        ("app_key", "test-key"),
+        ("app_secret", "test-secret"),
+        ("account", "1234567890"),
+    ):
+        path = tmp_path / name
+        path.write_text(value, encoding="utf-8")
+        secret_paths.append(str(path))
+    settings.kiwoom_enabled = True
+    settings.kiwoom_app_key_file = secret_paths[0]
+    settings.kiwoom_app_secret_file = secret_paths[1]
+    settings.kiwoom_account_id_file = secret_paths[2]
+
+    login(client)
+    health = client.get("/api/v1/system/health")
+
+    assert health.status_code == 200
+    assert health.json()["kiwoom_broker_status"] == "CONFIGURED"
+    assert health.json()["kiwoom_broker_status"] not in {"AUTHENTICATED", "READY"}
 
 
 def test_paper_health_and_position_use_persisted_fill_data(

@@ -102,6 +102,10 @@
 | T-KIW-013 | KIW-094, MKT-070~074 | `ka10001` fixture 정규화 | 부호 제거·필수값 검증·결정적 hash·명시적 거래상태 | 통과 (2026-08-01, 자동) |
 | T-KIW-014 | KIW-096, API-086 | Broker 비활성·secret 누락·secret 준비 상태 조회 | 각각 `NOT_CONFIGURED`, `NOT_CONFIGURED`, `CONFIGURED`; 외부 인증 전 `CONNECTED` 금지 | 통과 (2026-08-01, 자동) |
 | T-KIW-015 | KIW-090 | MOCK 환경에 운영 Kiwoom URL 주입 시도 | 설정 검증에서 기동 거부 | 통과 (2026-08-01, 자동) |
+| T-KIW-016 | KIW-097 | `ka00001` 정상·필드 누락·잘못된 형식 fixture | 숫자 10자리만 내부 계좌 식별값으로 수용 | 통과 (2026-08-03, 자동) |
+| T-KIW-017 | KIW-098~100 | secret 계좌 일치·불일치·8자리 prefix 입력 | 정확한 10자리만 통과, 불일치 fail-closed, 출력은 마스킹 | 통과 (2026-08-03, 자동) |
+| T-KIW-018 | KIW-101 | `kiwoom-check` 성공·인증 실패·계좌 실패 | 안정된 상태·오류 코드와 종료코드, 비밀값 미출력 | 통과 (2026-08-03, 자동) |
+| T-KIW-019 | KIW-102~103 | 일회성 점검 종료 후 시스템 상태 조회 | API는 `READY`를 주장하지 않고 구성 상태만 유지 | 통과 (2026-08-03, 자동) |
 
 ### 3.7 Guard 리스크 및 비상정지
 
@@ -263,7 +267,7 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 47개 통과 | 인증·Paper·Watch와 키움 토큰/REST fixture mapping 포함; 실제 키움 인증·계좌·WebSocket·주문 제외 |
+| Python 단위·API 시험 | `python -m pytest` | 60개 통과 | 인증·Paper·Watch, 키움 토큰/시세와 `ka00001` 10자리 계좌 검증·CLI 포함; 실제 계좌조회·WebSocket·주문 제외 |
 | Console component 시험 | `npm test` | 4개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃, Paper 조회 전용 화면 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
@@ -277,4 +281,4 @@
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
 | Watch 상태 UI 변경 점검 | component·TypeScript·production build | 통과 | 인앱 브라우저의 로컬 URL 정책 차단으로 이번 변경의 추가 시각 점검은 미실행 |
 
-검증된 세부 동작은 인증·Paper 흐름 외에 Watch quote의 KRX/NXT 분리, payload 중복·충돌, 역순·순번 갭·누적량 역행, 명시적 복구 snapshot, 최신성·stream 품질, 키움 MOCK URL 강제, 메모리 토큰 단일 갱신, 401 1회 재인증과 `ka10001` fixture mapping을 포함한다. 실제 키움 인증·계좌·WebSocket mapping·수신 순번·분봉·지표·호가 가격정책·재동기화 snapshot·PostgreSQL 동시성은 미검증이므로 관련 표의 `계획` 또는 `부분 통과` 상태를 유지한다.
+검증된 세부 동작은 인증·Paper 흐름 외에 Watch quote의 KRX/NXT 분리, payload 중복·충돌, 역순·순번 갭·누적량 역행, 명시적 복구 snapshot, 최신성·stream 품질, 키움 MOCK URL 강제, 메모리 토큰 단일 갱신, 401 1회 재인증, `ka10001` mapping과 `ka00001` 10자리 계좌 일치·마스킹 CLI를 포함한다. 실제 서버의 MOCK 인증·`ka10001` 시세는 2026-08-03 통과했으며, 신규 `ka00001` 실제 계좌조회·WebSocket·분봉·지표·호가 가격정책·재동기화 snapshot·PostgreSQL 동시성은 미검증이다.

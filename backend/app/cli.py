@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import sys
 from datetime import UTC, datetime
 
@@ -17,6 +18,7 @@ from app.auth.crypto import (
     validate_password,
     verify_totp,
 )
+from app.broker.kiwoom import KiwoomAdapterError, KiwoomMockClient
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import RecoveryCode, TotpCredential, User
@@ -77,14 +79,55 @@ def create_admin(login_id: str) -> int:
     return 0
 
 
+def check_kiwoom() -> int:
+    settings = get_settings()
+    try:
+        verification = KiwoomMockClient(settings).verify_account()
+    except KiwoomAdapterError as exc:
+        print(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "environment": "MOCK",
+                    "status": "FAILED",
+                    "error_code": exc.code,
+                    "retryable": exc.retryable,
+                },
+                separators=(",", ":"),
+            )
+        )
+        configuration_errors = {
+            "KIWOOM_NOT_CONFIGURED",
+            "KIWOOM_ACCOUNT_ID_INVALID",
+            "KIWOOM_ACCOUNT_MISMATCH",
+        }
+        return 2 if exc.code in configuration_errors else 3
+
+    print(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "environment": "MOCK",
+                "status": verification.status,
+                "account": verification.masked_account,
+            },
+            separators=(",", ":"),
+        )
+    )
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="cresta-admin")
     subparsers = parser.add_subparsers(dest="command", required=True)
     create = subparsers.add_parser("create-admin")
     create.add_argument("--login-id", required=True)
+    subparsers.add_parser("kiwoom-check")
     args = parser.parse_args()
     if args.command == "create-admin":
         raise SystemExit(create_admin(args.login_id))
+    if args.command == "kiwoom-check":
+        raise SystemExit(check_kiwoom())
 
 
 if __name__ == "__main__":

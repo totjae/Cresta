@@ -21,13 +21,13 @@
 
 | ID | 항목 | 값 | 상태 |
 | --- | --- | --- | --- |
-| KIW-001 | 키움 등록 예정 고정 공인 IP | `180.68.4.149` | 사용자 제공, 실제 출구 IP 확인 필요 |
+| KIW-001 | 키움 등록 고정 공인 IP | `180.68.4.149` | 2026-08-03 실제 서버 출구·MOCK 인증 확인 |
 | KIW-002 | 서버 사용자 홈 | `/home/totquf4171` | 확정 |
 | KIW-003 | Cresta 배포 루트 | `/home/totquf4171/cresta` | 확정 |
 | KIW-004 | 초기 Broker 환경 | `MOCK` | 확정 |
 | KIW-005 | 초기 계좌 수 | 모의투자 계좌 1개 | 계좌 식별값은 비밀로 주입 |
 
-`180.68.4.149`가 서버 NIC에 직접 할당된 주소인지와 무관하게, 키움 API 요청이 외부로 나갈 때 보이는 실제 출구 IP가 이 값과 같아야 한다. 운영 전 키움 IP 등록과 인증 요청으로 확인한다.
+`180.68.4.149`가 서버 NIC에 직접 할당된 주소인지와 무관하게, 키움 API 요청이 외부로 나갈 때 보이는 실제 출구 IP가 이 값과 같아야 한다. 2026-08-03 운영 서버에서 출구 IP와 키움 MOCK 인증·`ka10001` 조회를 확인했다.
 
 ### 3.2 권장 디렉터리 구조
 
@@ -294,7 +294,29 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 | KIW-095 | `return_code`가 0이 아니거나 필수 필드가 없거나 JSON이 아니면 해당 응답을 정상 시세로 저장하지 않는다. 오류 응답에는 토큰·App Key·Secret을 포함하지 않는다. |
 | KIW-096 | 자격증명이 없거나 Broker가 비활성인 경우 API 서버는 계속 기동할 수 있지만 상태는 `NOT_CONFIGURED`이다. 자격증명 파일이 읽기 가능하면 외부 호출 전 상태는 `CONFIGURED`이며 실제 인증 성공 전 `CONNECTED`로 표시하지 않는다. |
 
-이번 구현 단계는 토큰 수명주기, 공통 REST client, `ka10001` 정규화와 구성 상태까지만 포함한다. WebSocket 상시 연결, 출구 IP 외부 확인, 계좌조회, 주문 송신과 Active worker lease는 후속 단계로 유지한다.
+첫 REST 기반 단계는 토큰 수명주기, 공통 REST client, `ka10001` 정규화와 구성 상태를 포함했다. 이번 계좌 부트스트랩 단계는 `ka00001` 일치 점검까지 확장하며, WebSocket 상시 연결, 주문 송신, 재동기화와 Active worker lease는 후속 단계로 유지한다.
+
+### 3.15 모의투자 계좌조회와 부트스트랩 점검
+
+2026-08-03 기준 키움 공식 API 가이드에서 다음 계약을 확인했다.
+
+- API ID: `ka00001`
+- Method·URL: `POST /api/dostk/acnt`
+- 요청 body: 빈 JSON object
+- 응답 계좌 필드: `acctNo`
+- 계좌 형식: 뒤 2자리 분류값을 포함한 숫자 10자리
+
+참고 자료: <https://openapi.kiwoom.com/m/guide/apiguide?jobTpCode=08>
+
+| ID | 요구사항 |
+| --- | --- |
+| KIW-097 | Adapter는 `ka00001`로 현재 토큰에 귀속된 계좌번호를 조회하며 `acctNo`가 정확히 숫자 10자리가 아니면 응답을 거부한다. |
+| KIW-098 | `kiwoom_mock_account_id`에는 분류값을 포함한 10자리 전체 계좌 식별값을 저장하고 키움 응답과 상수시간 비교한다. 8자리 prefix 또는 부분 일치는 허용하지 않는다. |
+| KIW-099 | 계좌가 다르면 `KIWOOM_ACCOUNT_MISMATCH`, secret 형식이 잘못되면 `KIWOOM_ACCOUNT_ID_INVALID`, 응답 형식이 잘못되면 `KIWOOM_INVALID_RESPONSE`로 실패하고 신규 주문을 금지한다. |
+| KIW-100 | 로그·CLI·HTTP 응답에는 전체 계좌번호를 출력하지 않는다. 점검 성공 시 앞 8자리를 `*`로 가리고 마지막 분류 2자리만 표시할 수 있다. |
+| KIW-101 | `cresta-admin kiwoom-check`는 MOCK 설정 확인→토큰 발급→계좌조회→계좌 일치 검증 순으로 실행하며 성공 시 `ACCOUNT_VERIFIED`를 반환한다. App Key·Secret·token·전체 계좌번호는 출력하지 않는다. |
+| KIW-102 | 일회성 점검 프로세스의 `ACCOUNT_VERIFIED`는 해당 점검 시점의 결과다. 프로세스 종료 후 API 상태를 `AUTHENTICATED`나 `READY`로 유지하지 않는다. |
+| KIW-103 | Broker 준비 상태 순서는 `NOT_CONFIGURED → CONFIGURED → AUTHENTICATED → ACCOUNT_VERIFIED → RECONCILING → READY`이며, 어느 단계에서든 오류에 따라 `DEGRADED` 또는 `HALTED`로 전환할 수 있다. 이번 단계는 `ACCOUNT_VERIFIED`까지만 구현한다. |
 
 ## 4. 오류·예외 또는 경계 조건
 
@@ -321,7 +343,7 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 ## 6. 미결정·보류 항목
 
 - 사용할 실제 모의투자 계좌 별칭과 secret 주입 완료 여부
-- `180.68.4.149`가 Ubuntu 서버의 실제 고정 출구 IP인지 운영 확인
+- 10자리 모의투자 계좌 secret 주입 후 `ka00001` 실제 일치 점검
 - Docker 컨테이너를 실행할 Linux UID/GID와 디렉터리 소유권
 - 원본 키움 요청·응답을 보관할 기간과 암호화 방식
 - WebSocket heartbeat와 실제 단절 판정 시간

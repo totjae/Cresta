@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import threading
 from collections.abc import Callable
@@ -17,6 +18,8 @@ from app.watch import SUPPORTED_TRADING_STATUSES, QuoteEvent
 TOKEN_PATH = "/oauth2/token"
 BASIC_QUOTE_PATH = "/api/dostk/stkinfo"
 BASIC_QUOTE_API_ID = "ka10001"
+ACCOUNT_PATH = "/api/dostk/acnt"
+ACCOUNT_API_ID = "ka00001"
 KST = timezone(timedelta(hours=9))
 
 
@@ -49,6 +52,12 @@ class HttpClientLike(Protocol):
 class AccessToken:
     value: str
     expires_at: datetime
+
+
+@dataclass(frozen=True)
+class AccountVerification:
+    status: str
+    masked_account: str
 
 
 class KiwoomMockClient:
@@ -137,6 +146,37 @@ class KiwoomMockClient:
             symbol=symbol,
             trading_status=trading_status,
             received_at=received_at or self._clock(),
+        )
+
+    def get_account_number(self) -> str:
+        payload = self.request(api_id=ACCOUNT_API_ID, path=ACCOUNT_PATH, body={})
+        account_number = payload.get("acctNo")
+        if not isinstance(account_number, str):
+            raise KiwoomAdapterError(
+                "KIWOOM_INVALID_RESPONSE", "Kiwoom account response is incomplete"
+            )
+        normalized = account_number.strip()
+        if len(normalized) != 10 or not normalized.isdigit():
+            raise KiwoomAdapterError(
+                "KIWOOM_INVALID_RESPONSE", "Kiwoom account identifier must be ten digits"
+            )
+        return normalized
+
+    def verify_account(self) -> AccountVerification:
+        _, _, expected_account = self.settings.load_kiwoom_credentials()
+        if len(expected_account) != 10 or not expected_account.isdigit():
+            raise KiwoomAdapterError(
+                "KIWOOM_ACCOUNT_ID_INVALID",
+                "Configured Kiwoom account identifier must be ten digits",
+            )
+        actual_account = self.get_account_number()
+        if not hmac.compare_digest(expected_account, actual_account):
+            raise KiwoomAdapterError(
+                "KIWOOM_ACCOUNT_MISMATCH", "Kiwoom token account does not match configuration"
+            )
+        return AccountVerification(
+            status="ACCOUNT_VERIFIED",
+            masked_account=f"********{actual_account[-2:]}",
         )
 
     def _issue_token(self) -> AccessToken:

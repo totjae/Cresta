@@ -35,7 +35,11 @@ class FakeHttpClient:
 
 def configured_settings(tmp_path: Path) -> Settings:
     files = []
-    for name, value in (("key", "test-key"), ("secret", "test-secret"), ("account", "12345678")):
+    for name, value in (
+        ("key", "test-key"),
+        ("secret", "test-secret"),
+        ("account", "1234567890"),
+    ):
         path = tmp_path / name
         path.write_text(value, encoding="utf-8")
         files.append(str(path))
@@ -73,6 +77,10 @@ def quote_response() -> FakeResponse:
             "return_code": 0,
         },
     )
+
+
+def account_response(account: Any = "1234567890") -> FakeResponse:
+    return FakeResponse(200, {"acctNo": account, "return_code": 0})
 
 
 def test_token_is_kst_parsed_memory_only_and_reused(tmp_path: Path) -> None:
@@ -143,6 +151,56 @@ def test_rest_request_stops_after_second_401(tmp_path: Path) -> None:
         client.get_basic_quote("005930", trading_status="TRADING", received_at=now)
     assert failure.value.code == "KIWOOM_AUTH_FAILED"
     assert len(http.calls) == 4
+
+
+def test_account_query_uses_official_contract_and_masks_verified_account(tmp_path: Path) -> None:
+    now = datetime(2026, 8, 1, 0, 0, tzinfo=UTC)
+    http = FakeHttpClient([token_response("token"), account_response()])
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http, clock=lambda: now)
+
+    verification = client.verify_account()
+
+    assert verification.status == "ACCOUNT_VERIFIED"
+    assert verification.masked_account == "********90"
+    account_call = http.calls[1]
+    assert account_call["url"] == "https://mockapi.kiwoom.com/api/dostk/acnt"
+    assert account_call["headers"]["api-id"] == "ka00001"
+    assert account_call["json"] == {}
+
+
+@pytest.mark.parametrize("account", [None, "", "12345678", "12345678901", "12345678AB"])
+def test_account_query_rejects_missing_or_non_ten_digit_response(
+    tmp_path: Path, account: Any
+) -> None:
+    now = datetime(2026, 8, 1, 0, 0, tzinfo=UTC)
+    http = FakeHttpClient([token_response("token"), account_response(account)])
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http, clock=lambda: now)
+
+    with pytest.raises(KiwoomAdapterError) as invalid:
+        client.get_account_number()
+    assert invalid.value.code == "KIWOOM_INVALID_RESPONSE"
+
+
+def test_account_verification_rejects_mismatch_without_exposing_accounts(tmp_path: Path) -> None:
+    now = datetime(2026, 8, 1, 0, 0, tzinfo=UTC)
+    http = FakeHttpClient([token_response("token"), account_response("9999999999")])
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http, clock=lambda: now)
+
+    with pytest.raises(KiwoomAdapterError) as mismatch:
+        client.verify_account()
+    assert mismatch.value.code == "KIWOOM_ACCOUNT_MISMATCH"
+    assert "1234567890" not in mismatch.value.message
+    assert "9999999999" not in mismatch.value.message
+
+
+def test_account_verification_rejects_eight_digit_prefix(tmp_path: Path) -> None:
+    settings = configured_settings(tmp_path)
+    Path(settings.kiwoom_account_id_file or "").write_text("12345678", encoding="utf-8")
+    client = KiwoomMockClient(settings, http_client=FakeHttpClient([]))
+
+    with pytest.raises(KiwoomAdapterError) as invalid:
+        client.verify_account()
+    assert invalid.value.code == "KIWOOM_ACCOUNT_ID_INVALID"
 
 
 def test_basic_quote_normalization_is_strict_and_deterministic() -> None:

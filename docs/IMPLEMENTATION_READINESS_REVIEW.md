@@ -36,8 +36,8 @@
 
 | 항목 | 상태 | 제한 |
 | --- | --- | --- |
-| 키움 모의계좌·App Key | 사용자 secret 미주입 | 실제 키움 인증·주문 통합시험 금지 |
-| 고정 출구 IP `180.68.4.149` | 실제 서버 확인 전 | Broker `READY` 금지 |
+| 키움 모의계좌·App Key | secret 주입과 MOCK 인증·`ka10001` 확인 완료, 10자리 계좌 일치 미검증 | `ka00001` 일치·재동기화 전 Broker `READY` 금지 |
+| 고정 출구 IP `180.68.4.149` | 2026-08-03 실제 서버 출구 확인 완료 | IP 변경 감지와 상시 worker 게이트는 후속 구현 |
 | 키움 주문·체결 필드 | 실제 mock capture 전 잠정 | production adapter mapping 확정 금지 |
 | 키움 호출 제한·WebSocket heartbeat | 실측 전 초기값 | 측정 가능한 설정으로 유지 |
 | Scout·Core 모델 제공자 | 미선정 | 실제 AI 호출 활성화 금지, mock adapter 사용 |
