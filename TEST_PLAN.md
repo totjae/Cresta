@@ -242,6 +242,11 @@
 | T-OPS-008 | OPS-006~007 | N100 자원 제한과 디스크 임계값 검사 | 예약 메모리 유지, 20% 경고·10% 차단 | 계획 |
 | T-OPS-009 | OPS-002 | host secret이 `0600` 사용자 소유인 상태와 준비 스크립트 실행 후 API 읽기 검사 | 준비 전 API 접근 실패, 실행 후 `10001:10001`·`0400`이며 migration에서 읽기 성공 | 실서버 부분 통과 |
 | T-OPS-010 | OPS-008 | 제한된 host 권한에서 API 이미지 빌드 후 UID와 source import 검사 | 컨테이너는 `10001:10001`이며 `/app/app/broker/kiwoom.py`를 읽고 import 가능 | 통과 (2026-08-03, 실서버 수동) |
+| T-KIW-025 | KIW-111~112, DB-027~029 | 같은 계좌에서 worker 두 개가 동시에 lease 획득 | 하나만 획득하고 만료·fencing 전에는 승계 불가 | 단위 통과 |
+| T-KIW-026 | KIW-113~115 | LOGIN·REG·재동기화 단계별 성공/실패 | 모두 성공한 현재 lease owner만 READY, 실패는 fail-closed | 단위 통과 |
+| T-KIW-027 | KIW-114, KIW-116 | PING과 `00`·`04` 이벤트 수신 | PING echo, 계좌 이벤트를 REST 대조 trigger로 분류 | 단위 통과·실서버 대기 |
+| T-KIW-028 | KIW-117~119 | token 교체·단절·lease 상실·종료 | 재로그인·backoff·READY 해제·소유 lease만 해제 | 부분 단위 통과·장애주입 대기 |
+| T-KIW-029 | KIW-120, API-087~089 | CLI·HTTP Broker 상태 조회 | 연결 상태 제공, owner/token/계좌/원문 오류 미노출 | 단위 통과 |
 
 ## 4. 시험 환경
 
@@ -275,7 +280,7 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 73개 통과 | 인증·Paper·Watch, 키움 계좌 snapshot 연속조회·정규화·DB 대조·CLI 포함; WebSocket·주문 제외 |
+| Python 단위·API 시험 | `python -m pytest` | 80개 통과 | 인증·Paper·Watch, 키움 snapshot·DB 대조, lease/fencing, WebSocket 계약, worker READY gate와 상태 CLI/API 포함; 주문 송신 제외 |
 | Console component 시험 | `npm test` | 4개 통과 | 미인증 차단, 2단계 로그인, 세션 복구·CSRF 로그아웃, Paper 조회 전용 화면 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
@@ -283,10 +288,10 @@
 | Console production dependency audit | `npm audit --omit=dev --audit-level=high` | 취약점 0건 | Next 하위 PostCSS·Sharp를 검증된 패치 버전으로 고정 |
 | 정적 검사 | `python -m ruff check app tests migrations` | 통과 | FastAPI dependency의 B008은 프레임워크 관용구로 제외 |
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
-| migration 왕복 | `alembic upgrade head`·`current`·`downgrade base` | 통과 | SQLite에서 reconciliation schema 포함 `20260803_0004` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
+| migration 왕복 | `alembic upgrade head`·`current`·`downgrade base` | 통과 | SQLite에서 worker lease/state 포함 `20260804_0005` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
 | Docker Compose·HTTPS | Ubuntu 서버에서 전체 서비스 기동, migration, host Nginx·TLS 접속과 로그인 | 통과 | PostgreSQL·Redis healthy, secret 읽기, API·Frontend·gateway, HTTPS와 ID·비밀번호·TOTP 로그인 확인 |
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
 | Watch 상태 UI 변경 점검 | component·TypeScript·production build | 통과 | 인앱 브라우저의 로컬 URL 정책 차단으로 이번 변경의 추가 시각 점검은 미실행 |
 
-검증된 세부 동작은 인증·Paper·Watch 외에 키움 MOCK URL 강제, 메모리 토큰 단일 갱신, 401 재인증, `ka10001`, `ka00001`, `ka10075`, `ka10076`, `kt00018` fixture mapping과 읽기 전용 대조를 포함한다. 실제 서버의 MOCK 인증·`ka10001` 시세·`ka00001` 계좌 일치는 2026-08-03 통과했다. 신규 계좌 snapshot API·WebSocket·분봉·지표·호가 가격정책·자동 복구·PostgreSQL 동시성은 미검증이다.
+검증된 세부 동작은 인증·Paper·Watch 외에 키움 MOCK URL 강제, 메모리 token 단일 갱신, 401 재인증, 5개 REST API mapping, 읽기 전용 대조와 WebSocket worker 안전 게이트를 포함한다. 실제 서버의 MOCK 인증·시세·계좌 일치는 2026-08-03, 빈 계좌의 미체결·체결·잔고 snapshot 대조는 2026-08-04 통과했다. 상시 WebSocket worker·분봉·지표·호가 가격정책·주문 송신·PostgreSQL 다중 worker 경쟁은 실서버 미검증이다.

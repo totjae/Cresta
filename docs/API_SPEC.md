@@ -147,6 +147,9 @@ PATCH는 활성 설정을 직접 수정하지 않고 초안 version을 생성한
 | API-084 | 포지션 목록은 수량 0의 종료 포지션을 `state`로 구분하며 평균단가·version·기준시각을 제공한다. |
 | API-085 | 운영 Web API에는 Paper 주문·체결·게이트를 임의 생성하거나 변경하는 endpoint를 제공하지 않는다. |
 | API-086 | `kiwoom_broker_status`는 기능 비활성 또는 secret 미준비 시 `NOT_CONFIGURED`, secret 파일 준비 시 `CONFIGURED`를 반환한다. 실제 인증과 연결 확인 전에는 `CONNECTED`를 반환하지 않는다. |
+| API-087 | `GET /system/broker`는 `KIWOOM_MOCK_PRIMARY`의 gate, worker 상태, lease 유효 여부, WebSocket·구독 상태와 최근 heartbeat·재동기화 시각을 반환한다. |
+| API-088 | Broker 상태 응답에는 worker owner ID, token, 전체 계좌번호, 자격증명, 원본 오류 메시지와 원본 WebSocket payload를 포함하지 않는다. |
+| API-089 | worker 레코드가 없거나 heartbeat가 lease 만료 기준을 넘으면 응답은 `READY`를 추론하지 않고 `NOT_STARTED` 또는 `STALE`을 표시한다. |
 
 ### 3.6 Watch snapshot 조회 모델
 

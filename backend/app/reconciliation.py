@@ -33,6 +33,13 @@ ACTIVE_ORDER_STATES = {
     "RECONCILING",
 }
 BROKER_REQUEST_IDS = ["ka00001", "ka10075", "ka10076", "kt00018"]
+RECONCILIATION_TRIGGERS = {
+    "MANUAL_BOOTSTRAP",
+    "WORKER_STARTUP",
+    "WEBSOCKET_RECONNECTED",
+    "BROKER_EVENT",
+    "PERIODIC",
+}
 
 
 @dataclass(frozen=True)
@@ -62,12 +69,16 @@ def run_kiwoom_reconciliation(
     client: KiwoomMockClient,
     *,
     correlation_id: str | None = None,
+    trigger: str = "MANUAL_BOOTSTRAP",
+    clean_gate_reason: str = "PERMANENT_WORKER_REQUIRED",
 ) -> ReconciliationResult:
+    if trigger not in RECONCILIATION_TRIGGERS:
+        raise ValueError("Unsupported reconciliation trigger")
     now = datetime.now(UTC)
     run = ReconciliationRun(
         account_alias=ACCOUNT_ALIAS,
         environment="MOCK",
-        trigger="MANUAL_BOOTSTRAP",
+        trigger=trigger,
         scope="ACCOUNT",
         state="RUNNING",
         started_at=now,
@@ -123,7 +134,7 @@ def run_kiwoom_reconciliation(
     if critical_count:
         gate_status, gate_reason = "HALTED", "RECONCILIATION_MISMATCH"
     else:
-        gate_status, gate_reason = "RECONCILING", "PERMANENT_WORKER_REQUIRED"
+        gate_status, gate_reason = "RECONCILING", clean_gate_reason
     _set_gate(db, gate_status, gate_reason)
     db.commit()
 

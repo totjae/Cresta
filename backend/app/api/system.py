@@ -7,10 +7,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import AuthContext, get_auth_context
+from app.broker.worker_state import get_broker_status
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import MarketStreamState, Position, TradingGate, TradingOrder
 from app.schemas import (
+    BrokerStatusResponse,
     SystemCountResponse,
     SystemHealthResponse,
     TradingGateResponse,
@@ -104,4 +106,27 @@ def system_health(
         market_data_status=_market_data_status(db, settings),
         trading_gate=gate_response,
         counts=counts,
+    )
+
+
+@router.get("/broker", response_model=BrokerStatusResponse)
+def broker_status(
+    request: Request,
+    _: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+) -> BrokerStatusResponse:
+    status = get_broker_status(db)
+    return BrokerStatusResponse(
+        request_id=request.state.request_id,
+        state=status.state,
+        gate_status=status.gate_status,
+        gate_reason=status.gate_reason,
+        fencing_token=status.fencing_token,
+        lease_valid=status.lease_valid,
+        websocket_connected=status.websocket_connected,
+        subscriptions_ready=status.subscriptions_ready,
+        last_heartbeat_at=status.last_heartbeat_at,
+        last_reconciliation_at=status.last_reconciliation_at,
+        last_reconciliation_run_id=status.last_reconciliation_run_id,
+        last_error_code=status.last_error_code,
     )

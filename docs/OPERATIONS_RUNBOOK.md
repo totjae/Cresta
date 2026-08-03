@@ -229,7 +229,7 @@ sudo docker compose \
   exec -T api cresta-admin kiwoom-check
 ```
 
-성공 상태는 `ACCOUNT_VERIFIED`이며 이는 일회성 점검 결과다. 상시 Broker worker와 재동기화가 구현되기 전에는 `READY`를 의미하지 않는다.
+성공 상태는 `ACCOUNT_VERIFIED`이며 이는 일회성 점검 결과다. 상시 Broker worker의 lease·WebSocket·구독·재동기화까지 정상이어야 `READY`다.
 
 읽기 전용 계좌 스냅샷 대조는 migration 적용 후 다음 명령으로 실행한다.
 
@@ -240,7 +240,28 @@ sudo docker compose \
   exec -T api cresta-admin kiwoom-reconcile-check
 ```
 
-정상 대조도 상시 worker가 없으므로 `RECONCILING`을 반환한다. `HALTED` 또는 `DEGRADED`이면 신규 주문을 허용하지 않고 mismatch/error code만 진단 기록에 남긴다.
+수동 정상 대조는 `RECONCILING`을 반환한다. `HALTED` 또는 `DEGRADED`이면 신규 주문을 허용하지 않고 mismatch/error code만 진단 기록에 남긴다.
+
+상시 worker 배포와 상태 확인:
+
+```bash
+sudo docker compose \
+  -f deploy/compose.yaml \
+  -f deploy/compose.kiwoom.yaml \
+  up -d --build api worker
+
+sudo docker compose \
+  -f deploy/compose.yaml \
+  -f deploy/compose.kiwoom.yaml \
+  exec -T api cresta-admin kiwoom-worker-status
+
+sudo docker compose \
+  -f deploy/compose.yaml \
+  -f deploy/compose.kiwoom.yaml \
+  logs --tail=100 worker
+```
+
+정상 출력은 `state=READY`, `gate_status=READY`, `lease_valid=true`, `websocket_connected=true`, `subscriptions_ready=true`다. status 명령은 READY가 아니면 종료 코드 5를 반환한다. 실제 token·전체 계좌번호·owner ID는 출력하지 않는다. worker를 이중 기동해도 lease를 가진 하나만 키움에 연결하며 대기 인스턴스는 직접 조회하지 않는다.
 
 `CRESTA_KIWOOM_ENABLED=true`는 세 secret이 준비되고 출구 IP를 별도로 확인한 뒤에만 적용한다. 이번 단계의 `CONFIGURED`는 파일 준비 상태이며 키움 인증·계좌조회 성공을 뜻하지 않는다.
 

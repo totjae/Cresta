@@ -158,6 +158,48 @@ class TradingGate(Base):
     }
 
 
+class BrokerLease(Base):
+    __tablename__ = "broker_leases"
+    __table_args__ = (
+        CheckConstraint("fencing_token > 0", name="ck_broker_leases_fencing_positive"),
+        CheckConstraint("version > 0", name="ck_broker_leases_version_positive"),
+    )
+
+    account_alias: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class BrokerWorkerState(Base):
+    __tablename__ = "broker_worker_states"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('STARTING','AUTHENTICATING','CONNECTING','SUBSCRIBING',"
+            "'RECONCILING','READY','DEGRADED','STOPPED')",
+            name="ck_broker_worker_states_state",
+        ),
+        CheckConstraint(
+            "fencing_token > 0", name="ck_broker_worker_states_fencing_positive"
+        ),
+    )
+
+    account_alias: Mapped[str] = mapped_column(String(64), primary_key=True)
+    environment: Mapped[str] = mapped_column(String(16), nullable=False, default="MOCK")
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="STARTING")
+    fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    websocket_connected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    subscriptions_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_reconciliation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_reconciliation_run_id: Mapped[str | None] = mapped_column(String(36))
+    last_error_code: Mapped[str | None] = mapped_column(String(64))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class ReconciliationRun(Base):
     __tablename__ = "reconciliation_runs"
     __table_args__ = (

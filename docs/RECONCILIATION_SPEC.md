@@ -261,6 +261,15 @@ reconciliation_run:
 | REC-076 | mismatch가 없으면 run은 `SUCCEEDED`, gate는 `RECONCILING/PERMANENT_WORKER_REQUIRED`다. 하나 이상의 `CRITICAL` mismatch가 있으면 run은 `MISMATCH`, gate는 `HALTED/RECONCILIATION_MISMATCH`다. |
 | REC-077 | 조회·정규화·DB 반영이 실패하면 run은 `FAILED`, gate는 `DEGRADED/RECONCILIATION_FAILED`다. CLI는 안정된 오류 코드와 비밀이 없는 요약만 출력한다. |
 
+### 3.11 상시 worker 재동기화
+
+| ID | 요구사항 |
+| --- | --- |
+| REC-078 | worker 재동기화 trigger는 `WORKER_STARTUP`, `WEBSOCKET_RECONNECTED`, `BROKER_EVENT`, `PERIODIC` 중 하나로 기록한다. 수동 CLI는 기존 `MANUAL_BOOTSTRAP`을 유지한다. |
+| REC-079 | worker가 실행한 clean 대조도 reconciliation 함수 단독으로 READY를 만들지 않는다. 호출자가 현재 lease·LOGIN·구독을 재검증한 뒤 별도 transaction에서 READY를 확정한다. |
+| REC-080 | `00`·`04` 실시간 이벤트는 직접 주문·체결·포지션 변경 근거가 아니라 REST 대조 trigger로만 사용한다. 1초 안의 연속 이벤트는 하나로 합칠 수 있다. |
+| REC-081 | 주기·이벤트 대조 중 mismatch는 즉시 `HALTED`, 조회 실패는 `DEGRADED`로 전환하며 이전 READY 상태를 보존하지 않는다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 키움 조회 API 일부만 성공하면 성공한 스냅샷으로 전체 계좌를 확정하지 않는다.

@@ -51,6 +51,7 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | `reconciliation_runs` | id, scope, trigger, state, started_at, completed_at | 단계·checkpoint 포함 |
 | `reconciliation_mismatches` | id, run_id, code, symbol, severity, state, broker_value, internal_value | 해결 이력 |
 | `broker_leases` | account_alias, owner_id, fencing_token, expires_at, version | account_alias PK |
+| `broker_worker_states` | account_alias, state, fencing_token, websocket_connected, subscriptions_ready, heartbeat/reconciliation 시각, error_code | account_alias PK, 비밀 저장 금지 |
 | `audit_logs` | id, actor_type, actor_id, action, target, result, metadata, correlation_id, created_at | append-only |
 
 ### 3.3 주문·체결 제약과 트랜잭션
@@ -73,6 +74,9 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | DB-018 | run state는 `RUNNING`, `SUCCEEDED`, `MISMATCH`, `FAILED`만 허용하며 종료 상태에는 completed_at이 필요하다. |
 | DB-019 | `reconciliation_mismatches`는 run FK, code, symbol, severity, state, broker/internal 비교 JSON과 생성/해결 시각을 저장한다. account/token과 원본 응답은 금지한다. |
 | DB-026 | mismatch severity는 `WARNING`, `CRITICAL`, state는 `OPEN`, `RESOLVED`로 제한하고 run 삭제 시 mismatch도 함께 삭제한다. |
+| DB-027 | `broker_leases` 획득·갱신·해제는 account_alias 행 잠금과 owner/fencing token 비교로 원자 처리한다. 만료 전 다른 owner는 획득할 수 없다. |
+| DB-028 | `broker_worker_states`는 worker 상태와 연결·구독·heartbeat·최근 재동기화만 저장하며 계좌번호·접근 token·App Key·원본 WebSocket payload를 저장하지 않는다. |
+| DB-029 | `READY` 전환과 worker 상태 갱신은 현재 lease owner와 fencing token 검증을 같은 transaction에서 통과해야 한다. |
 
 권장 트랜잭션 격리 수준은 일반 명령 `READ COMMITTED`와 명시적 행 잠금이며, 계좌 소유권·설정 활성화처럼 경합이 적고 중요도가 높은 작업은 `SERIALIZABLE` 또는 동등한 낙관적 재시도를 사용한다.
 

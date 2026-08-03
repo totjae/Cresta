@@ -294,7 +294,7 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 | KIW-095 | `return_code`가 0이 아니거나 필수 필드가 없거나 JSON이 아니면 해당 응답을 정상 시세로 저장하지 않는다. 오류 응답에는 토큰·App Key·Secret을 포함하지 않는다. |
 | KIW-096 | 자격증명이 없거나 Broker가 비활성인 경우 API 서버는 계속 기동할 수 있지만 상태는 `NOT_CONFIGURED`이다. 자격증명 파일이 읽기 가능하면 외부 호출 전 상태는 `CONFIGURED`이며 실제 인증 성공 전 `CONNECTED`로 표시하지 않는다. |
 
-첫 REST 기반 단계는 토큰 수명주기, 공통 REST client, `ka10001` 정규화와 구성 상태를 포함했다. 이번 계좌 부트스트랩 단계는 `ka00001` 일치 점검까지 확장하며, WebSocket 상시 연결, 주문 송신, 재동기화와 Active worker lease는 후속 단계로 유지한다.
+첫 REST 기반 단계는 토큰 수명주기, 공통 REST client, `ka10001` 정규화와 구성 상태를 포함했다. 이후 계좌 snapshot 대조와 상시 WebSocket worker·Active lease까지 확장했으며 주문 송신은 아직 후속 단계다.
 
 ### 3.15 모의투자 계좌조회와 부트스트랩 점검
 
@@ -340,6 +340,35 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 | KIW-109 | 당일 체결 응답에 독립된 체결번호가 없으므로 이번 단계는 주문번호별 체결 합계 비교에만 사용한다. 체결 원장 복원은 실시간 체결 고유키가 확인되기 전 수행하지 않는다. |
 | KIW-110 | `cresta-admin kiwoom-reconcile-check`는 계좌 일치 후 미체결·당일 체결·평가잔고 전체 페이지를 읽고 DB 원장과 대조한다. 비밀·전체 계좌번호·원본 payload는 출력하지 않는다. |
 
+### 3.17 상시 모의투자 Broker worker
+
+2026-08-04 키움 공식 시작하기와 국내주식 WebSocket 가이드에서 다음 계약을 확인했다.
+
+- 연결 URL: `wss://mockapi.kiwoom.com:10000/api/dostk/websocket`
+- 로그인: `{"trnm":"LOGIN","token":"<access token>"}`
+- 등록: `REG`, 그룹 `1`, 주문체결 `00`, 잔고 `04`
+- heartbeat: 서버의 `PING` JSON을 변경 없이 즉시 회신
+
+참고 자료:
+
+- <https://openapi.kiwoom.com/m/guide/index?dummyVal=0>
+- <https://openapi.kiwoom.com/guide/apiguide?jobTpCode=15>
+
+첫 상시 worker는 실시간 `00`·`04` 원문을 주문 원장에 직접 적용하지 않는다. 이벤트 수신 사실을 계좌 재동기화 trigger로 사용하고, REST 전체 snapshot이 일치할 때만 거래 게이트를 갱신한다.
+
+| ID | 요구사항 |
+| --- | --- |
+| KIW-111 | worker는 별도 `worker` container에서 계좌별 PostgreSQL lease를 획득한 인스턴스 하나만 키움에 연결한다. API container는 WebSocket을 소유하지 않는다. |
+| KIW-112 | lease는 60초 만료, 10초 heartbeat를 기본으로 하며 owner와 fencing token이 일치하지 않으면 갱신·READY 전환을 거부한다. lease 상실 시 연결을 닫고 `DEGRADED/WORKER_LEASE_LOST`로 전환한다. |
+| KIW-113 | worker는 토큰 발급→10자리 계좌 일치→WebSocket 연결→LOGIN 성공→`00`·`04` REG 성공→REST 전체 재동기화 순으로 시작한다. 어느 단계도 건너뛰지 않는다. |
+| KIW-114 | `LOGIN`·`REG` 응답의 `return_code`가 0이 아니거나 필수 필드가 없으면 READY로 전환하지 않는다. `PING`은 payload를 변경하지 않고 회신한다. |
+| KIW-115 | 시작·재연결·token 교체 후 전체 재동기화가 mismatch 없이 끝나고 현재 lease·WebSocket·구독이 모두 유효할 때만 `READY/WORKER_HEALTHY`로 전환한다. |
+| KIW-116 | 정상 연결 중 60초마다 전체 계좌 재동기화를 수행한다. `00`·`04` 이벤트는 1초 debounce 후 추가 재동기화를 요청하며 원본 실시간 payload를 DB나 로그에 저장하지 않는다. |
+| KIW-117 | REST client가 만료 전 새 token을 발급하면 기존 WebSocket을 정상 종료하고 새 token으로 LOGIN·REG·재동기화를 다시 수행한다. token 원문이나 두 token의 비교값은 영속화하지 않는다. |
+| KIW-118 | 연결 실패는 `1,2,5,10,30`초 capped backoff로 재시도한다. 단절 즉시 `RECONCILING/WEBSOCKET_RECONNECTING`, 반복 실패는 `DEGRADED/WEBSOCKET_UNAVAILABLE`로 기록하며 READY를 유지하지 않는다. |
+| KIW-119 | 종료 신호를 받으면 신규 작업을 중지하고 WebSocket과 소유 lease를 해제한다. 다른 owner의 lease나 gate는 수정하지 않는다. |
+| KIW-120 | `cresta-admin kiwoom-worker-status`와 `GET /api/v1/system/broker`는 owner UUID·token·계좌번호 없이 worker 상태, lease 유효 여부, fencing token, 연결·구독, 최근 heartbeat·재동기화와 안전한 오류 코드만 반환한다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 고정 IP가 맞더라도 키움 등록이 완료되지 않았으면 인증 성공으로 간주하지 않는다.
@@ -366,7 +395,6 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 
 ## 6. 미결정·보류 항목
 
-- 모의투자 계좌에 사용할 내부 별칭 확정
 - 원본 키움 요청·응답을 보관할 기간과 암호화 방식
-- WebSocket heartbeat와 실제 단절 판정 시간
+- 실제 모의 서버에서 PING 간격과 단절 판정 시간을 측정한 뒤 현재 timeout·backoff 조정
 - 키움 JSON 명세 다운로드 후 전체 필드·오류 코드 매핑

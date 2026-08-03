@@ -176,6 +176,24 @@ class SystemHealthResponse(StrictModel):
     counts: SystemCountResponse
 
 
+class BrokerStatusResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    environment: str = "MOCK"
+    account_alias: str = "KIWOOM_MOCK_PRIMARY"
+    state: str
+    gate_status: str | None
+    gate_reason: str | None
+    fencing_token: int | None
+    lease_valid: bool
+    websocket_connected: bool
+    subscriptions_ready: bool
+    last_heartbeat_at: datetime | None
+    last_reconciliation_at: datetime | None
+    last_reconciliation_run_id: str | None
+    last_error_code: str | None
+
+
 class QuoteResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str

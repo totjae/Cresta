@@ -20,9 +20,11 @@
 - 키움 모의투자 전용 메모리 토큰·REST client와 `ka10001` 복구 시세 정규화 기반
 - 키움 `ka00001` 10자리 계좌 일치 검증과 비밀 마스킹 `kiwoom-check` 점검 명령
 - 키움 `ka10075`·`ka10076`·`kt00018` 연속조회 정규화와 읽기 전용 DB 대조 `kiwoom-reconcile-check`
+- PostgreSQL 단일 lease·fencing, 키움 WebSocket LOGIN·`00`/`04` 구독, PING echo와 주기·이벤트 기반 재동기화를 수행하는 별도 Broker worker
+- 인증된 `GET /api/v1/system/broker`와 `kiwoom-worker-status` 안전 상태 조회
 - N100·16GiB 서버용 Docker Compose 자원 제한 초안
 
-Console의 주문 생성·승인·설정 화면, 주문가격 산정, 전체 Guard·자동 복구·분봉·지표·AI와 키움 WebSocket·주문 연결은 아직 구현되지 않았습니다. 키움 계좌 대조는 읽기 전용이며 외부 주문·포지션을 자동 편입하거나 수정하지 않습니다.
+Console의 주문 생성·승인·설정 화면, 주문가격 산정, 전체 Guard·분봉·지표·AI와 키움 주문 송신·실시간 이벤트 직접 원장 반영은 아직 구현되지 않았습니다. 키움 계좌 대조와 Broker worker는 읽기 전용이며 외부 주문·포지션을 자동 편입하거나 수정하지 않습니다.
 
 ## Backend 개발 실행
 
@@ -41,6 +43,8 @@ alembic upgrade head
 cresta-admin create-admin --login-id <사용자ID>
 cresta-admin kiwoom-check
 cresta-admin kiwoom-reconcile-check
+cresta-admin kiwoom-worker-status
+cresta-worker kiwoom
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 

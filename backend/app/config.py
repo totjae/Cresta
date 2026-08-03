@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     kiwoom_account_id_file: str | None = None
     kiwoom_token_refresh_minutes: int = Field(default=60, ge=1, le=720)
     kiwoom_timeout_seconds: int = Field(default=5, ge=1, le=30)
+    kiwoom_worker_lease_seconds: int = Field(default=60, ge=30, le=300)
+    kiwoom_worker_heartbeat_seconds: int = Field(default=10, ge=5, le=60)
+    kiwoom_reconcile_interval_seconds: int = Field(default=60, ge=30, le=600)
+    kiwoom_event_debounce_seconds: int = Field(default=1, ge=1, le=10)
     totp_encryption_key: str | None = Field(default=None, repr=False)
     totp_encryption_key_file: str | None = None
 
@@ -76,6 +80,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Only the Kiwoom MOCK REST endpoint is allowed in the first release")
         if self.kiwoom_ws_base_url.rstrip("/") != "wss://mockapi.kiwoom.com:10000":
             raise RuntimeError("Only the Kiwoom MOCK WebSocket endpoint is allowed in the first release")
+        if self.kiwoom_worker_heartbeat_seconds * 2 >= self.kiwoom_worker_lease_seconds:
+            raise RuntimeError("Kiwoom worker heartbeat must be less than half the lease duration")
 
     def kiwoom_configuration_status(self) -> str:
         if not self.kiwoom_enabled:

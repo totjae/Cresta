@@ -19,6 +19,7 @@ from app.auth.crypto import (
     verify_totp,
 )
 from app.broker.kiwoom import KiwoomAdapterError, KiwoomMockClient
+from app.broker.worker_state import get_broker_status
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import RecoveryCode, TotpCredential, User
@@ -160,6 +161,37 @@ def reconcile_kiwoom() -> int:
     return 4 if result.critical_mismatch_count else 0
 
 
+def kiwoom_worker_status() -> int:
+    with SessionLocal() as db:
+        status = get_broker_status(db)
+    print(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "environment": "MOCK",
+                "account_alias": "KIWOOM_MOCK_PRIMARY",
+                "state": status.state,
+                "gate_status": status.gate_status,
+                "gate_reason": status.gate_reason,
+                "fencing_token": status.fencing_token,
+                "lease_valid": status.lease_valid,
+                "websocket_connected": status.websocket_connected,
+                "subscriptions_ready": status.subscriptions_ready,
+                "last_heartbeat_at": _iso(status.last_heartbeat_at),
+                "last_reconciliation_at": _iso(status.last_reconciliation_at),
+                "last_reconciliation_run_id": status.last_reconciliation_run_id,
+                "last_error_code": status.last_error_code,
+            },
+            separators=(",", ":"),
+        )
+    )
+    return 0 if status.state == "READY" and status.lease_valid else 5
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.astimezone(UTC).isoformat() if value is not None else None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="cresta-admin")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -167,6 +199,7 @@ def main() -> None:
     create.add_argument("--login-id", required=True)
     subparsers.add_parser("kiwoom-check")
     subparsers.add_parser("kiwoom-reconcile-check")
+    subparsers.add_parser("kiwoom-worker-status")
     args = parser.parse_args()
     if args.command == "create-admin":
         raise SystemExit(create_admin(args.login_id))
@@ -174,6 +207,8 @@ def main() -> None:
         raise SystemExit(check_kiwoom())
     if args.command == "kiwoom-reconcile-check":
         raise SystemExit(reconcile_kiwoom())
+    if args.command == "kiwoom-worker-status":
+        raise SystemExit(kiwoom_worker_status())
 
 
 if __name__ == "__main__":
