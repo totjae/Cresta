@@ -33,7 +33,7 @@
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 감시 종목·키움 `0B`·`0D`, 1분봉·VWAP·SMA5·고점 하락률·spread 영속화 로컬 검증 완료; 상대 거래량·체결강도·변동성과 실제 장중 수신 미검증 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 구현 중 | 최신 영속 snapshot 기반 `deterministic-mock-v1`, 판단 저장과 실행 권한 분기 로컬 검증; 외부 모델·승인·Guard 실행 미구현 |
 | DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·지표 `20260804_0009` 포함 SQLite migration 적용과 단위시험 완료; 신규 migration 실서버 PostgreSQL 적용·실제 다중 container 경쟁 미검증 |
-| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | worker READY·재시작 fencing 실서버 검증, gateway Docker DNS 재해석 설정 로컬 계약 통과; 서버 502 재발 시험·백업·경보·복구훈련 미완료 |
+| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 부팅 Compose 조정 unit 구현·로컬 계약 통과; 06:00 실서버 재부팅 인수시험과 백업·경보·복구훈련 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 명세 완료 | 키움 출구 IP·MOCK 인증·시세 실서버 확인 반영, 계좌·주문 외부 통합 게이트 유지 |
 | Backend·Docker 골격 | `docs/SYSTEM_DESIGN.md`, `docs/OPERATIONS_RUNBOOK.md` | 검증 완료 | API source UID `10001` 소유권·PostgreSQL·Redis·API·Frontend·gateway 기동과 HTTPS/내부 health 실서버 확인 |
 

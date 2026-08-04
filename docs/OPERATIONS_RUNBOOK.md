@@ -89,6 +89,48 @@ PostgreSQL healthy
 | OPS-011 | 위 의존 단계 중 하나라도 실패하면 신규 주문 게이트를 열지 않는다. |
 | OPS-012 | 종료 시 먼저 신규 작업을 중단하고 큐를 drain한 뒤 Broker lease를 반납한다. 결과 불명 주문이 있으면 `UNKNOWN`으로 남겨 재시작 대조 대상으로 만든다. |
 | OPS-013 | 비상정지, 미해결 불일치와 설정 활성 버전은 컨테이너 재시작에도 유지한다. |
+| OPS-014 | 서버의 매일 06:00 예정 재부팅과 예기치 않은 Docker daemon 재시작 뒤 모든 Compose 서비스는 운영자 로그인 없이 다시 시작한다. API·Console·gateway는 자체 healthcheck를 가지며 컨테이너 재시작 정책은 `unless-stopped`로 통일한다. |
+| OPS-015 | 부팅 시 `cresta-boot.service`가 Docker와 network-online 이후 기본 Compose와 키움 overlay를 `up -d --wait`로 한 번 조정한다. 180초 안에 user-facing health가 준비되지 않으면 최대 5회 재시도하고 실패 상태를 남기되, 거래 게이트는 열지 않는다. |
+| OPS-016 | 부팅 완료 판정은 컨테이너의 단순 `running`이 아니라 PostgreSQL·Redis·API·Console·gateway health 통과를 요구한다. Broker worker는 프로세스 기동 후 자체 재연결·재동기화로 `READY`를 회복하며, 외부 키움 장애 때문에 Web Console까지 중단시키지 않는다. |
+
+재부팅 복구 구성은 두 층으로 나눈다. Docker의 `unless-stopped` 정책은 개별 컨테이너의 종료와 Docker daemon 재시작을 복구하고, systemd oneshot은 부팅 때 누락·수동 정지된 컨테이너까지 Compose 정의와 일치시키며 준비 상태를 기다린다. systemd는 컨테이너 프로세스를 상시 감시하거나 개별 재시작하지 않으므로 Docker 재시작 정책과 역할이 중복되지 않는다.
+
+```text
+network-online + docker active
+→ cresta-boot.service: compose config 검증
+→ compose up -d --wait --wait-timeout 180
+→ PostgreSQL·Redis healthy
+→ API·Console healthy
+→ gateway /healthz healthy
+→ boot unit active (exited)
+→ Broker worker가 독립적으로 READY 복구
+```
+
+호스트 최초 1회 설치:
+
+```bash
+cd /home/totquf4171/cresta
+sudo install -o root -g root -m 0644 \
+  deploy/cresta-boot.service \
+  /etc/systemd/system/cresta-boot.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now cresta-boot.service
+```
+
+저장소에서 unit 파일이 변경된 배포는 위 `install`과 `daemon-reload`를 다시 실행한다. 예정 재부팅 후 다음 명령이 모두 성공해야 한다.
+
+```bash
+sudo systemctl is-enabled docker cresta-boot.service
+sudo systemctl --no-pager --full status cresta-boot.service
+sudo docker compose \
+  -f /home/totquf4171/cresta/deploy/compose.yaml \
+  -f /home/totquf4171/cresta/deploy/compose.kiwoom.yaml \
+  ps
+curl --fail --silent --show-error --max-time 5 \
+  http://127.0.0.1:7788/healthz
+```
+
+`compose ps`에서 PostgreSQL·Redis·API·Frontend·Nginx는 `healthy`, worker는 `Up`이어야 한다. 이어서 인증된 Console의 Broker 상태가 `READY`로 복구되는지 확인한다. Broker가 `DEGRADED`여도 Console과 API가 healthy이면 부팅 복구 자체는 성공이며, 거래 게이트를 닫은 채 키움 연결 원인을 별도로 처리한다.
 
 ### 3.3 배포·업데이트·롤백
 

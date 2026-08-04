@@ -259,6 +259,8 @@
 | T-KIW-038 | KIW-136, REC-080~082 | `00`·`04` 이벤트 수신 후 debounce 중 CREATED 주문 존재 | 즉시 RECONCILING, 대조 전 송신 0회, BROKER_EVENT 대조 성공 후에만 polling 재개 | 통과 (2026-08-04, 자동) |
 | T-KIW-039 | KIW-137, SEC-065, API-094~098 | Web MOCK 진단 주문 요청·proof 재사용·worker 비준비 | READY에서만 BUY 1주 CREATED·감사, proof 재사용 403, 비준비 409 | 통과 (2026-08-04, 자동) |
 | T-OPS-011 | OPS-003 | API 컨테이너 IP 변경 후 gateway를 재시작하지 않고 health·login 요청 | Docker DNS 재해석 후 새 API로 연결되고 502가 지속되지 않음 | 설정 계약 통과·실서버 대기 |
+| T-OPS-012 | OPS-014 | 배포 Compose의 장기 실행 서비스 재시작·health 설정 검사 | API·Frontend 포함 전 서비스 `unless-stopped`, PostgreSQL·Redis·API·Frontend·gateway healthcheck 존재 | 통과 (2026-08-05, 자동 계약) |
+| T-OPS-013 | OPS-015~016 | `cresta-boot.service` 정적 계약과 Ubuntu 부팅 시험 | Docker·network-online 이후 두 Compose 파일을 `up -d --wait --wait-timeout 180`으로 조정하고 실패 재시도; 부팅 후 core 5종 healthy·worker Up·내부 health 200 | 정적 계약 통과·실서버 재부팅 대기 |
 
 ## 4. 시험 환경
 

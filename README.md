@@ -62,6 +62,8 @@ npm run build
 
 운영 Web 진입점은 `https://trade.mihoservice.xyz`이며, Compose gateway는 `127.0.0.1:7788`에만 바인딩됩니다. 호스트 Nginx 예시는 `deploy/host-nginx.example.conf`에 있으며 7788 포트는 인터넷에 직접 개방하지 않습니다.
 
+서버 재부팅 후 전체 Compose 스택을 자동 복구하려면 최초 1회 `deploy/cresta-boot.service`를 systemd에 설치하고 활성화합니다. unit 변경이 포함된 업데이트 뒤에는 파일을 다시 설치하고 `daemon-reload`해야 합니다. 정확한 설치·부팅 인수시험 절차는 [배포·운영·장애복구 명세](docs/OPERATIONS_RUNBOOK.md)의 3.2절을 따릅니다.
+
 ## 문서
 
 - [제품 요구사항](docs/PRODUCT_REQUIREMENTS.md)

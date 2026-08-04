@@ -39,7 +39,7 @@ services:
   api:
     build:
       context: ../backend
-    restart: on-failure:3
+    restart: unless-stopped
     env_file: [.env]
     environment:
       CRESTA_TOTP_ENCRYPTION_KEY_FILE: /run/secrets/totp_encryption_key
@@ -52,6 +52,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).read()"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     mem_limit: 1g
     cpus: 1.0
     networks: [backend]
@@ -59,8 +69,20 @@ services:
   frontend:
     build:
       context: ../frontend
-    restart: on-failure:3
-    depends_on: [api]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     mem_limit: 512m
     cpus: 0.5
     networks: [backend]
@@ -68,11 +90,21 @@ services:
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
-    depends_on: [api, frontend]
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
     ports:
       - "127.0.0.1:7788:8080"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     mem_limit: 256m
     cpus: 0.25
     networks: [backend]

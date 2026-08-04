@@ -1,0 +1,21 @@
+[Unit]
+Description=Cresta Compose boot reconciliation
+Documentation=file:/home/totquf4171/cresta/docs/OPERATIONS_RUNBOOK.md
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/totquf4171/cresta
+ExecStartPre=/usr/bin/docker compose -f deploy/compose.yaml -f deploy/compose.kiwoom.yaml config --quiet
+ExecStart=/usr/bin/docker compose -f deploy/compose.yaml -f deploy/compose.kiwoom.yaml up -d --wait --wait-timeout 180
+Restart=on-failure
+RestartSec=30s
+TimeoutStartSec=240
+
+[Install]
+WantedBy=multi-user.target
