@@ -1,6 +1,6 @@
 # Cresta Backend
 
-FastAPI 기반 Backend다. 현재 범위는 health endpoint, ID·비밀번호·TOTP 서버 세션 인증, Paper Broker 주문 상태 머신, Watch quote 정규화·영속 상태, 키움 MOCK 토큰·시세·10자리 계좌 일치, 읽기 전용 주문·체결·잔고 대조와 상시 WebSocket worker다. Paper 주문·체결과 Watch 시세 주입은 내부 service이며 공개 Web API로 제공하지 않는다.
+FastAPI 기반 Backend다. 현재 범위는 health endpoint, ID·비밀번호·TOTP 서버 세션 인증, Paper Broker 주문 상태 머신, 감시 종목 API와 Watch quote·1분봉·1차 지표 영속 상태, 키움 MOCK 토큰·시세·10자리 계좌 일치, 읽기 전용 주문·체결·잔고 대조와 상시 WebSocket worker다. Worker는 활성 KRX 감시 종목의 `0B`·`0D`를 구독한다. Paper 주문·체결과 Watch 시세 주입은 내부 service이며 공개 Web API로 제공하지 않는다.
 
 ```bash
 python -m venv .venv

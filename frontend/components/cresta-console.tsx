@@ -44,16 +44,18 @@ import {
   settingsApi,
   systemApi,
   SystemHealth,
+  watchlistApi,
+  WatchlistData,
 } from "../lib/api";
 
 type Screen = "boot" | "credentials" | "totp" | "console";
-type ConsolePage = "dashboard" | "positions" | "orders" | "decisions" | "settings" | "system";
+type ConsolePage = "dashboard" | "watchlist" | "positions" | "orders" | "decisions" | "settings" | "system";
 
 const SAFE_AUTH_ERROR = "인증 정보를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.";
 
 const navigation = [
   ["dashboard", "대시보드", LayoutDashboard, true],
-  ["watchlist", "감시 종목", Eye, false],
+  ["watchlist", "감시 종목", Eye, true],
   ["positions", "보유 포지션", WalletCards, true],
   ["orders", "승인·주문", ListChecks, true],
   ["decisions", "AI 판단", Bot, false],
@@ -245,6 +247,7 @@ function ConsoleShell({
         <div className="content">
           {(error || healthError) && <div className="console-alert" role="alert"><CircleAlert size={17} /> {error || healthError}</div>}
           {page === "dashboard" && <DashboardPage session={session} health={health} />}
+          {page === "watchlist" && <WatchlistPage session={session} onSessionExpired={onSessionExpired} />}
           {page === "orders" && <OrdersPage onSessionExpired={onSessionExpired} />}
           {page === "positions" && <PositionsPage onSessionExpired={onSessionExpired} />}
           {page === "decisions" && <DecisionsPage session={session} onSessionExpired={onSessionExpired} />}
@@ -280,6 +283,93 @@ function DashboardPage({ session, health }: { session: SessionData; health: Syst
       <article className="panel guard-panel"><div className="panel-head"><div><ShieldCheck size={18} /><span>Cresta Guard</span></div><span className="status-pill ok">ENFORCED</span></div><div className="guard-body"><div className="shield-visual"><ShieldCheck size={36} /></div><div><h3>거래 게이트 우선</h3><p>Paper Broker가 조회 가능해도 게이트가 READY가 아니면 신규 주문은 생성되지 않습니다.</p></div></div><div className="policy-row"><span>거래 게이트</span><b>{health?.trading_gate?.status ?? "초기화 전"}</b></div><div className="policy-row"><span>차단 사유</span><b>{health?.trading_gate?.reason ?? "없음"}</b></div></article>
       <article className="panel"><div className="panel-head"><div><ListChecks size={18} /><span>Paper 원장 요약</span></div><span className="status-pill neutral">READ ONLY</span></div><div className="metric-list"><div><span>전체 주문</span><strong>{health?.counts.orders ?? "—"}</strong></div><div><span>진행 주문</span><strong>{health?.counts.active_orders ?? "—"}</strong></div><div><span>보유 포지션</span><strong>{health?.counts.open_positions ?? "—"}</strong></div></div></article>
       <article className="panel activity-panel"><div className="panel-head"><div><Activity size={18} /><span>현재 연동 범위</span></div></div><div className="empty-state"><Radio size={26} /><h3>Paper 조회 전용</h3><p>주문·체결·포지션 조회만 활성화했습니다. 운영 Web에서는 임의 주문이나 체결을 만들 수 없습니다.</p></div></article>
+    </section>
+  </>;
+}
+
+function WatchlistPage({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {
+  const [data, setData] = useState<WatchlistData | null>(null);
+  const [symbol, setSymbol] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      setData(await watchlistApi.list());
+      setError("");
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) onSessionExpired();
+      else setError("감시 종목을 불러오지 못했습니다.");
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!/^\d{6}$/.test(symbol)) return;
+    setBusy(true);
+    try {
+      setData(await watchlistApi.create(session.csrf_token, symbol));
+      setSymbol("");
+      setError("");
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) onSessionExpired();
+      else if (caught instanceof ApiError && caught.status === 409) setError("이미 등록된 종목입니다.");
+      else if (caught instanceof ApiError && caught.status === 422) setError("등록 한도 또는 모의투자 시장 조건을 확인해 주세요.");
+      else setError("감시 종목을 등록하지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(itemId: string) {
+    setBusy(true);
+    try {
+      await watchlistApi.remove(session.csrf_token, itemId);
+      await load();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) onSessionExpired();
+      else setError("감시 종목을 해제하지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <>
+    <PageHeading kicker="CRESTA WATCH" title="감시 종목" description="키움 모의투자 KRX 실시간 체결·호가를 수집할 종목을 관리합니다." />
+    {error && <div className="console-alert"><CircleAlert size={15} />{error}</div>}
+    <section className="ledger-panel watchlist-panel">
+      <div className="ledger-toolbar">
+        <div>
+          <span className="status-pill neutral">{data?.items.length ?? 0} / 3</span>
+          <small>남은 슬롯 {data?.remaining_slots ?? "-"}개 · MOCK에서는 KRX만 지원</small>
+        </div>
+        <button className="secondary-button" disabled={busy} onClick={() => void load()}><RefreshCw size={14} />새로고침</button>
+      </div>
+      <form className="watchlist-form" onSubmit={submit}>
+        <label htmlFor="watch-symbol">종목코드</label>
+        <input id="watch-symbol" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="예: 005930" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} required />
+        <span className="watch-market">KRX · 키움 모의투자</span>
+        <button className="primary-button" type="submit" disabled={busy || symbol.length !== 6 || (data?.remaining_slots ?? 0) === 0}>감시 등록</button>
+      </form>
+      {!data ? <div className="empty-state ledger-empty"><span className="loader small" /></div> : data.items.length === 0 ?
+        <div className="empty-state ledger-empty"><Eye size={28} /><h3>등록된 감시 종목이 없습니다.</h3><p>숫자 6자리 종목코드를 등록하면 worker가 5초 이내에 실시간 구독을 동기화합니다.</p></div> :
+        <div className="watchlist-grid">{data.items.map((item) => <article className="watch-card" key={item.id}>
+          <div className="watch-card-head"><div><span>{item.market} · MOCK</span><h2>{item.symbol}</h2></div><span className={`order-status ${item.data_status === "AVAILABLE" ? "complete" : item.data_status === "DEGRADED" ? "risk" : "neutral"}`}>{item.data_status === "WAITING_FOR_DATA" ? "시세 대기" : item.data_status}</span></div>
+          <dl>
+            <div><dt>현재가</dt><dd>{item.quote ? `${Number(item.quote.last_price).toLocaleString("ko-KR")}원` : "-"}</dd></div>
+            <div><dt>누적 거래량</dt><dd>{item.quote ? item.quote.cumulative_volume.toLocaleString("ko-KR") : "-"}</dd></div>
+            <div><dt>데이터 품질</dt><dd>{item.quote?.quality ?? "WAITING"}</dd></div>
+            <div><dt>수신 경과</dt><dd>{item.quote ? `${item.quote.age_seconds}초` : "시세 수신 전"}</dd></div>
+            <div><dt>VWAP</dt><dd>{item.indicators ? `${Number(item.indicators.vwap).toLocaleString("ko-KR")}원` : "-"}</dd></div>
+            <div><dt>SMA5</dt><dd>{item.indicators?.sma5 ? `${Number(item.indicators.sma5).toLocaleString("ko-KR")}원` : "-"}</dd></div>
+            <div><dt>고점 대비</dt><dd>{item.indicators ? `${item.indicators.drawdown_from_high_pct}%` : "-"}</dd></div>
+            <div><dt>호가 spread</dt><dd>{item.indicators?.spread_pct ? `${item.indicators.spread_pct}%` : "-"}</dd></div>
+            <div><dt>1분봉</dt><dd>{item.indicators ? `${item.indicators.minute_bar_count}개` : "-"}</dd></div>
+          </dl>
+          <button className="secondary-button watch-remove" disabled={busy} onClick={() => void remove(item.id)}>감시 해제</button>
+        </article>)}</div>}
     </section>
   </>;
 }

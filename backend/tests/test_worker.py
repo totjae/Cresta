@@ -19,8 +19,17 @@ from app.broker.kiwoom import (
 )
 from app.broker.worker_state import get_broker_status
 from app.config import Settings
-from app.models import OrderIntent, ReconciliationRun, TradingOrder
+from app.models import (
+    MarketSnapshot,
+    MarketStreamState,
+    OrderIntent,
+    ReconciliationRun,
+    TradingOrder,
+    User,
+    WatchlistItem,
+)
 from app.reconciliation import ACCOUNT_ALIAS
+from app.watch import QuoteEvent
 
 
 class SnapshotClient:
@@ -59,6 +68,9 @@ class ControlledWebSocket:
     async def open(self, token: str) -> None:
         self.opened_with = token
 
+    async def sync_quotes(self, symbols: tuple[str, ...]) -> None:
+        assert symbols == ()
+
     async def receive(self) -> str:
         assert self.on_receive is not None
         self.on_receive()
@@ -80,6 +92,9 @@ class AccountEventWebSocket:
     async def open(self, token: str) -> None:
         self.opened_with = token
 
+    async def sync_quotes(self, symbols: tuple[str, ...]) -> None:
+        assert symbols == ()
+
     async def receive(self) -> str:
         if not self._event_sent:
             self._event_sent = True
@@ -95,6 +110,31 @@ class AccountEventWebSocket:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class QuoteWebSocket:
+    def __init__(self, quote: QuoteEvent) -> None:
+        self.quote = quote
+        self.worker: worker_module.KiwoomBrokerWorker | None = None
+        self.synced: list[tuple[str, ...]] = []
+        self.sent = False
+
+    async def open(self, _: str) -> None:
+        return None
+
+    async def sync_quotes(self, symbols: tuple[str, ...]) -> None:
+        self.synced.append(symbols)
+
+    async def receive(self) -> str | QuoteEvent:
+        if not self.sent:
+            self.sent = True
+            return self.quote
+        assert self.worker is not None
+        self.worker.stop()
+        return "OTHER"
+
+    async def close(self) -> None:
+        return None
 
 
 def _configured_settings(tmp_path: Path) -> Settings:
@@ -160,6 +200,42 @@ def test_worker_reaches_ready_only_after_websocket_and_clean_reconciliation(
     }
     assert observed["reconciliation_run_id"] is not None
     assert socket.closed is True
+
+
+def test_worker_syncs_watchlist_and_persists_realtime_quote(
+    monkeypatch: pytest.MonkeyPatch,
+    session_factory: sessionmaker[Session],
+    tmp_path: Path,
+    admin: User,
+) -> None:
+    monkeypatch.setattr(worker_module, "SessionLocal", session_factory)
+    with session_factory() as db:
+        db.add(WatchlistItem(user_id=admin.id, symbol="005930", market="KRX"))
+        db.commit()
+    observed_at = datetime.now(UTC)
+    quote = QuoteEvent(
+        symbol="005930", market="KRX", source="KIWOOM_WS", sequence_or_hash="worker-quote-1",
+        event_at=observed_at, received_at=observed_at, last_price=Decimal(70000),
+        open_price=Decimal(69000), high_price=Decimal(70500), low_price=Decimal(68800),
+        cumulative_volume=12345, trading_status="TRADING",
+    )
+    socket = QuoteWebSocket(quote)
+    worker = worker_module.KiwoomBrokerWorker(
+        _configured_settings(tmp_path),
+        client=SnapshotClient(),
+        websocket=socket,
+        owner_id="worker-owner-quote",
+    )
+    socket.worker = worker
+
+    assert asyncio.run(worker.run()) == 0
+    assert socket.synced[0] == ("005930",)
+    with session_factory() as db:
+        state = db.get(MarketStreamState, ("KRX", "005930"))
+        assert state is not None
+        snapshot = db.get(MarketSnapshot, state.current_snapshot_id)
+        assert snapshot is not None
+        assert snapshot.last_price == Decimal(70000)
 
 
 def _queue_order(session_factory: sessionmaker[Session]) -> str:

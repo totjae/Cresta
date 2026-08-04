@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     kiwoom_worker_heartbeat_seconds: int = Field(default=10, ge=5, le=60)
     kiwoom_reconcile_interval_seconds: int = Field(default=60, ge=30, le=600)
     kiwoom_event_debounce_seconds: int = Field(default=1, ge=1, le=10)
+    kiwoom_watchlist_sync_seconds: int = Field(default=5, ge=1, le=30)
     totp_encryption_key: str | None = Field(default=None, repr=False)
     totp_encryption_key_file: str | None = None
 

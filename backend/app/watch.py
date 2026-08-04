@@ -51,6 +51,7 @@ class QuoteEvent:
     best_ask_price: Decimal | None = None
     best_ask_quantity: int | None = None
     recovery_snapshot: bool = False
+    updates_trade: bool = True
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ def _payload(event: QuoteEvent) -> dict[str, object]:
         "source_sequence": event.source_sequence,
         "symbol": event.symbol,
         "trading_status": event.trading_status,
+        "updates_trade": event.updates_trade,
     }
 
 
@@ -178,9 +180,17 @@ def ingest_quote(db: Session, event: QuoteEvent) -> IngestResult:
         and state.last_sequence is not None
         and event.source_sequence > state.last_sequence + 1
     )
+    from app.indicators import trading_date, update_market_analysis
+
+    same_trading_date = bool(
+        state
+        and state.last_event_at is not None
+        and trading_date(event_at) == trading_date(_utc(state.last_event_at))
+    )
     volume_regression = bool(
         state
         and state.cumulative_volume is not None
+        and same_trading_date
         and event.cumulative_volume < state.cumulative_volume
     )
     source_changed = bool(state and state.source != event.source and not event.recovery_snapshot)
@@ -222,6 +232,15 @@ def ingest_quote(db: Session, event: QuoteEvent) -> IngestResult:
     )
     db.add(snapshot)
     db.flush()
+
+    if quality == "NORMAL":
+        update_market_analysis(
+            db,
+            event=event,
+            snapshot=snapshot,
+            previous_cumulative_volume=state.cumulative_volume if state else None,
+            previous_event_at=state.last_event_at if state else None,
+        )
 
     if state is None:
         state = MarketStreamState(

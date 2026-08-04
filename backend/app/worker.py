@@ -23,6 +23,8 @@ from app.config import Settings, get_settings
 from app.db import SessionLocal
 from app.ids import uuid7
 from app.reconciliation import ReconciliationResult, run_kiwoom_reconciliation
+from app.watch import QuoteEvent, WatchError, ingest_quote
+from app.watchlist import active_kiwoom_symbols
 
 logger = logging.getLogger("cresta.kiwoom_worker")
 RECONNECT_BACKOFF = (1, 2, 5, 10, 30)
@@ -123,6 +125,7 @@ class KiwoomBrokerWorker:
                     gate_reason="WEBSOCKET_CONNECTING",
                 )
                 await self.websocket.open(access_token)
+                await self._sync_watchlist()
                 self._require_state(
                     "SUBSCRIBING",
                     websocket_connected=True,
@@ -183,9 +186,15 @@ class KiwoomBrokerWorker:
         next_periodic = now + timedelta(seconds=self.settings.kiwoom_reconcile_interval_seconds)
         next_token_check = now + timedelta(seconds=self.settings.kiwoom_worker_heartbeat_seconds)
         event_due: datetime | None = None
+        next_watchlist_sync = now + timedelta(seconds=self.settings.kiwoom_watchlist_sync_seconds)
         order_dispatch_enabled = True
         while not self.stop_event.is_set() and not self.lease_lost.is_set():
             observed_at = datetime.now(UTC)
+            if observed_at >= next_watchlist_sync:
+                await self._sync_watchlist()
+                next_watchlist_sync = observed_at + timedelta(
+                    seconds=self.settings.kiwoom_watchlist_sync_seconds
+                )
             if order_dispatch_enabled:
                 dispatch_result = await self._dispatch_next_order()
                 if dispatch_result is not None and dispatch_result.status == "UNKNOWN":
@@ -240,6 +249,8 @@ class KiwoomBrokerWorker:
                 event_due = datetime.now(UTC) + timedelta(
                     seconds=self.settings.kiwoom_event_debounce_seconds
                 )
+            elif isinstance(event, QuoteEvent):
+                await asyncio.to_thread(self._persist_quote, event)
         if self.lease_lost.is_set():
             raise RuntimeError("WORKER_LEASE_LOST")
 
@@ -252,6 +263,19 @@ class KiwoomBrokerWorker:
                 return send_next_created_order(db, self.client, self.identity)
 
         return await asyncio.to_thread(execute)
+
+    async def _sync_watchlist(self) -> None:
+        with SessionLocal() as db:
+            symbols = active_kiwoom_symbols(db)
+        await self.websocket.sync_quotes(symbols)
+
+    @staticmethod
+    def _persist_quote(event: QuoteEvent) -> None:
+        try:
+            with SessionLocal() as db:
+                ingest_quote(db, event)
+        except WatchError as exc:
+            logger.warning("Kiwoom quote discarded code=%s symbol=%s", exc.code, event.symbol)
 
     async def _reconcile(self, trigger: str) -> ReconciliationResult:
         self._require_state(

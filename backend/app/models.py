@@ -46,6 +46,28 @@ class User(Base):
     totp: Mapped[TotpCredential] = relationship(back_populates="user", uselist=False)
 
 
+class WatchlistItem(Base):
+    __tablename__ = "watchlist_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "market", "symbol", name="uq_watchlist_items_user_market_symbol"
+        ),
+        CheckConstraint("market IN ('KRX')", name="ck_watchlist_items_market"),
+        Index("ix_watchlist_items_market_symbol", "market", "symbol"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(6), nullable=False)
+    market: Mapped[str] = mapped_column(String(16), nullable=False, default="KRX")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
 class TotpCredential(Base):
     __tablename__ = "totp_credentials"
 
@@ -576,3 +598,61 @@ class MarketStreamState(Base):
         "version_id_col": version,
         "version_id_generator": False,
     }
+
+
+class MinuteBar(Base):
+    __tablename__ = "minute_bars"
+    __table_args__ = (
+        UniqueConstraint(
+            "market", "symbol", "bucket_start", name="uq_minute_bars_stream_bucket"
+        ),
+        CheckConstraint("market IN ('KRX','NXT')", name="ck_minute_bars_market"),
+        Index("ix_minute_bars_stream_bucket", "market", "symbol", "bucket_start"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    market: Mapped[str] = mapped_column(String(16), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    bucket_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    open_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    high_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    low_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    close_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    volume: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    turnover: Mapped[Decimal] = mapped_column(Numeric(28, 4), nullable=False, default=0)
+    event_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    first_snapshot_id: Mapped[str] = mapped_column(ForeignKey("market_snapshots.id"), nullable=False)
+    last_snapshot_id: Mapped[str] = mapped_column(ForeignKey("market_snapshots.id"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __mapper_args__: ClassVar[dict[str, object]] = {
+        "version_id_col": version,
+        "version_id_generator": False,
+    }
+
+
+class IndicatorSnapshot(Base):
+    __tablename__ = "indicator_snapshots"
+    __table_args__ = (
+        CheckConstraint("market IN ('KRX','NXT')", name="ck_indicator_snapshots_market"),
+        Index("ix_indicator_snapshots_stream_created", "market", "symbol", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    market_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("market_snapshots.id"), nullable=False, unique=True, index=True
+    )
+    market: Mapped[str] = mapped_column(String(16), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    calculator_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    vwap: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    sma5: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    session_high: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    drawdown_from_high_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    spread_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    minute_bar_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    input_end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -37,7 +37,7 @@
 | GET | `/dashboard` | 계좌, 포지션, 시스템 상태 요약 |
 | GET | `/quotes/{symbol}` | 시장별 최신 시세·품질·기준시각 조회 |
 | GET/POST | `/watchlist` | 감시 종목 조회/등록 |
-| PATCH/DELETE | `/watchlist/{symbol}` | 전략 수정/감시 해제 |
+| DELETE | `/watchlist/{id}` | 감시 해제 |
 | GET/PATCH | `/settings/execution-policy` | 행동별 자동·승인·비활성 정책 조회/수정 |
 | GET/PATCH | `/settings/trading-session` | 감시·분석·신규매수·장 마감 시간 조회/수정 |
 | GET/PATCH | `/settings/overnight-policy` | 익일 보유 정책 조회/수정 |
@@ -252,3 +252,12 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `approval.req
 | API-099 | `POST /decisions/mock-evaluate`는 CSRF와 고유 요청 ID를 요구하고 최신 영속 snapshot으로 진단 판단 하나를 생성한다. |
 | API-100 | `GET /decisions`와 `GET /decisions/{id}`는 모델·snapshot·설정 버전·Scout/Core 출력·실행 모드와 안전 차단 결과를 반환한다. |
 | API-101 | Mock 진단 API는 주문·승인·설정·시장 snapshot을 변경하지 않으며 시세가 없거나 오래되면 주문 가능 행동을 반환하지 않는다. |
+
+### 8.3 감시 종목 API 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| API-102 | `GET /watchlist`는 현재 사용자의 활성 감시 종목과 각 종목의 최신 snapshot 요약을 반환한다. snapshot이 없어도 종목은 `WAITING_FOR_DATA`로 반환한다. |
+| API-103 | `POST /watchlist`는 CSRF, `schema_version=1.0`, 숫자 6자리 종목코드와 `market=KRX`를 요구한다. 중복은 `409`, 활성 3개 초과와 MOCK 미지원 시장은 `422`로 거부한다. |
+| API-104 | `DELETE /watchlist/{id}`는 CSRF와 소유권을 검사하고 DB에서 삭제한다. WebSocket worker는 늦어도 설정된 동기화 주기 안에 구독을 해제한다. |
+| API-105 | 감시 종목 항목은 최신 snapshot과 같은 입력에 결합된 `watch-indicators-v1` 요약을 선택적으로 포함한다. 지표가 아직 없으면 null이며 시세 대기와 구분한다. |

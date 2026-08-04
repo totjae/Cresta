@@ -16,7 +16,7 @@
 - 보호된 반응형 MOCK Console, 실제 Paper 시스템 상태·주문 상세·포지션 조회 화면
 - 결정론적 Paper Broker 주문·부분체결·취소·정정·응답유실 상태 머신
 - 주문·체결·포지션 원장과 인증된 주문 조회 API
-- Watch quote 정규화·중복/역순/갭 처리, PostgreSQL snapshot과 인증된 최신 시세 조회 API
+- Web UI 감시 종목 최대 3개 관리, 키움 MOCK KRX `0B`·`0D` 실시간 구독, 1분봉과 VWAP·SMA5·고점 하락률·호가 spread 영속·조회
 - 키움 모의투자 전용 메모리 토큰·REST client와 `ka10001` 복구 시세 정규화 기반
 - 키움 `ka00001` 10자리 계좌 일치 검증과 비밀 마스킹 `kiwoom-check` 점검 명령
 - 키움 `ka10075`·`ka10076`·`kt00018` 연속조회 정규화와 읽기 전용 DB 대조 `kiwoom-reconcile-check`

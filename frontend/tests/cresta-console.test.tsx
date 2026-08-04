@@ -96,6 +96,43 @@ describe("CrestaConsole authentication", () => {
     }));
   });
 
+  it("manages the persistent KRX watchlist from the console", async () => {
+    const emptyWatchlist = { schema_version: "1.0", request_id: "watch-1", limit: 3, remaining_slots: 3, items: [] };
+    const populatedWatchlist = {
+      schema_version: "1.0", request_id: "watch-2", limit: 3, remaining_slots: 2,
+      items: [{
+        id: "watch-item-1", symbol: "005930", market: "KRX", data_status: "AVAILABLE",
+        quote: { last_price: "70000.0000", cumulative_volume: 12345, quality: "NORMAL", age_seconds: "0.200", is_fresh: true, received_at: "2026-08-04T01:00:00Z" },
+        indicators: { calculator_version: "watch-indicators-v1", vwap: "69900.0000", sma5: "69800.0000", session_high: "70500.0000", drawdown_from_high_pct: "-0.709220", spread_pct: "0.142857", minute_bar_count: 5, calculated_at: "2026-08-04T01:00:00Z" },
+        created_at: "2026-08-04T01:00:00Z",
+      }],
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "session-watch", login_id: "admin", expires_at: "2026-08-04T09:00:00Z", csrf_token: "csrf-watch" });
+      if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
+      if (path === "/api/v1/watchlist" && init?.method === "POST") return jsonResponse(populatedWatchlist, 201);
+      if (path === "/api/v1/watchlist") return jsonResponse(emptyWatchlist);
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CrestaConsole />);
+
+    await user.click(await screen.findByRole("button", { name: "감시 종목" }));
+    expect(await screen.findByRole("heading", { name: "감시 종목" })).toBeInTheDocument();
+    expect(await screen.findByText("등록된 감시 종목이 없습니다.")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("종목코드"), "005930");
+    await user.click(screen.getByRole("button", { name: "감시 등록" }));
+    expect(await screen.findByRole("heading", { name: "005930" })).toBeInTheDocument();
+    expect(screen.getByText("69,900원")).toBeInTheDocument();
+    expect(screen.getByText("5개")).toBeInTheDocument();
+    const createCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/watchlist" && init?.method === "POST");
+    expect(createCall?.[1]).toEqual(expect.objectContaining({
+      headers: expect.objectContaining({ "X-CSRF-Token": "csrf-watch" }),
+    }));
+  });
+
   it("shows persisted Paper read models without order creation controls", async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);

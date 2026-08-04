@@ -48,6 +48,40 @@ export type DecisionData = {
   created_at: string;
 };
 
+export type WatchlistItem = {
+  id: string;
+  symbol: string;
+  market: "KRX";
+  data_status: "WAITING_FOR_DATA" | "AVAILABLE" | "STALE" | "DEGRADED";
+  quote: null | {
+    last_price: string;
+    cumulative_volume: number;
+    quality: string;
+    age_seconds: string;
+    is_fresh: boolean;
+    received_at: string;
+  };
+  indicators: null | {
+    calculator_version: string;
+    vwap: string;
+    sma5: string | null;
+    session_high: string;
+    drawdown_from_high_pct: string;
+    spread_pct: string | null;
+    minute_bar_count: number;
+    calculated_at: string;
+  };
+  created_at: string;
+};
+
+export type WatchlistData = {
+  schema_version: "1.0";
+  request_id: string;
+  limit: 3;
+  remaining_slots: number;
+  items: WatchlistItem[];
+};
+
 export type SystemHealth = {
   schema_version: "1.0";
   request_id: string;
@@ -297,5 +331,24 @@ export const positionApi = {
       "/api/v1/positions",
       { signal },
     );
+  },
+};
+
+export const watchlistApi = {
+  list(signal?: AbortSignal) {
+    return request<WatchlistData>("/api/v1/watchlist", { signal });
+  },
+  create(csrfToken: string, symbol: string) {
+    return request<WatchlistData>("/api/v1/watchlist", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({ schema_version: "1.0", symbol, market: "KRX" }),
+    });
+  },
+  remove(csrfToken: string, itemId: string) {
+    return request<{ status: "DELETED" }>(`/api/v1/watchlist/${encodeURIComponent(itemId)}`, {
+      method: "DELETE",
+      headers: { "X-CSRF-Token": csrfToken },
+    });
   },
 };

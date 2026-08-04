@@ -411,6 +411,17 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 | KIW-136 | Active worker가 계좌 실시간 `00`·`04` 이벤트를 수신하면 원본 payload를 영속화하거나 직접 체결로 적용하지 않고, 즉시 주문 송신 gate를 닫은 뒤 debounce된 `BROKER_EVENT` REST 대조를 실행한다. |
 | KIW-137 | 첫 외부 통합시험은 Web UI에서만 MOCK·KRX·BUY·1주로 생성하며, API는 READY 안전 게이트와 재인증을 다시 검증한 뒤 worker polling용 `CREATED`를 영속화한다. |
 
+### 3.20 Watch 실시간 구독
+
+2026-08-04 키움 공식 실시간시세 문서에서 `REG`의 그룹별 등록, `refresh=0` 전체 교체, `0B` 주식체결과 `0D` 주식호가잔량 및 MOCK의 KRX 전용 제약을 확인했다.
+
+| ID | 요구사항 |
+| --- | --- |
+| KIW-138 | 계좌 이벤트는 그룹 `1`, Watch 시세는 그룹 `2`를 사용해 등록 변경이 서로의 구독을 해제하지 않게 한다. |
+| KIW-139 | Watch 목록 전체 동기화는 그룹 `2`에 `refresh=0`, 활성 KRX 종목과 `type=["0B","0D"]`를 전송하며 응답 `return_code=0`을 확인한 뒤 구독 준비로 간주한다. |
+| KIW-140 | 빈 Watch 목록도 그룹 `2`의 기존 등록을 명시적으로 제거한다. 재연결 후 DB 활성 목록을 다시 읽어 등록하며 NXT suffix는 MOCK worker에서 생성하지 않는다. |
+| KIW-141 | REAL payload의 타입·종목·values 구조가 잘못되거나 필수 FID가 누락되면 해당 이벤트만 폐기하고 안전한 오류 코드로 기록한다. token·계좌·원본 payload는 로그에 기록하지 않는다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 고정 IP가 맞더라도 키움 등록이 완료되지 않았으면 인증 성공으로 간주하지 않는다.

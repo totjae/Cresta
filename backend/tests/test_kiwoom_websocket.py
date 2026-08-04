@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 
 from app.broker.kiwoom_ws import KiwoomAccountWebSocket, KiwoomWebSocketError
 from app.config import Settings
+from app.watch import QuoteEvent
 
 
 class FakeSocket:
@@ -93,3 +96,53 @@ def test_nonzero_login_and_invalid_real_payload_fail_closed(settings: Settings) 
 
     asyncio.run(login_failure())
     asyncio.run(invalid_real())
+
+
+def test_quote_subscription_trade_orderbook_and_remove_contract(settings: Settings) -> None:
+    socket = FakeSocket(
+        [
+            {"trnm": "LOGIN", "return_code": 0},
+            {"trnm": "REG", "return_code": 0},
+            {"trnm": "REG", "return_code": 0},
+            {"trnm": "REAL", "data": [{
+                "type": "0B", "name": "주식체결", "item": "005930",
+                "values": {"20": "101530", "10": "-70000", "13": "12345", "16": "69000", "17": "+70500", "18": "-68800", "27": "+70100", "28": "-70000"},
+            }]},
+            {"trnm": "REAL", "data": [{
+                "type": "0D", "name": "주식호가잔량", "item": "005930",
+                "values": {"21": "101531", "41": "+70100", "61": "120", "51": "-70000", "71": "90"},
+            }]},
+            {"trnm": "REMOVE", "return_code": 0},
+        ]
+    )
+
+    async def connector(_: str) -> FakeSocket:
+        return socket
+
+    async def scenario() -> None:
+        session = KiwoomAccountWebSocket(
+            settings,
+            connector,
+            clock=lambda: datetime(2026, 8, 4, 1, 15, 32, tzinfo=UTC),
+        )
+        await session.open("token")
+        await session.sync_quotes(("005930",))
+        trade = await session.receive()
+        assert isinstance(trade, QuoteEvent)
+        assert trade.last_price == Decimal(70000)
+        assert trade.cumulative_volume == 12345
+        assert trade.best_ask_price is None
+        book = await session.receive()
+        assert isinstance(book, QuoteEvent)
+        assert book.best_ask_price == Decimal(70100)
+        assert book.best_ask_quantity == 120
+        assert book.best_bid_price == Decimal(70000)
+        assert book.best_bid_quantity == 90
+        await session.sync_quotes(())
+
+    asyncio.run(scenario())
+    assert socket.sent[2] == {
+        "trnm": "REG", "grp_no": "2", "refresh": "0",
+        "data": [{"item": ["005930"], "type": ["0B", "0D"]}],
+    }
+    assert socket.sent[3] == {"trnm": "REMOVE", "grp_no": "2"}

@@ -147,7 +147,7 @@
 | T-UI-001 | UI-001~004 | 콘셉트 적용 화면 검토 | 국내주식·키움 모의투자 정보와 비색상 상태 표시 | 계획 |
 | T-UI-002 | UI-010~014 | MOCK·RECONCILING 상태 | 전역 상태와 주문 제한·비상정지 접근 표시 | 계획 |
 | T-UI-003 | UI-020~023 | 오래된 시세가 있는 대시보드 | STALE·경과시간 표시, 승인 불가 | 계획 |
-| T-UI-004 | UI-030~035 | 네 번째 감시 종목 등록 | 등록 차단 및 남은 슬롯 표시 | 계획 |
+| T-UI-004 | UI-030~035 | 네 번째 감시 종목 등록 | 등록 차단 및 남은 슬롯 표시 | 통과 (2026-08-04, API·component) |
 | T-UI-005 | UI-040~043 | 부분체결·UNKNOWN 포지션 | 잔량·재동기화 상태 표시 | 계획 |
 | T-UI-006 | UI-050~054 | 승인 만료·가격 이탈 | 승인 비활성화와 원인 표시 | 계획 |
 | T-UI-007 | UI-060~064 | API 자격증명 영역 검사 | 비밀 입력·원문 없이 상태만 표시 | 계획 |
@@ -292,15 +292,15 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 116개 통과 | 기존 범위와 결정론적 Mock Scout/Core, 시세 품질 차단, 실행 권한 3개 분기·주문 0건 검증 포함 |
-| Console component 시험 | `npm test` | 7개 통과 | 기존 범위와 Mock AI 진단·GUARD_BLOCKED 표시 포함 |
+| Python 단위·API 시험 | `python -m pytest` | 122개 통과 | 기존 범위와 감시 종목, 키움 실시간 fixture, 분봉·지표·거래일 초기화, Mock Scout/Core 검증 포함 |
+| Console component 시험 | `npm test` | 8개 통과 | 기존 범위와 감시 종목 등록·시세 대기, Mock AI 진단·GUARD_BLOCKED 표시 포함 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
 | Console HTTP smoke | standalone server에 HTTP 요청 | 통과 | `/` 응답 200과 Cresta metadata 확인 |
 | Console production dependency audit | `npm audit --omit=dev --audit-level=high` | 취약점 0건 | Next 하위 PostCSS·Sharp를 검증된 패치 버전으로 고정 |
 | 정적 검사 | `python -m ruff check app tests migrations` | 통과 | FastAPI dependency의 B008은 프레임워크 관용구로 제외 |
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
-| migration 적용 | `alembic upgrade head`·`current` | 통과 | SQLite에서 AI 판단 저장 `20260804_0007` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
+| migration 적용 | `alembic upgrade head`·`current` | 통과 | SQLite에서 분봉·지표 저장 `20260804_0009` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
 | Docker Compose·HTTPS | Ubuntu 서버에서 전체 서비스 기동, migration, host Nginx·TLS 접속과 로그인 | 통과 | PostgreSQL·Redis healthy, secret 읽기, API·Frontend·gateway, HTTPS와 ID·비밀번호·TOTP 로그인 확인 |
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
@@ -316,3 +316,8 @@
 | T-UI-012 | UI-036~038 | 8개 행동 모드 편집·검증·TOTP 활성화 | 안전 기본값 출처와 활성화 후 서버 재조회 | 통과 (2026-08-04, component) |
 | T-AI-009 | AI-070~074, API-099~101, DB-028~029 | 동일 snapshot 진단·지연 시세·실행 권한 3개 모드 | 결정론적 출력, 중복 억제, 주문 0건, 안전 분기 기록 | 통과 (2026-08-04, 자동) |
 | T-UI-013 | UI-039, UI-044~045 | Mock 진단 요청과 판단 목록 표시 | 모델·snapshot·행동·실행 차단 결과를 오인 없이 표시 | 통과 (2026-08-04, component) |
+| T-WATCH-009 | MKT-080~081, API-102~104, DB-030~032 | 감시 종목 등록·중복·3개 제한·해제 | 사용자별 유일성·최대 3개·CSRF를 지키고 기존 snapshot은 보존 | 통과 (2026-08-04, 자동) |
+| T-WATCH-010 | MKT-082~086, KIW-138~141 | 시작·목록 변경 구독과 공식 `0B`·`0D` fixture | 그룹 분리, KRX 종목 전체 동기화, 체결·호가 정규화와 snapshot 영속 | 통과 (2026-08-04, 자동 fixture); 실제 장중·재연결 대기 |
+| T-UI-014 | UI-046~048 | 빈 목록·등록·시세 대기·최신 snapshot·삭제 | 슬롯과 데이터 상태를 오인 없이 표시하고 mutation은 CSRF 사용 | component 등록 통과; 삭제 수동 대기 |
+| T-WATCH-011 | MKT-090~095, DB-033~034 | 같은 분·다음 분 체결, 호가만 변경, 거래일 변경, gap·late 입력 | 결정론적 OHLCV·turnover와 VWAP·SMA5·drawdown·spread, 비정상 입력 제외 | 통과 (2026-08-04, 자동 fixture) |
+| T-UI-015 | MKT-096, API-105, UI-049 | 지표 없음과 최신 지표가 있는 감시 카드 조회 | 계산 전 null과 지표 값을 구분해 표시 | 통과 (2026-08-04, API·component) |

@@ -346,3 +346,53 @@ class QuoteResponse(StrictModel):
     event_at: datetime
     received_at: datetime
     stream_version: int
+
+
+class WatchlistCreateRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    symbol: str = Field(pattern=r"^\d{6}$")
+    market: Literal["KRX", "NXT"] = "KRX"
+
+
+class WatchlistQuoteSummary(StrictModel):
+    last_price: Decimal
+    cumulative_volume: int
+    quality: str
+    age_seconds: Decimal
+    is_fresh: bool
+    received_at: datetime
+
+
+class WatchlistIndicatorSummary(StrictModel):
+    calculator_version: str
+    vwap: Decimal
+    sma5: Decimal | None
+    session_high: Decimal
+    drawdown_from_high_pct: Decimal
+    spread_pct: Decimal | None
+    minute_bar_count: int
+    calculated_at: datetime
+
+
+class WatchlistItemResponse(StrictModel):
+    id: str
+    symbol: str
+    market: str
+    data_status: Literal["WAITING_FOR_DATA", "AVAILABLE", "STALE", "DEGRADED"]
+    quote: WatchlistQuoteSummary | None
+    indicators: WatchlistIndicatorSummary | None
+    created_at: datetime
+
+
+class WatchlistResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    limit: int = 3
+    remaining_slots: int
+    items: list[WatchlistItemResponse]
+
+
+class WatchlistDeleteResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    status: Literal["DELETED"] = "DELETED"

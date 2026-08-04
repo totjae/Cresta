@@ -722,6 +722,7 @@ def normalize_basic_quote(
         cumulative_volume=normalized["cumulative_volume"],
         trading_status=trading_status,
         recovery_snapshot=True,
+        updates_trade=False,
     )
 
 

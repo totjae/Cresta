@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import MarketSnapshot, MarketStreamState
+from app.models import IndicatorSnapshot, MarketSnapshot, MarketStreamState, MinuteBar
 from app.watch import QuoteEvent, WatchError, ingest_quote
 
 
@@ -115,3 +115,79 @@ def test_invalid_quote_is_rejected_before_persistence(db: Session) -> None:
         ingest_quote(db, replace(quote("invalid", 1), high_price=Decimal(69000)))
     assert invalid.value.code == "INVALID_PRICE"
     assert db.scalar(select(func.count()).select_from(MarketSnapshot)) == 0
+
+
+def test_minute_bars_and_indicators_are_deterministic(db: Session) -> None:
+    base = datetime(2026, 8, 4, 0, 0, tzinfo=UTC)
+    prices = [100, 101, 102, 104, 103]
+    latest = None
+    for index, price in enumerate(prices):
+        latest = ingest_quote(
+            db,
+            replace(
+                quote(
+                    f"bar-{index}", index + 1,
+                    at=base + timedelta(minutes=index), volume=100 + index * 10,
+                ),
+                last_price=Decimal(price),
+                open_price=Decimal(100),
+                high_price=Decimal(105),
+                low_price=Decimal(99),
+                best_bid_price=Decimal("102.9"),
+                best_ask_price=Decimal("103.1"),
+            ),
+        )
+    assert latest is not None
+    bars = list(db.scalars(select(MinuteBar).order_by(MinuteBar.bucket_start)))
+    assert len(bars) == 5
+    assert [bar.volume for bar in bars] == [0, 10, 10, 10, 10]
+    assert bars[-1].open_price == Decimal(103)
+    assert bars[-1].close_price == Decimal(103)
+
+    indicator = db.scalar(
+        select(IndicatorSnapshot).where(
+            IndicatorSnapshot.market_snapshot_id == latest.snapshot.id
+        )
+    )
+    assert indicator is not None
+    assert indicator.calculator_version == "watch-indicators-v1"
+    assert indicator.vwap == Decimal("102.5000")
+    assert indicator.sma5 == Decimal("102.0000")
+    assert indicator.session_high == Decimal("105.0000")
+    assert indicator.drawdown_from_high_pct == Decimal("-1.904762")
+    assert indicator.spread_pct == Decimal("0.194175")
+
+    orderbook = ingest_quote(
+        db,
+        replace(
+            quote("book-only", 6, at=base + timedelta(minutes=4, seconds=10), volume=140),
+            last_price=Decimal(103), open_price=Decimal(100), high_price=Decimal(105),
+            low_price=Decimal(99), best_bid_price=Decimal("102.8"),
+            best_ask_price=Decimal("103.2"), updates_trade=False,
+        ),
+    )
+    db.refresh(bars[-1])
+    assert bars[-1].event_count == 1
+    book_indicator = db.scalar(
+        select(IndicatorSnapshot).where(
+            IndicatorSnapshot.market_snapshot_id == orderbook.snapshot.id
+        )
+    )
+    assert book_indicator is not None
+    assert book_indicator.spread_pct == Decimal("0.388350")
+
+
+def test_new_kst_trading_date_allows_cumulative_volume_reset(db: Session) -> None:
+    first = datetime(2026, 8, 4, 6, 0, tzinfo=UTC)
+    ingest_quote(db, replace(quote("day-one", 1, at=first, volume=1000), source_sequence=None))
+    next_day = ingest_quote(
+        db,
+        replace(
+            quote("day-two", 2, at=first + timedelta(days=1), volume=5),
+            source_sequence=None,
+        ),
+    )
+    assert next_day.outcome == "APPLIED"
+    state = db.get(MarketStreamState, ("KRX", "005930"))
+    assert state is not None
+    assert state.cumulative_volume == 5
