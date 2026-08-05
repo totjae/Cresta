@@ -198,6 +198,49 @@ class ConfigurationVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class DecisionInputSnapshot(Base):
+    __tablename__ = "decision_input_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "purpose",
+            "market_snapshot_id",
+            "input_hash",
+            name="uq_decision_input_snapshots_identity",
+        ),
+        CheckConstraint(
+            "purpose IN ('DIAGNOSTIC','TRADING')",
+            name="ck_decision_input_snapshots_purpose",
+        ),
+        CheckConstraint("market IN ('KRX','NXT')", name="ck_decision_input_snapshots_market"),
+        Index(
+            "ix_decision_input_snapshots_symbol_created",
+            "market",
+            "symbol",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    market: Mapped[str] = mapped_column(String(16), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    market_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("market_snapshots.id"), nullable=False
+    )
+    indicator_snapshot_id: Mapped[str | None] = mapped_column(
+        ForeignKey("indicator_snapshots.id")
+    )
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    data_quality: Mapped[str] = mapped_column(String(24), nullable=False)
+    session_state: Mapped[str] = mapped_column(String(32), nullable=False)
+    input_json: Mapped[str] = mapped_column(Text, nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Decision(Base):
     __tablename__ = "decisions"
     __table_args__ = (
@@ -219,6 +262,9 @@ class Decision(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    decision_input_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decision_input_snapshots.id"), index=True
+    )
     purpose: Mapped[str] = mapped_column(String(16), nullable=False, default="DIAGNOSTIC")
     evaluation_request_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     input_snapshot_id: Mapped[str] = mapped_column(
@@ -802,6 +848,10 @@ class IndicatorSnapshot(Base):
     session_high: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     drawdown_from_high_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
     spread_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    price_vs_vwap_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    sma5_slope_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    relative_volume_5: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    realized_volatility_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     minute_bar_count: Mapped[int] = mapped_column(Integer, nullable=False)
     input_start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     input_end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

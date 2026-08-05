@@ -110,6 +110,7 @@ def run_analysis_tick(
                 continue
             decision, created = create_mock_trading_decision(
                 db,
+                user=user,
                 evaluation_request_id=evaluation_request_id(user_id, market, symbol, slot.key),
                 symbol=symbol,
                 market=market,

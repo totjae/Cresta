@@ -64,6 +64,8 @@ Market stream ─> Watch ─> Event Bus
 
 Core 판단과 Guard trigger의 후속 실행은 [판단 실행 및 승인 오케스트레이션 명세](DECISION_EXECUTION_SPEC.md)를 따른다. 진단 판단은 이 경로에 진입하지 않으며, 거래 목적 판단도 실행 권한과 Guard의 현재 상태를 다시 확인한 뒤에만 승인 또는 내부 `CREATED` 주문을 만든다.
 
+Watch의 `watch-indicators-v2` 결과와 정규화 quote는 모델 호출 전에 `scout-input-v1` canonical JSON으로 고정한다. 이 입력은 SHA-256 해시와 시장·지표 snapshot 참조를 가진 불변 DB 행이며 사용자 소유권은 모델에 전달하지 않는 별도 metadata로 저장한다. 현재 결정론적 Mock v2와 향후 외부 Scout/Core provider는 같은 입력 경계를 사용한다.
+
 첫 Console 구현은 Next.js App Router와 TypeScript를 사용한다. 브라우저는 같은 origin의 `/api/v1`만 호출하고 세션 token은 `HttpOnly` cookie로, CSRF token은 React 메모리 상태로만 유지한다. 새로고침 시 `/api/v1/auth/session`으로 서버 세션을 다시 검증하고 새 CSRF token을 받는다. 미인증·만료 응답에서는 보호 화면 상태를 즉시 폐기하며 로그인 요청을 자동 재전송하지 않는다.
 
 첫 화면 범위는 2단계 로그인, 로그아웃, 보호된 Console shell, MOCK 환경·API 상태와 아직 구현되지 않은 Broker·거래 기능의 명시적 비활성 상태다. 실제 계좌·시세·주문 데이터를 흉내 낸 값을 운영 화면에 표시하지 않는다.

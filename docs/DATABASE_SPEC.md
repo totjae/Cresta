@@ -38,8 +38,9 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | `configuration_versions` | id, scope, target_symbol, state, payload, schema_version | 활성 범위별 1개 |
 | `market_snapshots` | id, symbol, market, observed_at, quality, payload_hash, payload | 판단 참조 불변 |
 | `minute_bars` | id, market, symbol, bucket_start, OHLCV, turnover, snapshot 범위, version | market+symbol+bucket unique |
-| `indicator_snapshots` | id, market_snapshot_id, calculator_version, VWAP, SMA5, session_high, drawdown, spread | input snapshot 1:1 |
-| `decisions` | id, purpose, kind, symbol, input_snapshot_id, output, action, valid_until | 구조화 스키마 검증 결과 포함·불변 |
+| `indicator_snapshots` | id, market_snapshot_id, calculator_version, VWAP, SMA5, session_high, drawdown, spread, relative volume, volatility | market snapshot 1:1 |
+| `decision_input_snapshots` | id, user_id, purpose, market/indicator snapshot ID, observed_at, input_json, input_hash | canonical 입력 불변·사용자 metadata는 JSON 밖에 저장 |
+| `decisions` | id, purpose, kind, symbol, input_snapshot_id, decision_input_id, output, action, valid_until | 구조화 스키마 검증 결과 포함·불변 |
 | `decision_executions` | id, decision/rule source, action, mode, policy versions, state, version | source+action+policy unique |
 | `guard_evaluations` | id, phase, subject, result, rule_results, input versions, valid_until | 불변 평가 |
 | `approvals` | id, execution_id, decision_id, status, scope_snapshot, expires_at, actor_id, reauth_id, version | execution당 최대 1개 |
@@ -229,3 +230,7 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-108 | `analysis_scheduler_leases`는 scheduler 이름을 PK로 하고 owner ID, fencing token, 만료시각과 version을 저장한다. 획득·갱신은 행 잠금과 owner/token 비교로 원자 처리한다. |
 | DB-109 | `analysis_scheduler_states`는 상태, 현재 fencing token, heartbeat, 최근 tick·완료·다음 예정 시각, 최근 처리·생성·건너뜀·실패 수와 비밀이 아닌 오류 code만 저장한다. |
 | DB-110 | scheduler lease·state에는 모델 API key, 계좌번호, 원본 시세 payload와 사용자 인증정보를 저장하지 않는다. |
+| DB-111 | `decision_input_snapshots`는 사용자와 목적, 시장·종목, 기준시각, 시장·지표 snapshot ID, 품질·세션, canonical 입력 JSON과 SHA-256 해시를 불변 저장한다. 사용자 식별자는 모델 입력 JSON 밖의 소유권 metadata로만 저장한다. |
+| DB-112 | `decisions.decision_input_id`는 신규 판단에서 입력 snapshot을 참조한다. 기존 판단 호환을 위해 migration 열은 nullable로 추가하되 새 생성 경로는 null을 허용하지 않는다. |
+| DB-113 | `indicator_snapshots`는 v2의 VWAP 대비율, SMA5 기울기, 상대 거래량과 실현 변동성을 nullable 고정소수점으로 저장한다. 기존 v1 행은 재해석하지 않는다. |
+| DB-114 | 동일 사용자의 같은 목적·시장 snapshot·입력 hash는 하나만 저장하고 hash 충돌 또는 내용 불일치는 판단 생성 전에 transaction을 rollback한다. |

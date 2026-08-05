@@ -156,6 +156,11 @@ class DecisionResponse(StrictModel):
     symbol: str
     market: str
     input_snapshot_id: str
+    decision_input_id: str | None
+    input_schema_version: str | None
+    input_hash: str | None
+    indicator_snapshot_id: str | None
+    indicator_calculator_version: str | None
     model_id: str
     prompt_version: str
     scout: ScoutOutputResponse

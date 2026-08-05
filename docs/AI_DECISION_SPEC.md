@@ -181,7 +181,7 @@ core_output:
 
 | ID | 요구사항 |
 | --- | --- |
-| AI-070 | 첫 구현은 외부 모델 대신 `deterministic-mock-v1`을 사용하며 동일 market snapshot과 설정 버전에서 동일 Scout·Core 출력을 생성한다. |
+| AI-070 | 외부 모델 연결 전에는 versioned 결정론적 Mock을 사용하며 같은 불변 입력 snapshot과 정책 버전에서 같은 Scout·Core 출력을 생성한다. v1 판단은 감사 이력으로 유지하고 현재 생성 버전은 AI-090의 v2다. |
 | AI-071 | 진단 판단은 `MarketStreamState.current_snapshot_id`가 가리키는 불변 snapshot만 입력으로 사용하고 품질·최신성·거래상태가 부적합하면 `RISK_BLOCK`을 기록한다. |
 | AI-072 | 진단 판단은 최신 활성 실행 권한 버전을 읽어 `DISABLED`, `APPROVAL_REQUIRED`, `GUARD_BLOCKED`, `NO_ACTION` 중 하나의 실행 결과만 기록한다. |
 | AI-073 | Guard와 승인 서비스가 구현되기 전에는 `AUTOMATIC`과 `MANUAL_APPROVAL` 모두 주문·승인 리소스를 생성하지 않으며 실행 결과로 미구현 안전 차단을 명시한다. |
@@ -196,9 +196,19 @@ core_output:
 | AI-077 | 판단 저장과 실행 인계 작업 enqueue는 같은 transaction 또는 transactional outbox로 연결해 판단 유실과 중복 실행을 방지한다. |
 | AI-078 | 실행 결과는 불변 판단을 수정하지 않고 별도 execution record로 연결한다. |
 | AI-079 | 결정론적 Mock 모델은 내부 `TRADING` 판단에도 사용할 수 있지만 모델 식별자가 같다는 이유만으로 진단 판단을 거래 판단으로 승격하지 않는다. |
-| AI-080 | 정기 AI scheduler는 API·Broker worker와 분리된 단일 장기 실행 프로세스이며 활성 감시 종목만 평가한다. 첫 구현은 `deterministic-mock-v1`을 사용한다. |
+| AI-080 | 정기 AI scheduler는 API·Broker worker와 분리된 단일 장기 실행 프로세스이며 활성 감시 종목만 평가한다. 현재 구현은 `deterministic-mock-v2`를 사용한다. |
 | AI-081 | scheduler가 만든 판단은 처음부터 `purpose=TRADING`으로 저장하며 공개 진단 판단을 승격하거나 복사하지 않는다. |
 | AI-082 | evaluation request ID는 사용자·시장·종목·KST 분석 슬롯·모델·프롬프트 버전으로 결정론적으로 만들고 DB unique 제약으로 재시작·중복 tick을 억제한다. 같은 슬롯에서는 snapshot이 바뀌어도 최초 판단을 유지한다. |
 | AI-083 | 활성 감시 종목에 현재 snapshot이 없으면 판단을 생성하지 않고 `SNAPSHOT_NOT_READY`로 scheduler 결과를 기록한다. snapshot이 존재하지만 stale·degraded이면 기존 판단 계약에 따라 `RISK_BLOCK` 판단을 저장할 수 있다. |
 | AI-084 | 종목 하나의 평가 실패는 같은 tick의 다른 종목을 중단시키지 않는다. 판단·SHADOW 실행·Guard·감사는 종목별 transaction으로 commit하며 실패 종목은 rollback한다. |
 | AI-085 | scheduler lease의 현재 owner만 tick을 실행한다. lease를 잃으면 새 판단 생성을 즉시 중단하며 다른 인스턴스가 만료 후 현재 슬롯을 멱등 재처리할 수 있다. |
+
+### 6.3 Scout 입력 snapshot과 지표 기반 Mock 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| AI-086 | 모든 신규 진단·거래 판단은 모델 호출 전에 `scout-input-v1` 불변 입력 snapshot을 만들고 판단이 해당 입력 ID와 시장·지표 snapshot을 참조한다. |
+| AI-087 | 입력 JSON은 기준시각, 품질·세션, 정규화 quote, `watch-indicators-v2` 지표와 명시적인 null 영역을 포함하며 사용자 ID·계좌번호·인증·Broker 자격증명을 포함하지 않는다. |
+| AI-088 | 입력 JSON은 정렬된 key와 고정 Decimal 문자열로 canonicalize해 SHA-256 해시를 저장한다. 저장된 JSON의 재계산 해시가 다르면 판단 실행에 사용하지 않는다. |
+| AI-089 | 현재 market snapshot에 연결된 v2 지표가 없거나 계산 버전이 다르면 Scout는 `UNKNOWN/DATA_INSUFFICIENT`, Core는 `RISK_BLOCK`을 반환한다. 결측 지표를 0으로 대체하지 않는다. |
+| AI-090 | `deterministic-mock-v2`는 VWAP 위치, SMA5 방향, 상대 거래량, 실현 변동성, 고점 낙폭과 spread만으로 허용 reason code와 점수를 생성한다. 같은 입력 hash는 같은 출력을 만들어야 한다. |

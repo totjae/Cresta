@@ -150,12 +150,16 @@ def test_minute_bars_and_indicators_are_deterministic(db: Session) -> None:
         )
     )
     assert indicator is not None
-    assert indicator.calculator_version == "watch-indicators-v1"
+    assert indicator.calculator_version == "watch-indicators-v2"
     assert indicator.vwap == Decimal("102.5000")
     assert indicator.sma5 == Decimal("102.0000")
     assert indicator.session_high == Decimal("105.0000")
     assert indicator.drawdown_from_high_pct == Decimal("-1.904762")
     assert indicator.spread_pct == Decimal("0.194175")
+    assert indicator.price_vs_vwap_pct == Decimal("0.487805")
+    assert indicator.sma5_slope_pct is None
+    assert indicator.relative_volume_5 is None
+    assert indicator.realized_volatility_pct is not None
 
     orderbook = ingest_quote(
         db,
@@ -191,3 +195,35 @@ def test_new_kst_trading_date_allows_cumulative_volume_reset(db: Session) -> Non
     state = db.get(MarketStreamState, ("KRX", "005930"))
     assert state is not None
     assert state.cumulative_volume == 5
+
+
+def test_v2_relative_volume_sma_slope_and_volatility_need_real_windows(db: Session) -> None:
+    base = datetime(2026, 8, 4, 0, 0, tzinfo=UTC)
+    latest = None
+    for index in range(10):
+        latest = ingest_quote(
+            db,
+            replace(
+                quote(
+                    f"v2-{index}",
+                    index + 1,
+                    at=base + timedelta(minutes=index),
+                    volume=100 + index * 10,
+                ),
+                last_price=Decimal(100 + index),
+                open_price=Decimal(100),
+                high_price=Decimal(110),
+                low_price=Decimal(99),
+            ),
+        )
+    assert latest is not None
+    indicator = db.scalar(
+        select(IndicatorSnapshot).where(
+            IndicatorSnapshot.market_snapshot_id == latest.snapshot.id
+        )
+    )
+    assert indicator is not None
+    assert indicator.relative_volume_5 == Decimal("1.250000")
+    assert indicator.sma5_slope_pct == Decimal("0.943396")
+    assert indicator.realized_volatility_pct is not None
+    assert indicator.realized_volatility_pct > 0

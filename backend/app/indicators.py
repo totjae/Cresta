@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
+from itertools import pairwise
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -12,7 +13,7 @@ from app.watch import PRICE_QUANTUM, QuoteEvent
 
 KST = ZoneInfo("Asia/Seoul")
 PCT_QUANTUM = Decimal("0.000001")
-CALCULATOR_VERSION = "watch-indicators-v1"
+CALCULATOR_VERSION = "watch-indicators-v2"
 
 
 def trading_date(value: datetime) -> object:
@@ -105,10 +106,41 @@ def update_market_analysis(
         if len(recent) == 5
         else None
     )
+    sma5_slope = None
+    if len(bars) >= 6 and sma5 is not None:
+        previous_sma5 = (
+            sum((bar.close_price for bar in bars[-6:-1]), Decimal(0)) / 5
+        ).quantize(PRICE_QUANTUM)
+        if previous_sma5 > 0:
+            sma5_slope = ((sma5 / previous_sma5) - 1) * Decimal(100)
+
+    relative_volume = None
+    if len(bars) >= 10:
+        previous_volume = sum(bar.volume for bar in bars[-10:-5])
+        recent_volume = sum(bar.volume for bar in bars[-5:])
+        if previous_volume > 0:
+            relative_volume = Decimal(recent_volume) / Decimal(previous_volume)
+
+    realized_volatility = None
+    volatility_bars = bars[-10:]
+    if len(volatility_bars) >= 3:
+        returns = [
+            (current.close_price / previous.close_price) - 1
+            for previous, current in pairwise(volatility_bars)
+            if previous.close_price > 0
+        ]
+        if len(returns) >= 2:
+            mean_return = sum(returns, Decimal(0)) / len(returns)
+            variance = (
+                sum(((value - mean_return) ** 2 for value in returns), Decimal(0))
+                / len(returns)
+            )
+            realized_volatility = variance.sqrt() * Decimal(100)
     session_high = max(
         [event.high_price, *(bar.high_price for bar in bars)]
     ).quantize(PRICE_QUANTUM)
     drawdown = ((event.last_price / session_high) - 1) * Decimal(100)
+    price_vs_vwap = ((event.last_price / vwap) - 1) * Decimal(100) if vwap > 0 else None
     spread = None
     if event.best_bid_price is not None and event.best_ask_price is not None:
         midpoint = (event.best_bid_price + event.best_ask_price) / 2
@@ -126,6 +158,18 @@ def update_market_analysis(
         session_high=session_high,
         drawdown_from_high_pct=drawdown.quantize(PCT_QUANTUM),
         spread_pct=spread,
+        price_vs_vwap_pct=(
+            price_vs_vwap.quantize(PCT_QUANTUM) if price_vs_vwap is not None else None
+        ),
+        sma5_slope_pct=(sma5_slope.quantize(PCT_QUANTUM) if sma5_slope is not None else None),
+        relative_volume_5=(
+            relative_volume.quantize(PCT_QUANTUM) if relative_volume is not None else None
+        ),
+        realized_volatility_pct=(
+            realized_volatility.quantize(PCT_QUANTUM)
+            if realized_volatility is not None
+            else None
+        ),
         minute_bar_count=len(bars),
         input_start_at=day_start,
         input_end_at=event_at,

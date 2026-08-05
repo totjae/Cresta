@@ -20,7 +20,9 @@ from app.models import (
     Approval,
     Decision,
     DecisionExecution,
+    DecisionInputSnapshot,
     GuardEvaluation,
+    IndicatorSnapshot,
     MarketSnapshot,
     MarketStreamState,
     TradingOrder,
@@ -56,6 +58,26 @@ def _watch_with_snapshot(db: Session, user: User, now: datetime) -> None:
             cumulative_volume=10000, quality="NORMAL",
         )
     )
+    db.add(
+        IndicatorSnapshot(
+            market_snapshot_id=snapshot.id,
+            market="KRX",
+            symbol="005930",
+            calculator_version="watch-indicators-v2",
+            vwap=Decimal(100),
+            sma5=Decimal("100.5"),
+            session_high=Decimal(102),
+            drawdown_from_high_pct=Decimal("-0.5"),
+            spread_pct=Decimal("0.2"),
+            price_vs_vwap_pct=Decimal("1.0"),
+            sma5_slope_pct=Decimal("0.2"),
+            relative_volume_5=Decimal("1.5"),
+            realized_volatility_pct=Decimal("0.5"),
+            minute_bar_count=10,
+            input_start_at=now - timedelta(minutes=10),
+            input_end_at=now,
+        )
+    )
     db.commit()
 
 
@@ -84,6 +106,8 @@ def test_tick_creates_one_trading_shadow_execution_and_no_order(
     assert first.decision_count == 1
     assert repeated.decision_count == 0
     assert decision is not None and decision.purpose == "TRADING"
+    assert decision.decision_input_id is not None
+    assert db.scalar(select(func.count()).select_from(DecisionInputSnapshot)) == 1
     assert execution is not None and execution.stage == "SHADOW"
     assert execution.state == "GUARD_BLOCKED"
     assert db.scalar(select(func.count()).select_from(Decision)) == 1

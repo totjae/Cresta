@@ -16,16 +16,17 @@
 - 보호된 반응형 MOCK Console, 실제 Paper 시스템 상태·주문 상세·포지션 조회 화면
 - 결정론적 Paper Broker 주문·부분체결·취소·정정·응답유실 상태 머신
 - 주문·체결·포지션 원장과 인증된 주문 조회 API
-- Web UI 감시 종목 최대 3개 관리, 키움 MOCK KRX `0B`·`0D` 실시간 구독, 1분봉과 VWAP·SMA5·고점 하락률·호가 spread 영속·조회
+- Web UI 감시 종목 최대 3개 관리, 키움 MOCK KRX `0B`·`0D` 실시간 구독, 1분봉과 VWAP·SMA5·상대 거래량·실현 변동성·고점 하락률·호가 spread 영속·조회
 - 키움 모의투자 전용 메모리 토큰·REST client와 `ka10001` 복구 시세 정규화 기반
 - 키움 `ka00001` 10자리 계좌 일치 검증과 비밀 마스킹 `kiwoom-check` 점검 명령
 - 키움 `ka10075`·`ka10076`·`kt00018` 연속조회 정규화와 읽기 전용 DB 대조 `kiwoom-reconcile-check`
 - PostgreSQL 단일 lease·fencing, 키움 WebSocket LOGIN·`00`/`04` 구독, PING echo와 주기·이벤트 기반 재동기화를 수행하는 별도 Broker worker
 - KST 평일 08:00~20:00에 감시 종목을 5분·10분 슬롯으로 평가하고 TRADING 판단을 SHADOW Guard에 인계하는 별도 AI scheduler
+- `scout-input-v1` canonical 입력·hash와 지표 provenance를 저장하고 이를 사용하는 `deterministic-mock-v2` Scout/Core
 - 인증된 `GET /api/v1/system/broker`와 `kiwoom-worker-status` 안전 상태 조회
 - N100·16GiB 서버용 Docker Compose 자원 제한 초안
 
-Console의 주문 생성·승인·설정 화면, 주문가격 산정, 전체 Guard·분봉·지표·AI와 키움 실시간 이벤트 직접 원장 반영은 아직 구현되지 않았습니다. Active worker의 영속 주문 polling과 중복 방지·`UNKNOWN` 즉시 재동기화는 구현됐지만 주문 생성·공개 승인 경로가 없어 정상 운영에서는 키움 주문이 생성되지 않습니다. 외부 주문·포지션도 자동 편입하거나 수정하지 않습니다.
+Console의 주문 생성·승인 화면, 주문가격 산정, 전체 Guard·외부 AI provider와 키움 실시간 체결의 주문 원장 반영은 아직 구현되지 않았습니다. Active worker의 영속 주문 polling과 중복 방지·`UNKNOWN` 즉시 재동기화는 구현됐지만 주문 생성·공개 승인 경로가 없어 정상 운영에서는 키움 주문이 생성되지 않습니다. 외부 주문·포지션도 자동 편입하거나 수정하지 않습니다.
 
 ## Backend 개발 실행
 

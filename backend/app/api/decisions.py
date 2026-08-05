@@ -11,7 +11,7 @@ from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import ResourceNotFoundError
 from app.mock_ai import evaluate_mock_decision, list_decisions
-from app.models import Decision, DecisionExecution
+from app.models import Decision, DecisionExecution, DecisionInputSnapshot, IndicatorSnapshot
 from app.schemas import (
     CoreOutputResponse,
     DecisionExecutionResponse,
@@ -25,6 +25,16 @@ router = APIRouter(prefix="/decisions", tags=["decisions"])
 
 
 def _response(request_id: str, decision: Decision, db: Session) -> DecisionResponse:
+    decision_input = (
+        db.get(DecisionInputSnapshot, decision.decision_input_id)
+        if decision.decision_input_id
+        else None
+    )
+    indicator = (
+        db.get(IndicatorSnapshot, decision_input.indicator_snapshot_id)
+        if decision_input and decision_input.indicator_snapshot_id
+        else None
+    )
     execution = db.scalar(
         select(DecisionExecution)
         .where(DecisionExecution.decision_id == decision.id)
@@ -54,6 +64,11 @@ def _response(request_id: str, decision: Decision, db: Session) -> DecisionRespo
         symbol=decision.symbol,
         market=decision.market,
         input_snapshot_id=decision.input_snapshot_id,
+        decision_input_id=decision_input.id if decision_input else None,
+        input_schema_version=decision_input.schema_version if decision_input else None,
+        input_hash=decision_input.input_hash if decision_input else None,
+        indicator_snapshot_id=decision_input.indicator_snapshot_id if decision_input else None,
+        indicator_calculator_version=indicator.calculator_version if indicator else None,
         model_id=decision.model_id,
         prompt_version=decision.prompt_version,
         scout=ScoutOutputResponse.model_validate(json.loads(decision.scout_output_json)),

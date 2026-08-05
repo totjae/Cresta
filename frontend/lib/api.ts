@@ -38,6 +38,11 @@ export type DecisionData = {
   symbol: string;
   market: string;
   input_snapshot_id: string;
+  decision_input_id: string | null;
+  input_schema_version: string | null;
+  input_hash: string | null;
+  indicator_snapshot_id: string | null;
+  indicator_calculator_version: string | null;
   model_id: string;
   prompt_version: string;
   scout: { trend_state: string; entry_score: number; reason_codes: string[] };

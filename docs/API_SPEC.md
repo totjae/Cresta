@@ -263,7 +263,7 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-102 | `GET /watchlist`는 현재 사용자의 활성 감시 종목과 각 종목의 최신 snapshot 요약을 반환한다. snapshot이 없어도 종목은 `WAITING_FOR_DATA`로 반환한다. |
 | API-103 | `POST /watchlist`는 CSRF, `schema_version=1.0`, 숫자 6자리 종목코드와 `market=KRX`를 요구한다. 중복은 `409`, 활성 3개 초과와 MOCK 미지원 시장은 `422`로 거부한다. |
 | API-104 | `DELETE /watchlist/{id}`는 CSRF와 소유권을 검사하고 DB에서 삭제한다. WebSocket worker는 늦어도 설정된 동기화 주기 안에 구독을 해제한다. |
-| API-105 | 감시 종목 항목은 최신 snapshot과 같은 입력에 결합된 `watch-indicators-v1` 요약을 선택적으로 포함한다. 지표가 아직 없으면 null이며 시세 대기와 구분한다. |
+| API-105 | 감시 종목 항목은 최신 snapshot과 같은 입력에 결합된 현재 `watch-indicators-v2` 요약을 선택적으로 포함한다. 기존 v1 행도 계산 버전을 표시해 조회할 수 있고, 지표가 아직 없으면 null이며 시세 대기와 구분한다. |
 
 ### 8.4 판단 실행·Guard·승인 API 계약
 
@@ -305,3 +305,4 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-123 | `/system/health`는 현재 실행 단계와 `BUY` 기능 gate의 준비·차단 reason을 반환한다. |
 | API-124 | `approval.requested`, `approval.updated`, `decision.execution_updated`, `risk.evaluated` 이벤트는 REST resource ID·version을 포함하고 주문 이벤트와 구분한다. |
 | API-125 | `/system/health`는 scheduler의 `NOT_STARTED | RUNNING | IDLE | DEGRADED | STALE | STOPPED`, lease 유효 여부, 최근 heartbeat·tick·완료 시각, 다음 예정 시각과 최근 집계만 반환한다. owner ID와 fencing token은 반환하지 않는다. |
+| API-126 | 판단 목록·상세는 `decision_input_id`, 입력 schema·hash, 연결된 indicator snapshot ID와 calculator version을 반환한다. canonical 입력 JSON과 사용자 소유권 metadata는 이 API에서 직접 반환하지 않는다. |

@@ -8,10 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.decision_inputs import build_decision_input
 from app.models import Decision, MarketSnapshot, MarketStreamState, User
 
-MODEL_ID = "deterministic-mock-v1"
-PROMPT_VERSION = "mock-entry-v1"
+MODEL_ID = "deterministic-mock-v2"
+PROMPT_VERSION = "mock-entry-indicators-v2"
 TRADING_STATES = {"TRADING", "OPEN", "NORMAL", "CONTINUOUS"}
 
 
@@ -27,17 +28,21 @@ def _utc(value: datetime) -> datetime:
 
 
 def _outputs(
-    snapshot: MarketSnapshot,
-    state: MarketStreamState,
-    settings: Settings,
-    now: datetime,
+    decision_input: dict[str, object],
 ) -> tuple[dict[str, object], dict[str, object]]:
-    age = (now - _utc(snapshot.received_at)).total_seconds()
+    quality = decision_input["data_quality"]
+    indicators = decision_input["indicators"]
+    strategy = decision_input["strategy"]
+    assert isinstance(quality, dict)
+    assert isinstance(indicators, dict)
+    assert isinstance(strategy, dict)
+    age = Decimal(str(quality["age_seconds"]))
     data_ready = (
-        state.quality == "NORMAL"
-        and snapshot.quality == "NORMAL"
-        and age <= settings.quote_stale_seconds
-        and snapshot.trading_status in TRADING_STATES
+        quality["stream"] == "NORMAL"
+        and quality["snapshot"] == "NORMAL"
+        and age <= Decimal(str(strategy["quote_stale_seconds"]))
+        and decision_input["session_state"] in TRADING_STATES
+        and indicators["status"] == "READY"
     )
     if not data_ready:
         scout = {
@@ -52,34 +57,88 @@ def _outputs(
         }
         return scout, core
 
-    open_price = Decimal(snapshot.open_price)
-    last_price = Decimal(snapshot.last_price)
-    change = (last_price - open_price) / open_price if open_price > 0 else Decimal(0)
-    spread = Decimal(0)
-    if snapshot.best_ask_price is not None and snapshot.best_bid_price is not None and last_price > 0:
-        spread = (Decimal(snapshot.best_ask_price) - Decimal(snapshot.best_bid_price)) / last_price
-    if change >= Decimal("0.005") and spread <= Decimal("0.005"):
-        score, action, confidence = 75, "BUY", "0.75"
-        reasons = ["PRICE_STABLE", "BREAKOUT_CONFIRMED"]
-        trend = "UPTREND"
-    elif change >= 0:
-        score, action, confidence = 55, "WAIT", "0.60"
-        reasons = ["PRICE_STABLE"]
-        trend = "RANGE"
+    def metric(name: str) -> Decimal | None:
+        value = indicators.get(name)
+        return Decimal(str(value)) if value is not None else None
+
+    price_vs_vwap = metric("price_vs_vwap_pct")
+    sma5_slope = metric("sma5_slope_pct")
+    relative_volume = metric("relative_volume_5")
+    volatility = metric("realized_volatility_pct")
+    drawdown = metric("drawdown_from_high_pct")
+    spread = metric("spread_pct")
+    score = 50
+    reasons: list[str] = []
+    if price_vs_vwap is not None and price_vs_vwap >= 0:
+        score += 15
+        reasons.append("ABOVE_VWAP")
     else:
-        score, action, confidence = 30, "REJECT", "0.70"
-        reasons = ["MARKET_WEAKENING"]
+        score -= 15
+        reasons.append("BELOW_VWAP")
+    if sma5_slope is not None and sma5_slope > Decimal("0.05"):
+        score += 10
+        reasons.append("BREAKOUT_CONFIRMED")
+    elif sma5_slope is not None and sma5_slope < Decimal("-0.05"):
+        score -= 10
+        reasons.append("BREAKDOWN_DETECTED")
+    if relative_volume is not None and relative_volume >= Decimal("1.2"):
+        score += 10
+        reasons.append("VOLUME_STRENGTHENING")
+        volume_state = "STRENGTHENING"
+    elif relative_volume is not None and relative_volume <= Decimal("0.8"):
+        score -= 10
+        reasons.append("VOLUME_WEAKENING")
+        volume_state = "WEAKENING"
+    else:
+        volume_state = "NORMAL" if relative_volume is not None else "UNKNOWN"
+    if drawdown is not None and drawdown <= Decimal("-1.0"):
+        score -= 15
+        reasons.append("DRAWDOWN_FROM_HIGH")
+    if volatility is None:
+        volatility_state = "UNKNOWN"
+    elif volatility >= Decimal("3.0"):
+        volatility_state = "EXTREME"
+        reasons.append("VOLATILITY_EXPANDING")
+    elif volatility >= Decimal("1.5"):
+        volatility_state = "EXPANDING"
+        score -= 10
+        reasons.append("VOLATILITY_EXPANDING")
+    else:
+        volatility_state = "NORMAL"
+    hard_block = bool(
+        (spread is not None and spread > Decimal("0.5"))
+        or volatility_state == "EXTREME"
+    )
+    if spread is not None and spread > Decimal("0.5"):
+        reasons.append("SPREAD_WIDE")
+    score = min(max(score, 0), 100)
+    if hard_block:
+        action, confidence = "RISK_BLOCK", "1.0"
+    elif score >= 70:
+        action, confidence = "BUY", "0.75"
+    elif score >= 45:
+        action, confidence = "WAIT", "0.60"
+    else:
+        action, confidence = "REJECT", "0.70"
+    if price_vs_vwap is not None and price_vs_vwap >= 0 and (
+        sma5_slope is None or sma5_slope >= 0
+    ):
+        trend = "UPTREND"
+    elif price_vs_vwap is not None and price_vs_vwap >= 0:
+        trend = "UPTREND_WEAKENING"
+    elif sma5_slope is not None and sma5_slope < 0:
         trend = "DOWNTREND"
-    if spread > Decimal("0.005"):
-        action, reasons = "RISK_BLOCK", ["SPREAD_WIDE"]
+    else:
+        trend = "RANGE"
     scout = {
-        "trend_state": trend, "volume_state": "NORMAL", "volatility_state": "NORMAL",
+        "trend_state": trend, "volume_state": volume_state,
+        "volatility_state": volatility_state,
         "entry_score": score, "exit_risk_score": max(0, 100 - score),
         "core_review_required": True, "suggested_review": "ENTRY", "reason_codes": reasons,
     }
     core = {
         "action": action, "confidence": confidence,
-        "risk_level": "MEDIUM" if action in {"BUY", "REJECT"} else "HIGH" if action == "RISK_BLOCK" else "LOW",
+        "risk_level": "HIGH" if action == "RISK_BLOCK" else "MEDIUM" if action in {"BUY", "REJECT"} else "LOW",
         "sell_ratio": None, "reason_codes": reasons,
     }
     return scout, core
@@ -97,6 +156,7 @@ def evaluate_mock_decision(
 ) -> Decision:
     decision, created = create_mock_decision(
         db,
+        user_id=user.id,
         evaluation_request_id=evaluation_request_id,
         symbol=symbol,
         market=market,
@@ -113,6 +173,7 @@ def evaluate_mock_decision(
 def create_mock_trading_decision(
     db: Session,
     *,
+    user: User,
     evaluation_request_id: str,
     symbol: str,
     market: str,
@@ -121,6 +182,7 @@ def create_mock_trading_decision(
 ) -> tuple[Decision, bool]:
     return create_mock_decision(
         db,
+        user_id=user.id,
         evaluation_request_id=evaluation_request_id,
         symbol=symbol,
         market=market,
@@ -133,6 +195,7 @@ def create_mock_trading_decision(
 def create_mock_decision(
     db: Session,
     *,
+    user_id: str,
     evaluation_request_id: str,
     symbol: str,
     market: str,
@@ -158,9 +221,19 @@ def create_mock_decision(
     if snapshot is None:
         raise MockDecisionError("DECISION_SNAPSHOT_NOT_FOUND", 404)
     current = now or datetime.now(UTC)
-    scout, core = _outputs(snapshot, state, settings, current)
+    decision_input, input_payload = build_decision_input(
+        db,
+        user_id=user_id,
+        purpose=purpose,
+        snapshot=snapshot,
+        state=state,
+        observed_at=current,
+        quote_stale_seconds=settings.quote_stale_seconds,
+    )
+    scout, core = _outputs(input_payload)
     action = str(core["action"])
     decision = Decision(
+        decision_input_id=decision_input.id,
         purpose=purpose,
         evaluation_request_id=evaluation_request_id,
         input_snapshot_id=snapshot.id,

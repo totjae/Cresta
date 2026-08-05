@@ -270,7 +270,10 @@ describe("Mock AI decisions", () => {
   it("shows execution-policy routing without creating an order", async () => {
     const decision = {
       decision_id: "decision-1", evaluation_request_id: "evaluation-1", symbol: "005930", market: "KRX",
-      input_snapshot_id: "snapshot-1", model_id: "deterministic-mock-v1", prompt_version: "mock-entry-v1",
+      input_snapshot_id: "snapshot-1", decision_input_id: "input-1",
+      input_schema_version: "scout-input-v1", input_hash: "abcdef1234567890",
+      indicator_snapshot_id: "indicator-1", indicator_calculator_version: "watch-indicators-v2",
+      model_id: "deterministic-mock-v2", prompt_version: "mock-entry-indicators-v2",
       scout: { trend_state: "UPTREND", entry_score: 75, reason_codes: ["BREAKOUT_CONFIRMED"] },
       core: { action: "BUY", confidence: "0.75", risk_level: "MEDIUM", reason_codes: ["BREAKOUT_CONFIRMED"] },
       purpose: "DIAGNOSTIC", configuration_version_id: null, execution_mode: null,
@@ -294,6 +297,9 @@ describe("Mock AI decisions", () => {
     await user.click(screen.getByRole("button", { name: "Mock 판단 실행" }));
     expect(await screen.findByText(/진단 판단이 BUY/)).toBeInTheDocument();
     expect((await screen.findAllByText("DIAGNOSTIC")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("scout-input-v1")).toBeInTheDocument();
+    expect(await screen.findByText("watch-indicators-v2")).toBeInTheDocument();
+    expect(await screen.findByText("abcdef123456")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/orders"))).toBe(false);
   });
 });
