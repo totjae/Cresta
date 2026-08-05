@@ -321,6 +321,17 @@ Docker Compose에서 API 또는 Frontend 컨테이너만 재생성하면 고정 
 - TLS 인증서 만료 임박 시 갱신 실패 경보를 발생시키며 만료 후 HTTP 우회 접속을 열지 않는다.
 - 호스트 Nginx가 `Host`, `X-Forwarded-Proto`, `X-Forwarded-For`, `X-Request-Id`를 전달하지 않거나 HTTPS 원본을 보장하지 못하면 인증 서비스 공개를 중지한다.
 
+### 4.1 LLM Provider·Ollama 운영 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| OPS-070 | 외부 LLM secret이 없거나 provider가 비활성이면 core Compose 기동은 실패하지 않고 AI route만 `NOT_CONFIGURED/SHADOW_DISABLED`로 유지한다. |
+| OPS-071 | 활성 provider secret은 `deploy/prepare-secrets.sh` 또는 동등한 절차로 UID/GID `10001:10001`, mode `0400`을 확인하고 값은 출력하지 않는다. |
+| OPS-072 | Provider health, circuit, rate/cost limit, schema 실패율과 p95 지연을 모니터링하고 신규매수 차단 여부를 함께 경보한다. |
+| OPS-073 | Ollama는 외부 포트로 공개하지 않고 Cresta 내부 network 또는 loopback에서만 접근한다. N100/16GB에서 메모리 여유 20% 경고·10% 신규 호출 차단과 동시 호출 1개를 기본으로 한다. |
+| OPS-074 | provider profile·route·prompt·schema 변경 배포는 SHADOW rollback 경로와 이전 ACTIVE version을 보존하고 진행 중 Core run의 model을 중간에 변경하지 않는다. |
+| OPS-075 | LLM 장애 대응은 신규 AI 매수 판단을 중지하되 Broker worker·재동기화·실시간 Guard를 재시작하거나 중단시키지 않는다. |
+
 ## 5. 검증·인수 조건
 
 - 깨끗한 Ubuntu 환경에서 문서화된 순서로 MOCK 서비스를 배포할 수 있다.
@@ -329,6 +340,7 @@ Docker Compose에서 API 또는 Frontend 컨테이너만 재생성하면 고정 
 - 동일 계좌 worker 이중 실행과 복원 서버 동시 실행이 차단된다.
 - 장 전·장 후 점검 결과와 장애 대응 이력이 감사 가능하다.
 - 외부에서는 `https://trade.mihoservice.xyz`로만 접근할 수 있고, 원격 호스트에서 서버의 7788 포트로 직접 접근할 수 없다.
+- LLM provider 미설정·장애·비용 한도와 Ollama 과부하에서 core 서비스와 Guard가 유지되고 AI 신규매수만 fail-closed된다.
 
 ## 6. 미결정·보류 항목
 

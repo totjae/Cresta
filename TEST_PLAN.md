@@ -13,7 +13,7 @@
 - 키움 모의투자 주문·체결 Adapter
 - 재시작과 재동기화
 - ID·비밀번호·TOTP 인증, 세션과 재인증
-- 시장데이터, Scout·Core 계약, DB/API와 운영 복구
+- 시장데이터, Scout·Core·다중 에이전트·LLM Provider 계약, DB/API와 운영 복구
 
 ## 3. 테스트 케이스
 
@@ -26,6 +26,7 @@
 | T-PRD-003 | PRD-003~004 | 모의투자 환경에서 실거래 서버 선택 | 시작 또는 주문 차단 | 계획 |
 | T-PRD-004 | PRD-005 | Core·Guard 코드에서 키움 TR·원본 필드 의존 검사 | Broker interface 외 직접 의존 없음 | 계획 |
 | T-PRD-005 | PRD-030~033 | Web UI 설정 조회·변경·이력·무결성 해제 시도 | 정책 설정 가능, 변경 불가 규칙은 상태만 표시 | 계획 |
+| T-PRD-006 | PRD-040~044 | agent·provider·model·fallback 변경과 장애 발생 | DAG·구조화 계약 유지, SHADOW 기본, Guard 우회·신규매수 없음 | 계획 |
 
 ### 3.2 거래 세션
 
@@ -202,6 +203,35 @@
 | T-AI-006 | AI-050~053 | 외부 텍스트에 주문 지시 삽입 | 비신뢰 데이터 처리, 도구·주문 접근 없음 | 계획 |
 | T-AI-007 | AI-060~063 | 동일 fixture로 모델 버전 비교 | 미래 데이터 없이 동일 평가 기준 사용 | 계획 |
 
+### 3.12.1 다중 에이전트 오케스트레이션
+
+| 테스트 ID | 관련 요구사항 | 시나리오 | 기대 결과 | 상태 |
+| --- | --- | --- | --- | --- |
+| T-MAO-001 | MAO-001~005, AI-091~094 | 동일 입력으로 DAG를 중복 tick하고 DIAGNOSTIC run을 실행 경로에 전달 | run·Core 1개, 진단 승격·승인·주문 0건 | 계획 |
+| T-MAO-002 | MAO-010~014 | 가격을 포함한 웹 문서·중복 기사·출처 없는 요약 수집 | 가격은 Watch만 사용, 중복 묶음, 출처·시각·hash 없는 증거 거부 | 계획 |
+| T-MAO-003 | MAO-020~023 | 상충 공시·뉴스와 외부 정보 없음 | `CONFLICTED/PARTIAL`, 임의 사실 선택·긍정 신호 없음 | 계획 |
+| T-MAO-004 | MAO-030~034 | Scout가 미등록 evidence·reason, 잘못된 점수와 결측 추정 출력 | `INVALID_OUTPUT/INSUFFICIENT_DATA`, Core 신규매수 차단 | 계획 |
+| T-MAO-005 | MAO-040~045, AI-095~099 | 필수 Scout timeout·실패·Core fallback 시도 | `WAIT/RISK_BLOCK`, Core 재전송·무승인 fallback·주문 없음 | 계획 |
+| T-MAO-006 | MAO-050~054 | stage worker 중복 claim·crash·lease 만료·응답유실 | 단일 실행, 완료 stage 재호출 없음, 불명확 결과 격리 | 계획 |
+| T-MAO-007 | MAO-060~063 | N100 동시 호출·queue 지연·비용 한도 초과 | admission·우선순위·유효시간 준수, Guard 지속 | 계획 |
+| T-MAO-008 | MAO-070~074 | 웹 원문에 주문·비밀·내부 URL 접근 지시 삽입 | 명령 무시, SSRF·도구·Broker 접근 차단, 안전 escape | 계획 |
+| T-MAO-009 | MAO-080~083 | 신규 model·prompt·DAG를 SHADOW로 실행·활성화 시도 | 회귀시험·TOTP 전 활성화 불가, SHADOW 승인·주문 0건 | 계획 |
+
+### 3.12.2 LLM Provider 및 Gateway
+
+| 테스트 ID | 관련 요구사항 | 시나리오 | 기대 결과 | 상태 |
+| --- | --- | --- | --- | --- |
+| T-LLM-001 | LLM-001~005, LLM-080~083 | 공식·Gateway·Ollama·사용자 endpoint profile 검증 | Mock Adapter 선택과 무통신 검증, 비허용 scheme·credential URL 거부; 외부 Adapter는 미구현 오류 | 부분 통과 (2026-08-05, 자동 fixture) |
+| T-LLM-002 | LLM-010~014, LLM-080~084, CFG-090~095 | 발견 모델·미검증 capability·route 이중 활성화 | 자동 활성화 없음, Mock fixture보다 넓은 capability와 SHADOW 외 route 거부 | 부분 통과 (2026-08-05, 자동 fixture) |
+| T-LLM-003 | LLM-020~024, LLM-083 | Mock Adapter canonical fixture와 외부 Adapter 선택 | deterministic 내부 result, 외부 Adapter는 호출 전에 차단 | 부분 통과 (2026-08-05, Mock만) |
+| T-LLM-004 | LLM-030~033 | timeout·cancellation·허용되지 않은 header/body override | 호출 격리, global 설정 불변, Authorization/host override 거부 | 계획 |
+| T-LLM-005 | LLM-040~044 | 429·5xx·timeout·응답유실·Gateway 내부 fallback | 유효시간 내 제한 재시도, Core fail-closed, 실제 route 불명확 시 활성화 금지 | 계획 |
+| T-LLM-006 | LLM-050~054 | usage 누락·가격 미확정·호출/비용 한도·Ollama 과부하 | `UNKNOWN` 비용, 한도 차단, Core 사용 전 benchmark gate | 계획 |
+| T-LLM-007 | LLM-060~065, LLM-080~085, SEC-080~085 | profile API·감사·DOM의 credential과 비허용 endpoint 검사 | Foundation credential ref·raw secret field 거부, 감사 원문 미기록, 비허용 loopback 차단, 외부 전송 0건 | 부분 통과 (2026-08-05, Foundation 범위) |
+| T-LLM-008 | LLM-070~074, LLM-080~085, API-130~137, UI-110~117 | Web UI Mock profile·model·SHADOW route 초안·검증 흐름 | credential 입력 없음, validation 분리, activation·agent run endpoint 없음 | 부분 통과 (2026-08-05, API·component) |
+| T-LLM-009 | DB-115~123, LLM-080 | Foundation migration·profile/model/route 참조와 주문 경계 | `0013` head·FK·SHADOW 제약, invocation·approval·order 0건 | 부분 통과 (2026-08-05, Foundation 범위) |
+| T-LLM-010 | MAO-080~083, LLM-013·042·053 | 동일 fixture로 cloud 모델·Gateway·Ollama SHADOW 비교 | schema 통과율·환각·p95 지연·비용 보고, 운영 판단 영향 0건 | 계획 |
+
 ### 3.13 데이터베이스 및 영속성
 
 | 테스트 ID | 관련 요구사항 | 시나리오 | 기대 결과 | 상태 |
@@ -261,6 +291,7 @@
 | T-OPS-011 | OPS-003 | API 컨테이너 IP 변경 후 gateway를 재시작하지 않고 health·login 요청 | Docker DNS 재해석 후 새 API로 연결되고 502가 지속되지 않음 | 설정 계약 통과·실서버 대기 |
 | T-OPS-012 | OPS-014 | 배포 Compose의 장기 실행 서비스 재시작·health 설정 검사 | API·Frontend 포함 전 서비스 `unless-stopped`, PostgreSQL·Redis·API·Frontend·gateway healthcheck 존재 | 통과 (2026-08-05, 자동 계약) |
 | T-OPS-013 | OPS-015~016 | `cresta-boot.service` 정적 계약과 Ubuntu 부팅 시험 | Docker·network-online 이후 두 Compose 파일을 `up -d --wait --wait-timeout 180`으로 조정하고 실패 재시도; 부팅 후 core 5종 healthy·worker Up·내부 health 200 | 통과 (2026-08-05, 자동 계약·Ubuntu 재부팅 9초 복구) |
+| T-OPS-015 | OPS-070~075 | Provider secret 미설정·외부 API 장애·비용 한도·Ollama 과부하 | core·Broker·Guard 유지, AI route만 차단, secret·Ollama 포트 미노출 | 계획 |
 
 ## 4. 시험 환경
 
@@ -294,15 +325,15 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 134개 통과 | 기존 범위와 v2 지표·불변 Scout 입력 hash·KST scheduler TRADING SHADOW 인계·주문 0건 검증 포함 |
-| Console component 시험 | `npm test` | 8개 통과 | 기존 범위와 감시 종목 등록·시세 대기, DIAGNOSTIC 목적·실행 없음 표시 포함 |
+| Python 단위·API 시험 | `python -m pytest` | 138개 통과 | 기존 범위와 LLM Foundation Mock Adapter·profile/model/SHADOW route API·비밀값 차단·주문 0건 검증 포함 |
+| Console component 시험 | `npm test` | 9개 통과 | 기존 범위와 credential 입력 없는 Mock Provider 초안·CSRF·SHADOW 전용 표시 포함 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
 | Console HTTP smoke | standalone server에 HTTP 요청 | 통과 | `/` 응답 200과 Cresta metadata 확인 |
 | Console production dependency audit | `npm audit --omit=dev --audit-level=high` | 취약점 0건 | Next 하위 PostCSS·Sharp를 검증된 패치 버전으로 고정 |
 | 정적 검사 | `python -m ruff check app tests migrations` | 통과 | FastAPI dependency의 B008은 프레임워크 관용구로 제외 |
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
-| migration 적용 | `alembic upgrade head`·`current` | 통과 | SQLite에서 v2 지표·Scout 입력을 포함한 `20260805_0012` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
+| migration 적용 | `alembic upgrade head`·`current` | 통과 | 빈 SQLite에서 LLM Foundation 4개 테이블을 포함한 `20260805_0013` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
 | Docker Compose·HTTPS | Ubuntu 서버에서 전체 서비스 기동, migration, host Nginx·TLS 접속과 로그인 | 통과 | PostgreSQL·Redis healthy, secret 읽기, API·Frontend·gateway, HTTPS와 ID·비밀번호·TOTP 로그인 확인 |
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |

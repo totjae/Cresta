@@ -30,6 +30,7 @@
 - 내부 주문 상태 머신, paper broker와 재동기화 시뮬레이터
 - Watch 정규화 모델, fixture 기반 분봉·지표·최신성 검사
 - Scout·Core 인터페이스, JSON Schema 검증과 mock model
+- 다중 에이전트 DAG·증거·stage schema와 LLM Provider Registry의 SHADOW 기반
 - API·WebSocket 계약과 Console 화면 골격
 
 ### 2.3 외부 확인 전 활성화 금지 범위
@@ -40,7 +41,7 @@
 | 고정 출구 IP `180.68.4.149` | 2026-08-03 실제 서버 출구 확인 완료 | IP 변경 감지와 상시 worker 게이트는 후속 구현 |
 | 키움 주문·체결 필드 | 실제 mock capture 전 잠정 | production adapter mapping 확정 금지 |
 | 키움 호출 제한·WebSocket heartbeat | 실측 전 초기값 | 측정 가능한 설정으로 유지 |
-| Scout·Core 모델 제공자 | 미선정 | 실제 AI 호출 활성화 금지, mock adapter 사용 |
+| Scout·Core 모델 제공자 | 다중 provider·gateway 명세 완료, 계정·모델 미선정 | 실제 AI 호출과 운영 route 활성화 금지, deterministic Mock Adapter·SHADOW만 사용 |
 | NXT/SOR 주문 | 키움 모의투자 미지원 | 표시·분석 외 주문 금지 |
 | 도메인·내부 upstream | `trade.mihoservice.xyz`·`127.0.0.1:7788` 확정 | 호스트 Nginx·TLS 실서버 검증 전 외부 공개 완료 처리 금지 |
 | TLS 자동 발급·갱신·외부 백업·알림 채널 | 운영값 미정 | 외부 공개 배포 완료 처리 금지 |
@@ -70,6 +71,32 @@
 3. 정상·실패·응답유실·재시작 테스트가 `TEST_PLAN.md`에 연결돼 있다.
 4. 외부 미확정값은 fixture 또는 interface 뒤에 격리돼 있다.
 5. 비밀값·실거래 기능이 개발 기본값으로 활성화되지 않는다.
+
+### 4.1 완료된 구현 slice: Provider Registry 기반
+
+외부 모델 연결 전에 구현 경계를 만드는 `LLM Foundation v1`은 2026-08-05 로컬 구현·검증을 완료했다.
+
+포함 범위:
+
+1. `llm_provider_profiles`, `llm_model_profiles`, `llm_role_routes`, `llm_invocations` migration
+2. canonical request/result와 capability schema
+3. deterministic Mock Provider Adapter와 registry/router
+4. provider/model/route 조회·초안·검증 API
+5. Console의 Provider·Model·Role Route 읽기 및 초안 화면
+6. secret 원문 미저장·redaction·route 이중 활성화·SHADOW 주문 0건 자동시험
+
+제외 범위:
+
+- 실제 OpenAI·Anthropic·Gemini credential 등록 및 외부 호출
+- Intel 웹 수집과 실제 뉴스·공시 사용
+- Core 운영 route 전환, 승인 또는 주문 생성
+- Vercel·Ollama 성능 비교
+
+`T-LLM-001~003`, `T-LLM-007~009` 중 외부 네트워크가 필요 없는 fixture 범위, migration `20260805_0013`, API·Console 회귀시험을 통과했다. 실제 PostgreSQL 적용과 외부 Adapter는 미검증 상태다.
+
+### 4.2 다음 구현 slice: Agent Runtime v1
+
+다음 작업은 Foundation의 Mock route만 사용하는 DIAGNOSTIC 다중 에이전트 runtime이다. `agent_runs`, `agent_stage_runs`, evidence 저장과 Intel→Verify→Scout→Core DAG를 구현하되 실제 웹 수집·외부 LLM·승인·주문은 연결하지 않는다. 상세 경계와 인수조건은 구현 전에 `MULTI_AGENT_ORCHESTRATION_SPEC.md`, `DATABASE_SPEC.md`, `API_SPEC.md`, `WEB_UI_SPEC.md`, `TEST_PLAN.md`에 보강한다.
 
 ## 5. 검증·인수 조건
 

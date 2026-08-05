@@ -18,6 +18,8 @@ Cresta MVP는 사용자가 등록한 국내주식 최대 3종목을 감시하고
 - [인증 및 보안 명세](SECURITY_SPEC.md)
 - [시장데이터 및 Watch 명세](MARKET_DATA_SPEC.md)
 - [Scout·Core AI 판단 계약](AI_DECISION_SPEC.md)
+- [다중 에이전트 오케스트레이션 명세](MULTI_AGENT_ORCHESTRATION_SPEC.md)
+- [LLM Provider 및 Gateway 명세](LLM_PROVIDER_GATEWAY_SPEC.md)
 - [판단 실행 및 승인 오케스트레이션 명세](DECISION_EXECUTION_SPEC.md)
 - [데이터베이스 및 영속성 명세](DATABASE_SPEC.md)
 - [배포·운영·장애복구 명세](OPERATIONS_RUNBOOK.md)
@@ -40,10 +42,15 @@ Browser ─HTTPS─> Host Nginx (trade.mihoservice.xyz)
                                                                └─> FastAPI
                          └> API (FastAPI) ─> PostgreSQL/TimescaleDB
                                   │          Redis (cache/queue/lock)
-Market stream ─> Watch ─> Event Bus
-                          ├─> Scout ─> Core ───────────────┐
-                          └─> Guard trigger (real-time) ───┤
-                                                         v
+Market stream ─> Watch ─> Event Bus ─> Technical Scout ───┐
+External sources ─> Intel ─> Verify ─┬─> News Scout ──────┤
+                                     └─> Market Scout ────┤
+Position/risk snapshot ───────────────> Position Scout ────┤
+                                                             v
+                                        Agent Orchestrator ─> Core
+                                                             │
+Watch ─> Guard trigger (real-time) ──────────────────────────┤
+                                                             v
                                               Execution Orchestrator
                                                 ├─> Guard evaluation
                                                 ├─> Approval
@@ -53,7 +60,10 @@ Market stream ─> Watch ─> Event Bus
 | 모듈 | 책임 | 주문 권한 |
 |---|---|---|
 | Watch | 시세 정규화, 지표 계산, 지연·급변 감지 | 없음 |
-| Scout | 추세 및 매도 위험 점수 산출 | 없음 |
+| Intel·Verify | 허용 소스 수집, 출처·시각·중복·상충 검증과 불변 증거 bundle 생성 | 없음 |
+| 복수 Scout | 기술·뉴스/공시·시장/업종·포지션 위험 평가 | 없음 |
+| Agent Orchestrator | 버전 고정 DAG, 병렬 stage, timeout·멱등성·실패 격리 | 없음 |
+| LLM Provider Layer | 공식 API·Gateway·Ollama Adapter, 구조화 출력·route·비용·health 정규화 | 없음 |
 | Core | 제한된 행동 코드와 근거 생성 | 없음 |
 | Guard | 한도·손절·데이터·연결 상태의 결정론적 평가 | 통과/차단·중지 범위 |
 | Execution Orchestrator | 거래 목적 판단·Guard trigger를 실행 권한에 따라 승인 또는 주문으로 변환 | 승인·주문 생성, Broker 호출 없음 |
@@ -65,6 +75,8 @@ Market stream ─> Watch ─> Event Bus
 Core 판단과 Guard trigger의 후속 실행은 [판단 실행 및 승인 오케스트레이션 명세](DECISION_EXECUTION_SPEC.md)를 따른다. 진단 판단은 이 경로에 진입하지 않으며, 거래 목적 판단도 실행 권한과 Guard의 현재 상태를 다시 확인한 뒤에만 승인 또는 내부 `CREATED` 주문을 만든다.
 
 Watch의 `watch-indicators-v2` 결과와 정규화 quote는 모델 호출 전에 `scout-input-v1` canonical JSON으로 고정한다. 이 입력은 SHA-256 해시와 시장·지표 snapshot 참조를 가진 불변 DB 행이며 사용자 소유권은 모델에 전달하지 않는 별도 metadata로 저장한다. 현재 결정론적 Mock v2와 향후 외부 Scout/Core provider는 같은 입력 경계를 사용한다.
+
+다중 에이전트 확장은 자유 대화형 swarm이 아니라 versioned DAG다. 외부 문서는 Intel과 Verify를 거쳐 `EvidenceBundle`로 고정되고 Core에는 원시 웹 문서나 도구를 제공하지 않는다. Agent Orchestrator는 필수 Scout 종료 후 Core를 한 번만 호출하며 provider·model·prompt·schema·입력·출력과 실행 경로를 불변 run으로 기록한다. 신규 agent·provider·model은 SHADOW로 시작하고 Core 장애는 신규매수 fail-closed로 처리한다.
 
 첫 Console 구현은 Next.js App Router와 TypeScript를 사용한다. 브라우저는 같은 origin의 `/api/v1`만 호출하고 세션 token은 `HttpOnly` cookie로, CSRF token은 React 메모리 상태로만 유지한다. 새로고침 시 `/api/v1/auth/session`으로 서버 세션을 다시 검증하고 새 CSRF token을 받는다. 미인증·만료 응답에서는 보호 화면 상태를 즉시 폐기하며 로그인 요청을 자동 재전송하지 않는다.
 

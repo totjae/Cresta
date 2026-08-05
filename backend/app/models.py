@@ -856,3 +856,191 @@ class IndicatorSnapshot(Base):
     input_start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     input_end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class LlmProviderProfile(Base):
+    __tablename__ = "llm_provider_profiles"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "name", name="uq_llm_provider_profiles_owner_name"),
+        CheckConstraint(
+            "adapter_type IN ('MOCK','OPENAI_RESPONSES','ANTHROPIC_MESSAGES',"
+            "'GEMINI_GENERATE_CONTENT','VERCEL_AI_GATEWAY','OPENAI_COMPATIBLE',"
+            "'OLLAMA_NATIVE','OLLAMA_OPENAI_COMPATIBLE')",
+            name="ck_llm_provider_profiles_adapter_type",
+        ),
+        CheckConstraint(
+            "state IN ('DRAFT','VALIDATED','DISABLED')",
+            name="ck_llm_provider_profiles_state",
+        ),
+        CheckConstraint(
+            "data_policy IN ('EXTERNAL_CLOUD','GATEWAY','LOCAL','NONE')",
+            name="ck_llm_provider_profiles_data_policy",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    adapter_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    endpoint: Mapped[str | None] = mapped_column(String(500))
+    credential_secret_ref: Mapped[str | None] = mapped_column(String(128))
+    data_policy: Mapped[str] = mapped_column(String(24), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="DRAFT")
+    health_status: Mapped[str] = mapped_column(String(24), nullable=False, default="UNKNOWN")
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    __mapper_args__: ClassVar[dict[str, object]] = {
+        "version_id_col": version,
+        "version_id_generator": False,
+    }
+
+
+class LlmModelProfile(Base):
+    __tablename__ = "llm_model_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_profile_id", "alias", name="uq_llm_model_profiles_provider_alias"
+        ),
+        CheckConstraint(
+            "state IN ('DRAFT','VALIDATED','DISABLED')",
+            name="ck_llm_model_profiles_state",
+        ),
+        CheckConstraint("max_output_tokens > 0", name="ck_llm_model_profiles_max_output"),
+        CheckConstraint(
+            "temperature >= 0 AND temperature <= 2",
+            name="ck_llm_model_profiles_temperature",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    provider_profile_id: Mapped[str] = mapped_column(
+        ForeignKey("llm_provider_profiles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    alias: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_model_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    capabilities_json: Mapped[str] = mapped_column(Text, nullable=False)
+    max_context_tokens: Mapped[int | None] = mapped_column(Integer)
+    max_output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=1024)
+    temperature: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False, default=0)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="DRAFT")
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    __mapper_args__: ClassVar[dict[str, object]] = {
+        "version_id_col": version,
+        "version_id_generator": False,
+    }
+
+
+class LlmRoleRoute(Base):
+    __tablename__ = "llm_role_routes"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('INTEL_COLLECTOR','EVIDENCE_VERIFIER','TECHNICAL_SCOUT',"
+            "'NEWS_DISCLOSURE_SCOUT','MARKET_SECTOR_SCOUT','POSITION_RISK_SCOUT','CORE')",
+            name="ck_llm_role_routes_role",
+        ),
+        CheckConstraint(
+            "state IN ('DRAFT','VALIDATED','ACTIVE','SUPERSEDED')",
+            name="ck_llm_role_routes_state",
+        ),
+        CheckConstraint(
+            "execution_stage = 'SHADOW'", name="ck_llm_role_routes_foundation_stage"
+        ),
+        CheckConstraint(
+            "fallback_policy = 'NONE'", name="ck_llm_role_routes_foundation_fallback"
+        ),
+        CheckConstraint("timeout_ms BETWEEN 1000 AND 60000", name="ck_llm_role_routes_timeout"),
+        CheckConstraint("max_attempts = 1", name="ck_llm_role_routes_attempts"),
+        Index(
+            "uq_llm_role_routes_active",
+            "owner_id",
+            "role",
+            unique=True,
+            sqlite_where=text("state = 'ACTIVE'"),
+            postgresql_where=text("state = 'ACTIVE'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    primary_model_profile_id: Mapped[str] = mapped_column(
+        ForeignKey("llm_model_profiles.id"), nullable=False, index=True
+    )
+    fallback_model_profile_ids_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]"
+    )
+    fallback_policy: Mapped[str] = mapped_column(String(32), nullable=False, default="NONE")
+    execution_stage: Mapped[str] = mapped_column(String(24), nullable=False, default="SHADOW")
+    timeout_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=10000)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    daily_call_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    daily_cost_limit_krw: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=0
+    )
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    output_schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="DRAFT")
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    __mapper_args__: ClassVar[dict[str, object]] = {
+        "version_id_col": version,
+        "version_id_generator": False,
+    }
+
+
+class LlmInvocation(Base):
+    __tablename__ = "llm_invocations"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('CREATED','RUNNING','SUCCEEDED','REFUSED','TIMED_OUT',"
+            "'RATE_LIMITED','PROVIDER_ERROR','INVALID_OUTPUT','AMBIGUOUS')",
+            name="ck_llm_invocations_state",
+        ),
+        CheckConstraint("retry_count >= 0", name="ck_llm_invocations_retry_count"),
+        Index("ix_llm_invocations_created", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    stage_run_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    requested_provider_profile_id: Mapped[str] = mapped_column(
+        ForeignKey("llm_provider_profiles.id"), nullable=False
+    )
+    requested_model_profile_id: Mapped[str | None] = mapped_column(
+        ForeignKey("llm_model_profiles.id")
+    )
+    actual_provider: Mapped[str | None] = mapped_column(String(128))
+    actual_model: Mapped[str | None] = mapped_column(String(128))
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    provider_request_id: Mapped[str | None] = mapped_column(String(128))
+    gateway_request_id: Mapped[str | None] = mapped_column(String(128))
+    input_hash: Mapped[str | None] = mapped_column(String(64))
+    raw_response_hash: Mapped[str | None] = mapped_column(String(64))
+    usage_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    estimated_cost_krw: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fallback_path_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    validation_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="NOT_RUN"
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -52,6 +52,8 @@
 | 인증 및 보안 명세 | [docs/SECURITY_SPEC.md](docs/SECURITY_SPEC.md) | ID·비밀번호·TOTP 로그인, 세션, 재인증, 비밀 저장과 감사 |
 | 시장데이터 명세 | [docs/MARKET_DATA_SPEC.md](docs/MARKET_DATA_SPEC.md) | KRX·NXT 시세 정규화, 최신성, 분봉·지표와 Watch 동작 |
 | AI 판단 계약 | [docs/AI_DECISION_SPEC.md](docs/AI_DECISION_SPEC.md) | Scout·Core 입력·출력, 호출·실패·검증과 재현 기준 |
+| 다중 에이전트 오케스트레이션 명세 | [docs/MULTI_AGENT_ORCHESTRATION_SPEC.md](docs/MULTI_AGENT_ORCHESTRATION_SPEC.md) | Intel·Verify·복수 Scout·Core의 DAG, 증거 계약, 실패 격리와 SHADOW 활성화 기준 |
+| LLM Provider 및 Gateway 명세 | [docs/LLM_PROVIDER_GATEWAY_SPEC.md](docs/LLM_PROVIDER_GATEWAY_SPEC.md) | 공식 API·Gateway·Ollama Adapter, 모델 기능, route, 비밀·비용·fallback 정책 |
 | 판단 실행·승인 명세 | [docs/DECISION_EXECUTION_SPEC.md](docs/DECISION_EXECUTION_SPEC.md) | AI·Guard 신호의 실행 권한 분기, Guard 재검사, 승인과 주문 생성 경계 |
 | 데이터베이스 명세 | [docs/DATABASE_SPEC.md](docs/DATABASE_SPEC.md) | 테이블, 제약조건, 트랜잭션, migration, 보존과 Redis 경계 |
 | 운영·장애복구 명세 | [docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md) | 배포, 모니터링, 백업·복원과 장애 대응 |
@@ -83,6 +85,8 @@
 | 인증·권한·비밀·감사 | `SECURITY_SPEC.md`, `SYSTEM_DESIGN.md`, `TEST_PLAN.md` |
 | 시세·호가·분봉·지표 | `MARKET_DATA_SPEC.md`, `SYSTEM_DESIGN.md`, `TEST_PLAN.md` |
 | Scout·Core 입력·출력·모델 | `AI_DECISION_SPEC.md`, `SYSTEM_DESIGN.md`, `TEST_PLAN.md` |
+| 에이전트 역할·DAG·증거·병렬 실행 | `MULTI_AGENT_ORCHESTRATION_SPEC.md`, `AI_DECISION_SPEC.md`, `SYSTEM_DESIGN.md`, `DATABASE_SPEC.md`, `TEST_PLAN.md` |
+| LLM provider·gateway·model·route·비용 | `LLM_PROVIDER_GATEWAY_SPEC.md`, `SECURITY_SPEC.md`, `CONFIGURATION_SPEC.md`, `DATABASE_SPEC.md`, `API_SPEC.md`, `WEB_UI_SPEC.md`, `TEST_PLAN.md` |
 | 판단 실행, Guard 분기, 승인·주문 연결 | `DECISION_EXECUTION_SPEC.md`, `GUARD_RISK_SPEC.md`, `ORDER_EXECUTION_SPEC.md`, `ORDER_STATE_MACHINE_SPEC.md`, `API_SPEC.md`, `DATABASE_SPEC.md`, `WEB_UI_SPEC.md`, `TEST_PLAN.md` |
 | Docker·배포·모니터링·복구 | `OPERATIONS_RUNBOOK.md`, `SYSTEM_DESIGN.md`, `TEST_PLAN.md` |
 

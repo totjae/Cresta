@@ -32,7 +32,9 @@
 | 인증·세션·TOTP | `docs/SECURITY_SPEC.md` | 구현 중 | 로그인·세션·CSRF·실패제한·재인증 기반 17개 로컬 시험 통과, 복구·운영 검증 미완료 |
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 감시 종목·키움 `0B`·`0D`, 1분봉과 v2 VWAP·SMA5·상대 거래량·실현 변동성·고점 하락률·spread 영속화 로컬 검증 완료; 체결강도와 v2 실제 장중 수신 미검증 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 구현 중 | 불변 `scout-input-v1`과 `deterministic-mock-v2`, KST 정기 TRADING scheduler·SHADOW 인계 구현; 실제 AI provider와 보유 포지션 판단 미구현 |
-| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표와 불변 Scout 입력 `20260805_0012` 로컬 적용 통과; 실서버 PostgreSQL migration·장중 입력 축적 미검증 |
+| 다중 에이전트 오케스트레이션 | `docs/MULTI_AGENT_ORCHESTRATION_SPEC.md` | 명세 완료 | Intel·Verify·4개 Scout·Core DAG, 증거·stage·멱등성·SHADOW 계약 완료; 코드·DB·worker 미구현 |
+| LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | `LLM Foundation v1`의 profile·model·SHADOW route·invocation DB, canonical 계약, deterministic Mock Adapter, 조회·초안·검증 API와 Console 구현·로컬 검증 완료; 외부 credential·실제 Adapter·활성화·agent run 미구현 |
+| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·불변 Scout 입력과 LLM Foundation `20260805_0013` 로컬 적용 통과; 실서버 PostgreSQL migration·장중 입력 축적 미검증 |
 | 판단 실행·승인 | `docs/DECISION_EXECUTION_SPEC.md` | 구현 중 | DIAGNOSTIC/TRADING 경계, scheduler 인계, 멱등 SHADOW execution, 불변 Guard 평가와 안전 차단 구현; 승인·주문 생성은 미구현 |
 | 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 부팅 Compose 조정 unit 구현; 2026-08-05 Ubuntu 재부팅 후 9초 내 전체 health·worker READY 복구 통과, 백업·경보·복구훈련 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 명세 완료 | 키움 출구 IP·MOCK 인증·시세 실서버 확인 반영, 계좌·주문 외부 통합 게이트 유지 |
@@ -53,3 +55,14 @@
 
 - 키움 모의투자 계정·API 사용신청·고정 출구 IP와 REST 인증·시세·10자리 계좌 일치는 실제 서버 확인 완료
 - NXT/SOR 실거래 검증 환경
+- 첫 외부 LLM provider·과금 계정과 뉴스·공시 수집 source Adapter는 미선정이며 외부 credential 등록과 네트워크 호출은 계속 차단한다.
+
+## 6. 다음 구현 작업
+
+다음 작업은 Foundation 위에서 실행 경계를 확장하는 `Agent Runtime v1` 명세 보강과 구현이다.
+
+- DB: `agent_runs`, `agent_stage_runs`, `evidence_items`, `evidence_bundles` migration
+- Backend: Intel·Verify·Scout·Core DAG runner, stage lease·멱등성·timeout
+- 안전 경계: deterministic fixture와 Mock Provider만 사용, 외부 웹·LLM 호출 없음, 승인·주문 연결 없음
+- API/UI: DIAGNOSTIC run 생성·상태·stage·증거 provenance 조회
+- 시험: `T-MAO-001~009` 중 로컬 fixture 범위와 주문·승인 0건

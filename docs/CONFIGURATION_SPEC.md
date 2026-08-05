@@ -187,3 +187,14 @@ configuration_change:
 | CFG-082 | 위험 설정이 활성화되지 않은 상태에서 조회용 시스템 안전 기본값은 제공할 수 있지만 `entry_order_amount` 기본값은 제공하지 않는다. 사용자가 값을 포함한 위험 설정을 활성화하기 전에는 신규매수를 차단한다. |
 | CFG-083 | 판단 실행과 Guard 평가는 사용한 risk policy version ID와 각 최종값의 출처를 저장한다. |
 | CFG-084 | 실행 단계 `SHADOW | APPROVAL_ONLY | MOCK_AUTOMATIC`은 별도 시스템 gate이며 일반 실행 권한보다 우선한다. 단계 확대는 TOTP 재인증, 변경 사유와 요구 시험 근거를 요구한다. |
+
+### 6.3 에이전트·모델 route 설정 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| CFG-090 | 사용자는 Web UI에서 agent 역할별 primary model, 승인된 fallback, timeout, 호출·비용 한도와 활성 여부를 조회·설정할 수 있다. |
+| CFG-091 | Provider credential은 일반 설정 payload에 포함하지 않고 별도 write-only 보안 흐름으로 관리한다. |
+| CFG-092 | DAG, prompt, model profile과 role route는 버전·적용 범위·활성 상태를 가지며 판단에 사용된 최종 version ID를 저장한다. |
+| CFG-093 | Core fallback 확대, 외부 데이터 전송 확대, provider endpoint 변경과 route 활성화는 영향 미리보기·변경 사유·TOTP 재인증을 요구한다. |
+| CFG-094 | model discovery 결과나 provider 연결 성공은 route 활성화로 간주하지 않으며 schema fixture와 회귀평가를 통과한 `VALIDATED` route만 활성화할 수 있다. |
+| CFG-095 | 새 agent·provider·model·prompt는 SHADOW가 기본이며 실행 권한의 `AUTOMATIC` 설정만으로 활성 판단 경로로 승격되지 않는다. |

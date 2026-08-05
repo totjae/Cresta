@@ -117,6 +117,17 @@ Argon2id 초기 최소값은 memory 64 MiB, iterations 3, parallelism 1로 한�
 | SEC-071 | 감사 로그에는 actor, event, result, occurred_at, IP, user-agent 요약과 correlation_id를 기록하되 입력한 인증값은 기록하지 않는다. |
 | SEC-072 | 인증 감사 로그는 거래 감사 로그와 동일한 변조 방지·접근 통제를 적용하고 보존 기간은 운영 명세에서 확정한다. |
 
+### 3.9 LLM Provider 비밀과 외부 전송
+
+| ID | 요구사항 |
+| --- | --- |
+| SEC-080 | LLM API key, Gateway token과 service account private key는 DB가 아닌 Docker secret 또는 동등한 비밀 저장소에 보관하고 애플리케이션 UID 10001만 읽는다. |
+| SEC-081 | Provider credential 등록·교체는 write-only 입력, TOTP 재인증, CSRF와 감사 기록을 요구하고 성공 응답에도 원문을 반환하지 않는다. |
+| SEC-082 | LLM prompt와 호출 metadata에는 사용자 ID·계좌번호·세션·TOTP·Broker credential·Authorization header를 포함하지 않는다. |
+| SEC-083 | 사용자 지정 Provider endpoint는 SSRF allowlist, TLS 검증, 리디렉션·응답 크기 제한을 적용하며 Ollama profile 외 loopback/private endpoint를 기본 거부한다. |
+| SEC-084 | 웹·공시·뉴스 원문은 비신뢰 입력으로 표시하고 모델이 포함된 지시나 내부 URL·비밀 요청을 실행할 수 없게 도구 권한을 분리한다. |
+| SEC-085 | Provider·Gateway별 데이터 보존·학습·지역 정책 확인 상태를 저장하고 미확인 외부 전송 profile은 활성 route에 사용할 수 없다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 서버 시각 동기화가 허용 오차를 벗어나면 신규 로그인과 고위험 재인증을 fail-closed 처리하고 운영 경보를 발생시킨다.
@@ -134,6 +145,7 @@ Argon2id 초기 최소값은 memory 64 MiB, iterations 3, parallelism 1로 한�
 - 쿠키·CSRF·세션 만료·로그아웃 동작이 명세와 일치한다.
 - 고위험 행동은 대상에 결합된 최신 TOTP 재인증 없이는 실행되지 않는다.
 - 저장소, DOM, 로그와 API 응답에서 비밀번호·TOTP secret·복구 코드·세션 토큰 원문이 발견되지 않는다.
+- Provider credential과 Authorization header가 DB·prompt·로그·API·UI·감사 metadata에 나타나지 않는다.
 
 참고 표준:
 

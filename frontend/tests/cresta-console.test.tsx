@@ -262,6 +262,49 @@ describe("execution policy settings", () => {
       target_action: "EXECUTION_POLICY_ACTIVATE", target_id: "policy-1",
     }));
   });
+
+  it("creates only a credential-free Mock provider from the SHADOW foundation panel", async () => {
+    const safePolicy = {
+      buy: "MANUAL_APPROVAL", partial_sell: "MANUAL_APPROVAL", full_sell: "MANUAL_APPROVAL",
+      take_profit: "MANUAL_APPROVAL", fixed_stop_loss: "AUTOMATIC", trailing_stop: "AUTOMATIC",
+      end_of_day_liquidation: "AUTOMATIC", emergency_exit: "AUTOMATIC",
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-llm", login_id: "admin", expires_at: "2026-08-05T09:00:00Z", csrf_token: "csrf-llm" });
+      if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
+      if (path === "/api/v1/settings/execution-policy") return jsonResponse({ active_version_id: null, source: "SAFE_DEFAULT", policy: safePolicy });
+      if (path === "/api/v1/ai/providers" && init?.method === "POST") return jsonResponse({ id: "provider-1" }, 201);
+      if (path === "/api/v1/ai/providers") return jsonResponse({ schema_version: "1.0", request_id: "providers-1", items: [] });
+      if (path === "/api/v1/ai/models") return jsonResponse({ schema_version: "1.0", request_id: "models-1", items: [] });
+      if (path === "/api/v1/ai/routes") return jsonResponse({ schema_version: "1.0", request_id: "routes-1", items: [] });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CrestaConsole />);
+
+    await user.click(await screen.findByRole("button", { name: /전략·설정/ }));
+    expect(await screen.findByText("SHADOW ONLY")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/credential/i)).not.toBeInTheDocument();
+    await user.clear(screen.getByLabelText("Provider 이름"));
+    await user.type(screen.getByLabelText("Provider 이름"), "foundation-mock");
+    await user.click(screen.getAllByRole("button", { name: "초안 생성" })[0]);
+    expect(await screen.findByText("Mock Provider 초안이 생성되었습니다.")).toBeInTheDocument();
+
+    const createCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/ai/providers" && init?.method === "POST");
+    expect(createCall?.[1]).toEqual(expect.objectContaining({
+      headers: expect.objectContaining({ "X-CSRF-Token": "csrf-llm" }),
+    }));
+    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
+      schema_version: "1.0",
+      name: "foundation-mock",
+      adapter_type: "MOCK",
+      endpoint: null,
+      credential_secret_ref: null,
+      data_policy: "NONE",
+    });
+  });
 });
 
 describe("Mock AI decisions", () => {

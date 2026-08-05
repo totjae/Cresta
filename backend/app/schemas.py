@@ -436,3 +436,146 @@ class WatchlistDeleteResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str
     status: Literal["DELETED"] = "DELETED"
+
+
+LlmAdapterType = Literal[
+    "MOCK",
+    "OPENAI_RESPONSES",
+    "ANTHROPIC_MESSAGES",
+    "GEMINI_GENERATE_CONTENT",
+    "VERCEL_AI_GATEWAY",
+    "OPENAI_COMPATIBLE",
+    "OLLAMA_NATIVE",
+    "OLLAMA_OPENAI_COMPATIBLE",
+]
+LlmDataPolicy = Literal["EXTERNAL_CLOUD", "GATEWAY", "LOCAL", "NONE"]
+LlmRole = Literal[
+    "INTEL_COLLECTOR",
+    "EVIDENCE_VERIFIER",
+    "TECHNICAL_SCOUT",
+    "NEWS_DISCLOSURE_SCOUT",
+    "MARKET_SECTOR_SCOUT",
+    "POSITION_RISK_SCOUT",
+    "CORE",
+]
+
+
+class LlmCapabilitiesPayload(StrictModel):
+    structured_output: bool = False
+    tool_calling: bool = False
+    web_search: bool = False
+    streaming: bool = False
+    reasoning: bool = False
+    seed: bool = False
+    usage_reporting: bool = False
+    local_execution: bool = False
+
+
+class LlmProviderCreateRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+    adapter_type: LlmAdapterType
+    endpoint: str | None = Field(default=None, max_length=500)
+    credential_secret_ref: str | None = Field(
+        default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    )
+    data_policy: LlmDataPolicy
+
+
+class LlmProviderResponse(StrictModel):
+    id: str
+    name: str
+    adapter_type: LlmAdapterType
+    endpoint: str | None
+    credential_configured: bool
+    data_policy: LlmDataPolicy
+    state: str
+    health_status: str
+    last_tested_at: datetime | None
+    version: int
+    created_at: datetime
+
+
+class LlmProviderListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[LlmProviderResponse]
+
+
+class LlmProviderTestResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    provider: LlmProviderResponse
+    external_network_used: bool
+    capabilities: LlmCapabilitiesPayload
+    message_code: str
+
+
+class LlmModelCreateRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    provider_profile_id: str = Field(min_length=36, max_length=36)
+    alias: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    provider_model_id: str = Field(min_length=1, max_length=128)
+    capabilities: LlmCapabilitiesPayload
+    max_context_tokens: int | None = Field(default=None, ge=1, le=2_000_000)
+    max_output_tokens: int = Field(default=1024, ge=1, le=32768)
+    temperature: Decimal = Field(default=Decimal(0), ge=0, le=2)
+
+
+class LlmModelResponse(StrictModel):
+    id: str
+    provider_profile_id: str
+    alias: str
+    provider_model_id: str
+    capabilities: LlmCapabilitiesPayload
+    max_context_tokens: int | None
+    max_output_tokens: int
+    temperature: Decimal
+    state: str
+    validated_at: datetime | None
+    version: int
+    created_at: datetime
+
+
+class LlmModelListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[LlmModelResponse]
+
+
+class LlmRouteCreateRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    role: LlmRole
+    primary_model_profile_id: str = Field(min_length=36, max_length=36)
+    timeout_ms: int = Field(default=10000, ge=1000, le=60000)
+    daily_call_limit: int = Field(default=100, ge=1, le=100000)
+    daily_cost_limit_krw: Decimal = Field(default=Decimal(0), ge=0)
+    prompt_version: str = Field(min_length=1, max_length=64)
+    output_schema_version: str = Field(min_length=1, max_length=64)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class LlmRouteResponse(StrictModel):
+    id: str
+    role: LlmRole
+    primary_model_profile_id: str
+    primary_model_alias: str
+    fallback_policy: Literal["NONE"]
+    execution_stage: Literal["SHADOW"]
+    timeout_ms: int
+    max_attempts: int
+    daily_call_limit: int
+    daily_cost_limit_krw: Decimal
+    prompt_version: str
+    output_schema_version: str
+    state: str
+    reason: str
+    validated_at: datetime | None
+    version: int
+    created_at: datetime
+
+
+class LlmRouteListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[LlmRouteResponse]

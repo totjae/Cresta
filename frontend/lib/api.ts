@@ -212,6 +212,66 @@ export type MockOrderTestResult = {
   requested_quantity: 1;
 };
 
+export type LlmCapabilities = {
+  structured_output: boolean;
+  tool_calling: boolean;
+  web_search: boolean;
+  streaming: boolean;
+  reasoning: boolean;
+  seed: boolean;
+  usage_reporting: boolean;
+  local_execution: boolean;
+};
+
+export type LlmProviderProfile = {
+  id: string;
+  name: string;
+  adapter_type: string;
+  endpoint: string | null;
+  credential_configured: boolean;
+  data_policy: string;
+  state: string;
+  health_status: string;
+  last_tested_at: string | null;
+  version: number;
+  created_at: string;
+};
+
+export type LlmModelProfile = {
+  id: string;
+  provider_profile_id: string;
+  alias: string;
+  provider_model_id: string;
+  capabilities: LlmCapabilities;
+  max_context_tokens: number | null;
+  max_output_tokens: number;
+  temperature: string;
+  state: string;
+  validated_at: string | null;
+  version: number;
+  created_at: string;
+};
+
+export type LlmRoleRoute = {
+  id: string;
+  role: string;
+  primary_model_profile_id: string;
+  primary_model_alias: string;
+  fallback_policy: "NONE";
+  execution_stage: "SHADOW";
+  timeout_ms: number;
+  max_attempts: number;
+  daily_call_limit: number;
+  daily_cost_limit_krw: string;
+  prompt_version: string;
+  output_schema_version: string;
+  state: string;
+  reason: string;
+  validated_at: string | null;
+  version: number;
+  created_at: string;
+};
+
 type PasswordChallenge = {
   request_id: string;
   challenge_id: string;
@@ -331,6 +391,111 @@ export const settingsApi = {
     return request<ExecutionPolicyVersion>(`/api/v1/settings/execution-policy/${encodeURIComponent(versionId)}/activate`, {
       method: "POST", headers: { "X-CSRF-Token": csrfToken },
       body: JSON.stringify({ schema_version: "1.0", reauth_proof: reauthProof }),
+    });
+  },
+};
+
+export const llmApi = {
+  providers(signal?: AbortSignal) {
+    return request<{ schema_version: "1.0"; request_id: string; items: LlmProviderProfile[] }>(
+      "/api/v1/ai/providers",
+      { signal },
+    );
+  },
+  createMockProvider(csrfToken: string, name: string) {
+    return request<LlmProviderProfile>("/api/v1/ai/providers", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        schema_version: "1.0",
+        name,
+        adapter_type: "MOCK",
+        endpoint: null,
+        credential_secret_ref: null,
+        data_policy: "NONE",
+      }),
+    });
+  },
+  testProvider(csrfToken: string, providerId: string) {
+    return request<{ provider: LlmProviderProfile; external_network_used: boolean }>(
+      `/api/v1/ai/providers/${encodeURIComponent(providerId)}/test`,
+      { method: "POST", headers: { "X-CSRF-Token": csrfToken } },
+    );
+  },
+  models(signal?: AbortSignal) {
+    return request<{ schema_version: "1.0"; request_id: string; items: LlmModelProfile[] }>(
+      "/api/v1/ai/models",
+      { signal },
+    );
+  },
+  createMockModel(
+    csrfToken: string,
+    providerProfileId: string,
+    alias: string,
+    providerModelId: string,
+  ) {
+    return request<LlmModelProfile>("/api/v1/ai/models", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        schema_version: "1.0",
+        provider_profile_id: providerProfileId,
+        alias,
+        provider_model_id: providerModelId,
+        capabilities: {
+          structured_output: true,
+          tool_calling: false,
+          web_search: false,
+          streaming: false,
+          reasoning: false,
+          seed: true,
+          usage_reporting: true,
+          local_execution: true,
+        },
+        max_context_tokens: 4096,
+        max_output_tokens: 1024,
+        temperature: "0",
+      }),
+    });
+  },
+  validateModel(csrfToken: string, modelId: string) {
+    return request<LlmModelProfile>(`/api/v1/ai/models/${encodeURIComponent(modelId)}/validate`, {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+    });
+  },
+  routes(signal?: AbortSignal) {
+    return request<{ schema_version: "1.0"; request_id: string; items: LlmRoleRoute[] }>(
+      "/api/v1/ai/routes",
+      { signal },
+    );
+  },
+  createShadowRoute(
+    csrfToken: string,
+    role: string,
+    modelProfileId: string,
+    reason: string,
+  ) {
+    return request<LlmRoleRoute>("/api/v1/ai/routes", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        schema_version: "1.0",
+        role,
+        primary_model_profile_id: modelProfileId,
+        timeout_ms: 10000,
+        daily_call_limit: 100,
+        daily_cost_limit_krw: "0",
+        prompt_version: `${role.toLowerCase()}-shadow-v1`,
+        output_schema_version: "agent-assessment-v1",
+        reason,
+      }),
+    });
+  },
+  validateRoute(csrfToken: string, routeId: string) {
+    return request<LlmRoleRoute>(`/api/v1/ai/routes/${encodeURIComponent(routeId)}/validate`, {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
     });
   },
 };

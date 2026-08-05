@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
 from app.api.decisions import router as decisions_router
+from app.api.llm import router as llm_router
 from app.api.orders import router as orders_router
 from app.api.positions import router as positions_router
 from app.api.quotes import router as quotes_router
@@ -20,6 +21,7 @@ from app.broker.mock_order_test import MockOrderTestError
 from app.errors import ResourceNotFoundError
 from app.execution_policy import ExecutionPolicyError
 from app.ids import uuid7
+from app.llm.profiles import LlmProfileError
 from app.mock_ai import MockDecisionError
 from app.watchlist import WatchlistError
 
@@ -127,6 +129,20 @@ def create_app() -> FastAPI:
             },
         )
 
+    @application.exception_handler(LlmProfileError)
+    async def llm_profile_error(request: Request, exc: LlmProfileError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": "LLM Provider 설정을 처리할 수 없습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": False,
+                }
+            },
+        )
+
     @application.exception_handler(WatchlistError)
     async def watchlist_error(request: Request, exc: WatchlistError) -> JSONResponse:
         return JSONResponse(
@@ -190,6 +206,7 @@ def create_app() -> FastAPI:
 
     application.include_router(auth_router, prefix="/api/v1")
     application.include_router(decisions_router, prefix="/api/v1")
+    application.include_router(llm_router, prefix="/api/v1")
     application.include_router(orders_router, prefix="/api/v1")
     application.include_router(positions_router, prefix="/api/v1")
     application.include_router(quotes_router, prefix="/api/v1")

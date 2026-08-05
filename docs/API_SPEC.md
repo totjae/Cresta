@@ -306,3 +306,20 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-124 | `approval.requested`, `approval.updated`, `decision.execution_updated`, `risk.evaluated` 이벤트는 REST resource ID·version을 포함하고 주문 이벤트와 구분한다. |
 | API-125 | `/system/health`는 scheduler의 `NOT_STARTED | RUNNING | IDLE | DEGRADED | STALE | STOPPED`, lease 유효 여부, 최근 heartbeat·tick·완료 시각, 다음 예정 시각과 최근 집계만 반환한다. owner ID와 fencing token은 반환하지 않는다. |
 | API-126 | 판단 목록·상세는 `decision_input_id`, 입력 schema·hash, 연결된 indicator snapshot ID와 calculator version을 반환한다. canonical 입력 JSON과 사용자 소유권 metadata는 이 API에서 직접 반환하지 않는다. |
+
+### 8.5 다중 에이전트·LLM Provider API 계약
+
+상세 endpoint와 canonical payload는 [LLM Provider 및 Gateway 명세](LLM_PROVIDER_GATEWAY_SPEC.md)를 따른다.
+
+| ID | 요구사항 |
+| --- | --- |
+| API-130 | `/ai/providers`, `/ai/models`, `/ai/routes` 조회는 secret 원문과 Authorization header를 반환하지 않고 profile 상태·capability·검증시각·version만 제공한다. |
+| API-131 | Provider 생성·수정과 credential 교체는 세션·CSRF·expected version을 요구하며 credential 교체와 외부 endpoint 변경은 대상에 결합된 TOTP proof를 요구한다. |
+| API-132 | Provider 연결 시험은 `test_id`, 단계별 상태, latency, 안전한 오류 code와 확인된 capability만 반환하고 model route를 자동 활성화하지 않는다. |
+| API-133 | model discovery와 capability validation은 별도 endpoint이며 발견된 model ID를 사용자의 확인 없이 저장·활성화하지 않는다. |
+| API-134 | role route는 draft·validate·activate endpoint를 분리하고 활성화에 회귀시험 ID, 변경 사유, TOTP proof와 expected version을 요구한다. |
+| API-135 | `/ai/agent-runs` 목록·상세는 run·stage·입력/출력 schema·provider/model·상태·지연·비용·evidence 참조를 반환하되 raw prompt·원문 응답·credential은 제외한다. |
+| API-136 | Provider·model·route mutation과 연결 시험은 `Idempotency-Key`를 지원하고 timeout 후 같은 key의 결과 조회를 허용한다. |
+| API-137 | Provider health·circuit·rate/cost limit과 agent run 상태 변경은 resource ID·version을 포함한 실시간 이벤트로 전달하고 주문·체결 이벤트와 구분한다. |
+
+Foundation v1에서는 `POST /ai/providers/{id}/test`, `POST /ai/models/{id}/validate`, `POST /ai/routes/{id}/validate`까지만 구현한다. `/activate`, credential mutation, model discovery와 agent run API는 명세된 후속 endpoint로 남겨 두며 존재하는 것처럼 응답하지 않는다.

@@ -58,6 +58,14 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | `broker_worker_states` | account_alias, state, fencing_token, websocket_connected, subscriptions_ready, heartbeat/reconciliation 시각, error_code | account_alias PK, 비밀 저장 금지 |
 | `analysis_scheduler_leases` | scheduler_name, owner_id, fencing_token, expires_at, version | scheduler_name PK |
 | `analysis_scheduler_states` | scheduler_name, state, fencing_token, heartbeat/tick/완료/다음 시각, 집계, error_code | scheduler_name PK, 비밀 저장 금지 |
+| `llm_provider_profiles` | id, name, adapter_type, endpoint, secret_ref, data_policy, state, version | name unique, credential 원문 금지 |
+| `llm_model_profiles` | id, provider_profile_id, alias, provider_model_id, capabilities, limits, state, version | provider+alias+version unique |
+| `llm_role_routes` | id, role, primary/fallback models, policy, prompt/schema versions, state | role·scope별 ACTIVE 1개 |
+| `agent_runs` | id, purpose, symbol, input/DAG/route versions, state, idempotency_key, timestamps | idempotency unique |
+| `agent_stage_runs` | id, run_id, role, input hash, state, lease, invocation_id, output ref | run+role unique |
+| `evidence_items` | id, symbol, source, source/event/received 시각, facts, content hash, raw ref | source URL/hash 중복 추적 |
+| `evidence_bundles` | id, symbol, as_of, policy version, state, evidence refs, bundle hash | 불변 canonical bundle |
+| `llm_invocations` | id, stage_run_id, requested/actual provider·model, state, usage, latency, cost, hashes | credential·Authorization 원문 금지 |
 | `audit_logs` | id, actor_type, actor_id, action, target, result, metadata, correlation_id, created_at | append-only |
 
 ### 3.3 주문·체결 제약과 트랜잭션
@@ -234,3 +242,17 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-112 | `decisions.decision_input_id`는 신규 판단에서 입력 snapshot을 참조한다. 기존 판단 호환을 위해 migration 열은 nullable로 추가하되 새 생성 경로는 null을 허용하지 않는다. |
 | DB-113 | `indicator_snapshots`는 v2의 VWAP 대비율, SMA5 기울기, 상대 거래량과 실현 변동성을 nullable 고정소수점으로 저장한다. 기존 v1 행은 재해석하지 않는다. |
 | DB-114 | 동일 사용자의 같은 목적·시장 snapshot·입력 hash는 하나만 저장하고 hash 충돌 또는 내용 불일치는 판단 생성 전에 transaction을 rollback한다. |
+
+### 6.5 다중 에이전트·LLM Provider 저장 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-115 | `llm_provider_profiles`에는 secret 참조와 상태만 저장하고 key/token/private key 원문을 저장하지 않는다. endpoint·adapter·data policy 변경은 새 version 또는 감사 가능한 조건부 갱신으로 처리한다. |
+| DB-116 | `llm_model_profiles` capability는 contract fixture 결과와 확인시각을 포함하고, 발견된 모델을 자동으로 활성화하지 않는다. |
+| DB-117 | `llm_role_routes`는 `DRAFT/VALIDATED/ACTIVE/SUPERSEDED`를 사용하고 같은 role·scope의 ACTIVE 행을 부분 unique로 하나만 허용한다. |
+| DB-118 | `agent_runs.idempotency_key`는 purpose·symbol·input snapshot·DAG version·분석 slot을 포함하며 동일 판단 run 중복을 차단한다. |
+| DB-119 | `agent_stage_runs`는 조건부 상태 전이와 lease/fencing으로 한 worker만 실행하고 완료 출력은 수정하지 않는다. |
+| DB-120 | `evidence_items`와 `evidence_bundles`는 원문 참조·사실·출처·시각·hash를 분리하고 bundle 생성 후 수정하지 않는다. |
+| DB-121 | `llm_invocations`는 요청·실제 provider/model, route, request ID, 상태, 사용량, 지연, 비용, retry/fallback과 redacted hash를 저장하고 prompt 원문은 별도 보존 정책 없이는 저장하지 않는다. |
+| DB-122 | agent stage 완료와 invocation 완료, Core 판단 enqueue는 유실·중복을 막는 transaction 또는 transactional outbox로 연결한다. |
+| DB-123 | invocation·evidence 보존 삭제는 판단·감사 legal hold와 참조 무결성을 확인하고 hash·최소 provenance를 유지한다. |

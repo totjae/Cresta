@@ -35,6 +35,10 @@ import {
   DecisionData,
   ExecutionMode,
   ExecutionPolicy,
+  llmApi,
+  LlmModelProfile,
+  LlmProviderProfile,
+  LlmRoleRoute,
   orderApi,
   OrderDetail,
   OrderSummary,
@@ -451,8 +455,96 @@ function SettingsPage({ session, onSessionExpired }: { session: SessionData; onS
         <button className="primary-button" disabled={busy || !reason.trim()}>{busy ? "검증 중" : "변경안 검증"}</button>
       </form>}
     </section>
+    <LlmFoundationPanel session={session} onSessionExpired={onSessionExpired} />
     {pendingVersion && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="policy-confirm-title"><span className="section-kicker">TOTP REAUTHENTICATION</span><h2 id="policy-confirm-title">실행 권한 활성화</h2><p>검증된 버전만 운영에 적용됩니다. 자동 실행 항목은 이후 건별 TOTP 없이 Guard 검사 후 실행됩니다.</p><form onSubmit={activate}><label htmlFor="policy-totp">현재 TOTP 코드</label><input id="policy-totp" className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus /><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setPendingVersion(""); setTotp(""); }} disabled={busy}>취소</button><button type="submit" className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "적용 중" : "활성화"}</button></div></form></section></div>}
   </>;
+}
+
+const llmRoles = [
+  "INTEL_COLLECTOR",
+  "EVIDENCE_VERIFIER",
+  "TECHNICAL_SCOUT",
+  "NEWS_DISCLOSURE_SCOUT",
+  "MARKET_SECTOR_SCOUT",
+  "POSITION_RISK_SCOUT",
+  "CORE",
+] as const;
+
+function LlmFoundationPanel({
+  session,
+  onSessionExpired,
+}: {
+  session: SessionData;
+  onSessionExpired: () => void;
+}) {
+  const [providers, setProviders] = useState<LlmProviderProfile[]>([]);
+  const [models, setModels] = useState<LlmModelProfile[]>([]);
+  const [routes, setRoutes] = useState<LlmRoleRoute[]>([]);
+  const [providerName, setProviderName] = useState("cresta-mock");
+  const [modelProviderId, setModelProviderId] = useState("");
+  const [modelAlias, setModelAlias] = useState("deterministic-shadow-v1");
+  const [providerModelId, setProviderModelId] = useState("deterministic-mock-v2");
+  const [routeRole, setRouteRole] = useState<(typeof llmRoles)[number]>("TECHNICAL_SCOUT");
+  const [routeModelId, setRouteModelId] = useState("");
+  const [routeReason, setRouteReason] = useState("Foundation SHADOW 검증");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const [providerResult, modelResult, routeResult] = await Promise.all([
+        llmApi.providers(signal),
+        llmApi.models(signal),
+        llmApi.routes(signal),
+      ]);
+      setProviders(providerResult.items);
+      setModels(modelResult.items);
+      setRoutes(routeResult.items);
+      setModelProviderId((current) => current || providerResult.items[0]?.id || "");
+      setRouteModelId((current) => current || modelResult.items.find((item) => item.state === "VALIDATED")?.id || "");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("LLM Foundation 설정을 불러오지 못했습니다.");
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+
+  async function perform(action: () => Promise<unknown>, success: string) {
+    setBusy(true); setMessage("");
+    try {
+      await action();
+      await load();
+      setMessage(success);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("요청을 처리하지 못했습니다. 현재 상태와 입력값을 확인해 주세요.");
+    } finally { setBusy(false); }
+  }
+
+  const validatedModels = models.filter((item) => item.state === "VALIDATED");
+
+  return <section className="panel execution-policy-panel" aria-labelledby="llm-foundation-title">
+    <div className="panel-head"><div><Bot size={18} /><span id="llm-foundation-title">LLM Provider · Agent Route</span></div><span className="status-pill neutral">SHADOW ONLY</span></div>
+    <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> 외부 API와 주문 경로는 연결되지 않았습니다. Mock Provider로 profile·model·route 계약만 검증합니다.</div>
+    {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
+
+    <div className="execution-policy-list">
+      <div className="execution-policy-row"><div><strong>Provider Profile</strong><small>credential 입력 없이 외부 통신이 없는 Mock profile을 생성합니다.</small></div><form className="diagnostic-form" onSubmit={(event) => { event.preventDefault(); void perform(() => llmApi.createMockProvider(session.csrf_token, providerName), "Mock Provider 초안이 생성되었습니다."); }}><label htmlFor="llm-provider-name">Provider 이름</label><input id="llm-provider-name" value={providerName} onChange={(event) => setProviderName(event.target.value.replace(/[^A-Za-z0-9_-]/g, ""))} required /><button className="secondary-button" disabled={busy || !providerName}>초안 생성</button></form></div>
+      {providers.map((provider) => <div className="execution-policy-row" key={provider.id}><div><strong>{provider.name}</strong><small>{provider.adapter_type} · {provider.data_policy} · credential {provider.credential_configured ? "설정됨" : "없음"}</small></div><div><span className={`status-pill ${provider.health_status === "READY" ? "ok" : "neutral"}`}>{provider.state} · {provider.health_status}</span> <button className="secondary-button" disabled={busy || provider.adapter_type !== "MOCK"} onClick={() => void perform(() => llmApi.testProvider(session.csrf_token, provider.id), "Mock Provider 연결 계약을 검증했습니다.")}>연결 시험</button></div></div>)}
+
+      <div className="execution-policy-row"><div><strong>Model Profile</strong><small>Mock capability fixture를 검증하며 운영 모델로 활성화하지 않습니다.</small></div><form className="diagnostic-form" onSubmit={(event) => { event.preventDefault(); void perform(() => llmApi.createMockModel(session.csrf_token, modelProviderId, modelAlias, providerModelId), "Model Profile 초안이 생성되었습니다."); }}><label htmlFor="llm-model-provider">Provider</label><select id="llm-model-provider" value={modelProviderId} onChange={(event) => setModelProviderId(event.target.value)} required><option value="">선택</option>{providers.filter((item) => item.adapter_type === "MOCK").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><label htmlFor="llm-model-alias">Model 별칭</label><input id="llm-model-alias" value={modelAlias} onChange={(event) => setModelAlias(event.target.value.replace(/[^A-Za-z0-9_.-]/g, ""))} required /><label htmlFor="llm-provider-model-id">Provider model ID</label><input id="llm-provider-model-id" value={providerModelId} onChange={(event) => setProviderModelId(event.target.value)} required /><button className="secondary-button" disabled={busy || !modelProviderId}>초안 생성</button></form></div>
+      {models.map((model) => <div className="execution-policy-row" key={model.id}><div><strong>{model.alias}</strong><small>{model.provider_model_id} · structured {model.capabilities.structured_output ? "지원" : "미지원"} · local {model.capabilities.local_execution ? "예" : "아니오"}</small></div><div><span className={`status-pill ${model.state === "VALIDATED" ? "ok" : "neutral"}`}>{model.state}</span> <button className="secondary-button" disabled={busy || model.state !== "DRAFT"} onClick={() => void perform(() => llmApi.validateModel(session.csrf_token, model.id), "Model capability를 검증했습니다.")}>모델 검증</button></div></div>)}
+
+      <div className="execution-policy-row"><div><strong>Agent Role Route</strong><small>fallback 없는 SHADOW route만 생성하고 활성화 endpoint는 제공하지 않습니다.</small></div><form className="diagnostic-form" onSubmit={(event) => { event.preventDefault(); void perform(() => llmApi.createShadowRoute(session.csrf_token, routeRole, routeModelId, routeReason), "SHADOW Route 초안이 생성되었습니다."); }}><label htmlFor="llm-route-role">Agent 역할</label><select id="llm-route-role" value={routeRole} onChange={(event) => setRouteRole(event.target.value as (typeof llmRoles)[number])}>{llmRoles.map((role) => <option key={role}>{role}</option>)}</select><label htmlFor="llm-route-model">Primary model</label><select id="llm-route-model" value={routeModelId} onChange={(event) => setRouteModelId(event.target.value)} required><option value="">검증된 모델 선택</option>{validatedModels.map((model) => <option key={model.id} value={model.id}>{model.alias}</option>)}</select><label htmlFor="llm-route-reason">Route 변경 사유</label><input id="llm-route-reason" value={routeReason} onChange={(event) => setRouteReason(event.target.value)} required /><button className="secondary-button" disabled={busy || !routeModelId || !routeReason.trim()}>초안 생성</button></form></div>
+      {routes.map((route) => <div className="execution-policy-row" key={route.id}><div><strong>{route.role}</strong><small>{route.primary_model_alias} · {route.execution_stage} · fallback {route.fallback_policy}</small></div><div><span className={`status-pill ${route.state === "VALIDATED" ? "ok" : "neutral"}`}>{route.state}</span> <button className="secondary-button" disabled={busy || route.state !== "DRAFT"} onClick={() => void perform(() => llmApi.validateRoute(session.csrf_token, route.id), "SHADOW Route 계약을 검증했습니다.")}>Route 검증</button></div></div>)}
+    </div>
+  </section>;
 }
 
 function DecisionsPage({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {

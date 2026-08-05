@@ -383,3 +383,16 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 | UI-047 | 화면은 `등록 수/3`, 남은 슬롯, 최신가·누적거래량·품질·수신 경과시간을 표시한다. snapshot이 없으면 오류 대신 `시세 대기`로 표시한다. |
 | UI-048 | 등록·해제 중 중복 제출을 막고 서버 거부 후 기존 목록을 유지한다. 시세 주입·수정 컨트롤은 제공하지 않는다. |
 | UI-049 | 감시 카드에 VWAP·SMA5·당일 고가 대비 하락률·호가 spread·분봉 수를 표시하고 계산 전 값은 `-`로 표시한다. |
+
+### 6.4 에이전트·LLM Provider 관리 화면 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| UI-110 | 전략·설정의 AI Provider 화면은 provider profile, Adapter 종류, endpoint 축약값, credential 설정 여부, 최근 연결 시험과 health를 표시한다. credential 원문은 표시하지 않는다. |
+| UI-111 | credential 입력·교체는 write-only 필드와 TOTP 재인증을 사용하고 저장 후 즉시 비운다. 브라우저 저장소·DOM·오류에 값을 남기지 않는다. |
+| UI-112 | model 화면은 발견 모델과 검증된 model profile을 구분하고 structured output·tool·web search·reasoning·local 등 확인된 capability를 표시한다. |
+| UI-113 | 역할 route 화면은 Intel·Verify·각 Scout·Core의 primary, fallback, timeout, 일일 호출·비용 한도, prompt/schema version과 SHADOW 상태를 설정한다. |
+| UI-114 | route 활성화 전 영향 미리보기는 외부 전송 범위, 예상 비용, fallback 변화, 회귀시험과 주문 가능 여부를 표시하고 TOTP 재인증을 요구한다. |
+| UI-115 | agent run 화면은 DAG, stage 상태, 입력·증거·출력 schema, 실제 provider/model, 지연·사용량·비용과 실패 이유를 표시하되 raw prompt·원문 응답은 기본 표시하지 않는다. |
+| UI-116 | SHADOW 비교 화면은 같은 입력에서 모델별 출력·schema 통과·latency·cost 차이를 표시하고 어떤 결과도 승인·주문을 생성하지 않았음을 고정 표시한다. |
+| UI-117 | provider 장애·circuit open·rate/cost limit·필수 stage 실패는 `연결됨`이나 `판단 성공`으로 표시하지 않고 신규매수에 미치는 차단 이유를 함께 표시한다. |

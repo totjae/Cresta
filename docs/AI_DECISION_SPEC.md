@@ -212,3 +212,19 @@ core_output:
 | AI-088 | 입력 JSON은 정렬된 key와 고정 Decimal 문자열로 canonicalize해 SHA-256 해시를 저장한다. 저장된 JSON의 재계산 해시가 다르면 판단 실행에 사용하지 않는다. |
 | AI-089 | 현재 market snapshot에 연결된 v2 지표가 없거나 계산 버전이 다르면 Scout는 `UNKNOWN/DATA_INSUFFICIENT`, Core는 `RISK_BLOCK`을 반환한다. 결측 지표를 0으로 대체하지 않는다. |
 | AI-090 | `deterministic-mock-v2`는 VWAP 위치, SMA5 방향, 상대 거래량, 실현 변동성, 고점 낙폭과 spread만으로 허용 reason code와 점수를 생성한다. 같은 입력 hash는 같은 출력을 만들어야 한다. |
+
+### 6.4 다중 에이전트·외부 Provider 확장 계약
+
+세부 역할·DAG·증거 형식은 [다중 에이전트 오케스트레이션 명세](MULTI_AGENT_ORCHESTRATION_SPEC.md), API Adapter·route·fallback은 [LLM Provider 및 Gateway 명세](LLM_PROVIDER_GATEWAY_SPEC.md)를 따른다.
+
+| ID | 요구사항 |
+| --- | --- |
+| AI-091 | 기존 `scout-input-v1`은 `TECHNICAL_SCOUT`의 불변 입력으로 유지하고 복수 Scout 도입을 이유로 기존 입력 의미를 변경하지 않는다. |
+| AI-092 | 외부 정보는 검증된 `EvidenceBundle`로만 뉴스·시장 Scout와 Core에 전달하고 원시 웹 문서를 Core에 직접 전달하지 않는다. |
+| AI-093 | Core 호출에는 활성 DAG, role route, model profile, prompt, 입력·출력 schema version과 모든 필수 Scout stage ID를 포함한다. |
+| AI-094 | 신규 provider·model·prompt·agent는 SHADOW로 시작하며 기존 실행 단계와 별개로 승인·주문을 생성할 수 없다. |
+| AI-095 | Core route는 기본적으로 자동 재시도와 fallback을 허용하지 않는다. 실패·불명확·schema 오류는 신규매수 차단으로 변환한다. |
+| AI-096 | provider가 구조화 출력을 지원해도 서버가 같은 JSON Schema, evidence reference와 상태별 행동을 다시 검증한다. |
+| AI-097 | 모델과 Gateway가 반환한 실제 provider/model, request ID, 사용량, 지연, 비용과 fallback 경로를 비밀 제거 후 기록한다. |
+| AI-098 | 복수 Scout의 confidence 평균이나 다수결만으로 행동을 정하지 않으며 Guard 우선순위와 기존 Core 행동 계약을 유지한다. |
+| AI-099 | 외부 LLM이 비활성 또는 장애여도 결정론적 Mock·Guard·Broker의 현재 검증 경계를 깨지 않고 명시된 SHADOW/실패 상태를 기록한다. |
