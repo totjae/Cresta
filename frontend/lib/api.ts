@@ -300,6 +300,9 @@ export type LlmModelProfile = {
   max_context_tokens: number | null;
   max_output_tokens: number;
   temperature: string;
+  top_p: string | null;
+  reasoning_effort: "LOW" | "MEDIUM" | "HIGH" | null;
+  seed: number | null;
   state: string;
   validated_at: string | null;
   version: number;
@@ -319,11 +322,36 @@ export type LlmRoleRoute = {
   daily_cost_limit_krw: string;
   prompt_version: string;
   output_schema_version: string;
+  temperature_override: string | null;
+  top_p_override: string | null;
+  max_output_tokens_override: number | null;
+  reasoning_effort_override: "LOW" | "MEDIUM" | "HIGH" | null;
+  seed_override: number | null;
+  effective_parameters: {
+    temperature: string;
+    temperature_source: string;
+    top_p: string | null;
+    top_p_source: string;
+    max_output_tokens: number;
+    max_output_tokens_source: string;
+    reasoning_effort: "LOW" | "MEDIUM" | "HIGH" | null;
+    reasoning_effort_source: string;
+    seed: number | null;
+    seed_source: string;
+  };
   state: string;
   reason: string;
   validated_at: string | null;
   version: number;
   created_at: string;
+};
+
+export type LlmRoleAssignment = {
+  role: string;
+  current: LlmRoleRoute | null;
+  candidates: LlmRoleRoute[];
+  history_count: number;
+  status: "UNASSIGNED" | "CANDIDATE" | "AMBIGUOUS" | "ACTIVE";
 };
 
 type PasswordChallenge = {
@@ -487,6 +515,12 @@ export const llmApi = {
     providerProfileId: string,
     alias: string,
     providerModelId: string,
+    defaults: {
+      temperature?: string;
+      topP?: string | null;
+      maxOutputTokens?: number;
+      seed?: number | null;
+    } = {},
   ) {
     return request<LlmModelProfile>("/api/v1/ai/models", {
       method: "POST",
@@ -507,8 +541,11 @@ export const llmApi = {
           local_execution: true,
         },
         max_context_tokens: 4096,
-        max_output_tokens: 1024,
-        temperature: "0",
+        max_output_tokens: defaults.maxOutputTokens ?? 1024,
+        temperature: defaults.temperature ?? "0",
+        top_p: defaults.topP ?? null,
+        reasoning_effort: null,
+        seed: defaults.seed ?? 0,
       }),
     });
   },
@@ -529,6 +566,13 @@ export const llmApi = {
     role: string,
     modelProfileId: string,
     reason: string,
+    parameters: {
+      temperature?: string | null;
+      topP?: string | null;
+      maxOutputTokens?: number | null;
+      reasoningEffort?: "LOW" | "MEDIUM" | "HIGH" | null;
+      seed?: number | null;
+    } = {},
   ) {
     return request<LlmRoleRoute>("/api/v1/ai/routes", {
       method: "POST",
@@ -542,6 +586,11 @@ export const llmApi = {
         daily_cost_limit_krw: "0",
         prompt_version: `${role.toLowerCase()}-shadow-v1`,
         output_schema_version: role === "CORE" ? "agent-core-v1" : "agent-assessment-v1",
+        temperature_override: parameters.temperature ?? null,
+        top_p_override: parameters.topP ?? null,
+        max_output_tokens_override: parameters.maxOutputTokens ?? null,
+        reasoning_effort_override: parameters.reasoningEffort ?? null,
+        seed_override: parameters.seed ?? null,
         reason,
       }),
     });
@@ -550,6 +599,37 @@ export const llmApi = {
     return request<LlmRoleRoute>(`/api/v1/ai/routes/${encodeURIComponent(routeId)}/validate`, {
       method: "POST",
       headers: { "X-CSRF-Token": csrfToken },
+    });
+  },
+  assignments(signal?: AbortSignal) {
+    return request<{ schema_version: "1.0"; request_id: string; items: LlmRoleAssignment[] }>(
+      "/api/v1/ai/role-assignments",
+      { signal },
+    );
+  },
+  previewAssignments(csrfToken: string, routeIds: Record<string, string>) {
+    return request<{ target_action: string; target_id: string; routes: LlmRoleRoute[] }>(
+      "/api/v1/ai/role-assignments/activation-preview",
+      {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({ schema_version: "1.0", route_ids: routeIds }),
+      },
+    );
+  },
+  activateAssignments(
+    csrfToken: string,
+    routeIds: Record<string, string>,
+    reauthProof: string,
+  ) {
+    return request<{ routes: LlmRoleRoute[] }>("/api/v1/ai/role-assignments/activate", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        schema_version: "1.0",
+        route_ids: routeIds,
+        reauth_proof: reauthProof,
+      }),
     });
   },
 };

@@ -198,3 +198,8 @@ configuration_change:
 | CFG-093 | Core fallback 확대, 외부 데이터 전송 확대, provider endpoint 변경과 route 활성화는 영향 미리보기·변경 사유·TOTP 재인증을 요구한다. |
 | CFG-094 | model discovery 결과나 provider 연결 성공은 route 활성화로 간주하지 않으며 schema fixture와 회귀평가를 통과한 `VALIDATED` route만 활성화할 수 있다. |
 | CFG-095 | 새 agent·provider·model·prompt는 SHADOW가 기본이며 실행 권한의 `AUTOMATIC` 설정만으로 활성 판단 경로로 승격되지 않는다. |
+| CFG-096 | 모델 등록과 역할 배정을 분리한다. 등록된 하나의 model profile을 여러 역할에서 선택할 수 있으며 역할마다 같은 model profile을 복제 생성하지 않는다. |
+| CFG-097 | 역할 설정은 현재 선택 모델과 역할별 생성 파라미터 override를 한 구성으로 저장하며 최종 적용값과 `MODEL_DEFAULT`, `ROLE_OVERRIDE`, `ADAPTER_DEFAULT` 출처를 표시한다. |
+| CFG-098 | 역할별 현재 활성 배정은 하나만 허용한다. 새 배정 활성화는 기존 배정을 `SUPERSEDED`로 보존하고 실행 중 run은 시작할 때 고정한 이전 version을 계속 사용한다. |
+| CFG-099 | `temperature`, `top_p`, `max_output_tokens`, `reasoning_effort`, `seed`는 선택 모델이 검증한 capability와 범위 안에서만 설정한다. 미지원 파라미터는 UI에서 비활성화하고 API에서도 거부한다. |
+| CFG-100 | 중복 `VALIDATED` route가 존재하면 자동 선택하지 않고 현재 배정 미확정으로 표시한다. 사용자가 하나를 선택해 활성화하기 전까지 해당 역할의 운영 호출은 차단한다. |

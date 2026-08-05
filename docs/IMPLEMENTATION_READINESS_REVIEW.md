@@ -98,9 +98,13 @@
 
 Foundation의 Mock route만 사용하는 DIAGNOSTIC 다중 에이전트 runtime은 2026-08-06 로컬 구현·검증을 완료했다. `agent_runs`, `agent_stage_runs`, evidence 저장과 Intel→Verify→4 Scout→Core DAG, API·Console, 멱등 재요청과 주문 0건을 검증했다. 실제 웹 수집·외부 LLM·승인·주문은 연결하지 않았다.
 
-### 4.3 다음 구현 slice: Agent Worker v2
+### 4.3 완료된 구현 slice: 역할별 모델 배정 관리
 
-실서버 PostgreSQL에서 `0014`와 수동 DIAGNOSTIC run을 확인한 뒤 stage claim·lease·fencing·timeout과 scheduler admission을 설계한다. 이 단계도 deterministic Mock만 사용하며 외부 source·provider 연결은 별도 게이트로 유지한다.
+Provider·Model 카탈로그와 역할별 현재 배정·이력을 분리하고 같은 검증 모델을 여러 역할에서 재사용하도록 구현했다. generation parameter 상속·override, 중복 `VALIDATED` 후보 명시 선택, 5개 역할의 TOTP 1회 원자 활성화와 ACTIVE route 기반 DIAGNOSTIC 준비도를 로컬 검증했다. 외부 credential과 실제 Adapter는 연결하지 않았다.
+
+### 4.4 다음 구현 slice: Agent Worker v2
+
+실서버 PostgreSQL에서 `0015`, 역할 배정 일괄 활성화와 수동 DIAGNOSTIC run을 확인한 뒤 stage claim·lease·fencing·timeout과 scheduler admission을 설계한다. 이 단계도 deterministic Mock만 사용하며 외부 source·provider 연결은 별도 게이트로 유지한다.
 
 ## 5. 검증·인수 조건
 

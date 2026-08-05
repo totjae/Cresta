@@ -520,6 +520,9 @@ class LlmModelCreateRequest(StrictModel):
     max_context_tokens: int | None = Field(default=None, ge=1, le=2_000_000)
     max_output_tokens: int = Field(default=1024, ge=1, le=32768)
     temperature: Decimal = Field(default=Decimal(0), ge=0, le=2)
+    top_p: Decimal | None = Field(default=None, ge=0, le=1)
+    reasoning_effort: Literal["LOW", "MEDIUM", "HIGH"] | None = None
+    seed: int | None = Field(default=None, ge=-2147483648, le=2147483647)
 
 
 class LlmModelResponse(StrictModel):
@@ -531,6 +534,9 @@ class LlmModelResponse(StrictModel):
     max_context_tokens: int | None
     max_output_tokens: int
     temperature: Decimal
+    top_p: Decimal | None
+    reasoning_effort: Literal["LOW", "MEDIUM", "HIGH"] | None
+    seed: int | None
     state: str
     validated_at: datetime | None
     version: int
@@ -552,7 +558,25 @@ class LlmRouteCreateRequest(StrictModel):
     daily_cost_limit_krw: Decimal = Field(default=Decimal(0), ge=0)
     prompt_version: str = Field(min_length=1, max_length=64)
     output_schema_version: str = Field(min_length=1, max_length=64)
+    temperature_override: Decimal | None = Field(default=None, ge=0, le=2)
+    top_p_override: Decimal | None = Field(default=None, ge=0, le=1)
+    max_output_tokens_override: int | None = Field(default=None, ge=1, le=32768)
+    reasoning_effort_override: Literal["LOW", "MEDIUM", "HIGH"] | None = None
+    seed_override: int | None = Field(default=None, ge=-2147483648, le=2147483647)
     reason: str = Field(min_length=1, max_length=500)
+
+
+class LlmEffectiveGenerationParameters(StrictModel):
+    temperature: Decimal
+    temperature_source: str
+    top_p: Decimal | None
+    top_p_source: str
+    max_output_tokens: int
+    max_output_tokens_source: str
+    reasoning_effort: Literal["LOW", "MEDIUM", "HIGH"] | None
+    reasoning_effort_source: str
+    seed: int | None
+    seed_source: str
 
 
 class LlmRouteResponse(StrictModel):
@@ -568,6 +592,12 @@ class LlmRouteResponse(StrictModel):
     daily_cost_limit_krw: Decimal
     prompt_version: str
     output_schema_version: str
+    temperature_override: Decimal | None
+    top_p_override: Decimal | None
+    max_output_tokens_override: int | None
+    reasoning_effort_override: Literal["LOW", "MEDIUM", "HIGH"] | None
+    seed_override: int | None
+    effective_parameters: LlmEffectiveGenerationParameters
     state: str
     reason: str
     validated_at: datetime | None
@@ -588,6 +618,43 @@ AgentRouteRole = Literal[
     "POSITION_RISK_SCOUT",
     "CORE",
 ]
+
+
+class LlmAssignmentActivationRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    route_ids: dict[AgentRouteRole, str]
+
+
+class LlmAssignmentActivateRequest(LlmAssignmentActivationRequest):
+    reauth_proof: str = Field(min_length=32, max_length=256)
+
+
+class LlmAssignmentPreviewResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    target_action: Literal["LLM_ROLE_ASSIGNMENT_ACTIVATE"] = "LLM_ROLE_ASSIGNMENT_ACTIVATE"
+    target_id: str
+    routes: list[LlmRouteResponse]
+
+
+class LlmAssignmentActivationResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    routes: list[LlmRouteResponse]
+
+
+class LlmRoleAssignmentItem(StrictModel):
+    role: AgentRouteRole
+    current: LlmRouteResponse | None
+    candidates: list[LlmRouteResponse]
+    history_count: int
+    status: Literal["UNASSIGNED", "CANDIDATE", "AMBIGUOUS", "ACTIVE"]
+
+
+class LlmRoleAssignmentListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[LlmRoleAssignmentItem]
 
 
 class AgentDiagnosticRunRequest(StrictModel):

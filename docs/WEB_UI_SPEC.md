@@ -396,5 +396,12 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 | UI-115 | agent run 화면은 DAG, stage 상태, 입력·증거·출력 schema, 실제 provider/model, 지연·사용량·비용과 실패 이유를 표시하되 raw prompt·원문 응답은 기본 표시하지 않는다. |
 | UI-116 | SHADOW 비교 화면은 같은 입력에서 모델별 출력·schema 통과·latency·cost 차이를 표시하고 어떤 결과도 승인·주문을 생성하지 않았음을 고정 표시한다. |
 | UI-117 | provider 장애·circuit open·rate/cost limit·필수 stage 실패는 `연결됨`이나 `판단 성공`으로 표시하지 않고 신규매수에 미치는 차단 이유를 함께 표시한다. |
-| UI-118 | AI 판단 화면의 Agent Runtime v1 패널은 종목·시장과 5개 필수 role의 검증된 SHADOW route 준비 상태를 표시하고 모두 준비된 경우에만 DIAGNOSTIC run 생성을 허용한다. |
+| UI-118 | AI 판단 화면의 Agent Runtime v1 패널은 종목·시장과 5개 필수 role의 활성 SHADOW route 준비 상태를 표시하고 모두 준비된 경우에만 DIAGNOSTIC run 생성을 허용한다. |
 | UI-119 | run 목록·상세는 DAG·stage 상태·실제 provider/model·evidence bundle 상태·Core action을 표시하고 `SHADOW · 주문 없음`을 고정 표시한다. raw prompt·응답·credential은 입력하거나 표시하지 않는다. |
+| UI-120 | AI 설정 화면은 `Provider`, `Models`, `역할별 배정`, `이력` 영역을 분리한다. 생성 form과 전체 version 목록을 한 세로 화면에 계속 누적하지 않는다. |
+| UI-121 | Provider 기본 화면은 provider당 한 행 또는 카드로 이름·Adapter·health·credential 설정 여부를 표시하고 등록·수정·연결 시험은 modal 또는 별도 편집 panel에서 수행한다. |
+| UI-122 | Models 기본 화면은 Provider별 등록 모델 카탈로그를 표 형태로 표시하고 alias·provider model ID·검증 상태·capability·기본 파라미터를 편집한다. 같은 모델을 역할 수만큼 복제 생성하지 않는다. |
+| UI-123 | 역할별 배정 화면은 runtime이 모델 route를 요구하는 각 Scout·Core를 한 행씩 고정 표시하고 각 행에서 등록된 검증 모델 하나를 선택한다. 같은 모델을 여러 역할에서 선택할 수 있다. v1의 deterministic Intel·Verify 내부 stage는 별도 모델 배정 행을 표시하지 않는다. |
+| UI-124 | 역할 행의 `파라미터` 편집은 temperature·top_p·max output token·reasoning effort·seed의 모델 기본값, 역할 override와 최종값을 구분한다. 선택 모델이 지원하지 않는 필드는 비활성화하고 이유를 표시한다. |
+| UI-125 | 기본 역할 화면은 현재 활성 배정만 표시하고 draft·validated·superseded version은 `이력` drawer/table에서 조회한다. 중복 후보가 있으면 첫 행을 자동 선택하지 않고 `현재 배정 미확정`으로 표시한다. |
+| UI-126 | 선행조건 미충족으로 비활성화된 버튼은 `not-allowed` cursor와 구체적인 누락 사유를 표시한다. 실제 요청 처리 중에만 spinner와 `wait` cursor를 사용한다. |

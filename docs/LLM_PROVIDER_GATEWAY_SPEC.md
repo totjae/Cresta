@@ -129,6 +129,31 @@ role_route:
 | LLM-013 | role route 활성화는 `DRAFT → VALIDATED → ACTIVE` 생명주기, 변경 사유, TOTP 재인증과 회귀시험 근거를 요구한다. |
 | LLM-014 | 같은 role·scope에는 활성 route가 하나만 존재하며 활성 route는 수정하지 않고 교체한다. |
 
+### 5.4 모델 카탈로그와 역할 배정
+
+Provider, Model과 역할 배정은 서로 다른 자원으로 관리한다.
+
+```text
+Provider Profile 1개
+  └─ Model Profile 여러 개
+
+Model Profile 1개
+  └─ Agent 역할 여러 곳에서 재사용 가능
+
+Agent 역할 1개
+  └─ 현재 유효한 Model 배정은 scope별 정확히 1개
+```
+
+역할별 배정은 내부적으로 versioned `RoleRoute`로 저장하지만 Web UI에서는 누적 route 생성 목록이 아니라 **현재 모델 배정**으로 표현한다. 과거 route는 감사·재현을 위해 보존하고 기본 화면에서는 숨긴다.
+
+| ID | 요구사항 |
+| --- | --- |
+| LLM-015 | 사용자는 Provider에 여러 Model Profile을 등록하고, 같은 Model Profile을 여러 agent 역할에 재사용할 수 있다. 역할 배정을 위해 역할 이름과 같은 별도 Model Profile을 만들도록 요구하지 않는다. |
+| LLM-016 | 같은 owner·scope·role에는 현재 유효한 배정이 하나만 존재한다. 여러 `VALIDATED` 후보가 존재하더라도 runtime이나 UI가 생성순서로 하나를 임의 선택하지 않으며 사용자가 명시적으로 선택·활성화해야 한다. |
+| LLM-017 | 역할의 모델 변경은 기존 route를 수정하거나 삭제하지 않고 새 version을 활성화하고 기존 활성 version을 `SUPERSEDED`로 전환한다. 기존 중복 `VALIDATED` route는 이력으로 보존하되 현재 배정으로 간주하지 않는다. |
+| LLM-018 | 역할 배정은 Model Profile 기본 생성 파라미터를 상속하고 지원되는 필드에 한해 역할별 override를 가진다. 우선순위는 `role override → model default → adapter default`이며 invocation에는 계산된 최종값과 설정 version을 기록한다. |
+| LLM-019 | canonical 생성 파라미터는 `temperature(null 또는 0~2)`, `top_p(null 또는 0~1)`, `max_output_tokens`, `reasoning_effort(null/LOW/MEDIUM/HIGH)`, `seed(null 또는 정수)`를 지원한다. `null`은 Adapter 기본값 사용을 뜻하며 model capability가 미지원인 필드는 전송하지 않는다. 미지원 필드의 강제 설정은 route 검증 단계에서 거부한다. |
+
 ## 6. Canonical 호출 계약
 
 ### 6.1 요청
@@ -274,6 +299,10 @@ GET    /api/v1/ai/routes
 POST   /api/v1/ai/routes
 POST   /api/v1/ai/routes/{route_id}/validate
 POST   /api/v1/ai/routes/{route_id}/activate
+GET    /api/v1/ai/role-assignments
+PUT    /api/v1/ai/role-assignments/{role}/draft
+POST   /api/v1/ai/role-assignments/{role}/validate
+POST   /api/v1/ai/role-assignments/{role}/activate
 GET    /api/v1/ai/agent-runs
 GET    /api/v1/ai/agent-runs/{run_id}
 GET    /api/v1/ai/invocations
@@ -286,6 +315,9 @@ GET    /api/v1/ai/invocations
 | LLM-072 | provider·model·route mutation은 CSRF, 세션과 낙관적 version 검사를 요구하고 route 활성화·credential 변경은 TOTP 재인증을 요구한다. |
 | LLM-073 | UI는 역할별 primary/fallback, capability, 예상 외부 전송, 최근 health, p50/p95 지연, 오류율, 사용량·비용과 SHADOW 상태를 표시한다. |
 | LLM-074 | UI의 request/response 진단에는 redacted·크기 제한된 구조화 필드만 표시하고 raw prompt와 raw provider response는 기본적으로 표시하지 않는다. |
+| LLM-075 | 역할 배정 조회는 역할마다 현재 활성 배정, 검증 중 초안, 선택 가능한 Model Profile과 최종 적용 파라미터를 한 항목으로 반환한다. route 전체 이력은 별도 history 조회로 분리한다. |
+| LLM-076 | 역할 배정 draft 저장은 해당 역할의 작업 중 draft를 갱신하거나 교체하고 목록에 동일 목적의 행을 계속 추가하지 않는다. 활성화는 LLM-013~019의 version·재인증·단일 활성 규칙을 적용한다. |
+| LLM-077 | 여러 역할 배정은 사용자가 선택한 route ID map의 canonical hash에 결합된 TOTP proof 하나로 일괄 활성화할 수 있다. 활성화 transaction은 선택된 모든 역할을 검증한 뒤 기존 ACTIVE를 `SUPERSEDED`하고 새 ACTIVE를 원자 적용하며 일부 역할만 변경된 상태를 남기지 않는다. |
 
 ## 12. 상태와 관측성
 
@@ -316,6 +348,8 @@ Invocation: CREATED | RUNNING | SUCCEEDED | REFUSED | TIMED_OUT |
 8. 회귀평가 후 선택한 Scout만 활성화
 
 첫 구현 PR은 1~3과 deterministic Mock Adapter까지만 포함하며 외부 모델 응답으로 Core 판단이나 주문을 생성하지 않는다.
+
+Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 단계에서 Provider 카탈로그, Model 카탈로그, 역할별 현재 배정과 이력으로 분리했다. v1은 Mock Adapter와 5개 Scout·Core SHADOW 배정만 지원하며 외부 credential과 실제 Adapter는 계속 차단한다.
 
 ### 13.1 LLM Foundation v1 고정 계약
 

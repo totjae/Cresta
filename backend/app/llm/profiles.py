@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -10,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth.service import consume_reauth_proof
 from app.llm.adapters.mock import MOCK_CAPABILITIES
 from app.llm.contracts import ModelCapabilities, ProviderHealth
 from app.llm.registry import AdapterNotImplementedError, provider_registry
@@ -41,6 +43,14 @@ ROLES = {
     "POSITION_RISK_SCOUT",
     "CORE",
 }
+ASSIGNMENT_ROLES = (
+    "TECHNICAL_SCOUT",
+    "NEWS_DISCLOSURE_SCOUT",
+    "MARKET_SECTOR_SCOUT",
+    "POSITION_RISK_SCOUT",
+    "CORE",
+)
+ASSIGNMENT_REAUTH_ACTION = "LLM_ROLE_ASSIGNMENT_ACTIVATE"
 
 
 class LlmProfileError(Exception):
@@ -241,6 +251,9 @@ def create_model(
     max_context_tokens: int | None,
     max_output_tokens: int,
     temperature: Decimal,
+    top_p: Decimal | None,
+    reasoning_effort: str | None,
+    seed: int | None,
     correlation_id: str,
 ) -> LlmModelProfile:
     provider = get_provider(db, user.id, provider_id)
@@ -252,6 +265,9 @@ def create_model(
         max_context_tokens=max_context_tokens,
         max_output_tokens=max_output_tokens,
         temperature=temperature,
+        top_p=top_p,
+        reasoning_effort=reasoning_effort,
+        seed=seed,
     )
     db.add(model)
     try:
@@ -294,6 +310,10 @@ def validate_model(
     if provider.adapter_type != "MOCK" or provider.state != "VALIDATED":
         raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED")
     declared = ModelCapabilities.model_validate_json(model.capabilities_json)
+    if model.reasoning_effort is not None and not declared.reasoning:
+        raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_REASONING")
+    if model.seed is not None and not declared.seed:
+        raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_SEED")
     unsupported = [
         key
         for key, enabled in declared.model_dump().items()
@@ -338,6 +358,11 @@ def create_route(
     daily_cost_limit_krw: Decimal,
     prompt_version: str,
     output_schema_version: str,
+    temperature_override: Decimal | None,
+    top_p_override: Decimal | None,
+    max_output_tokens_override: int | None,
+    reasoning_effort_override: str | None,
+    seed_override: int | None,
     reason: str,
     correlation_id: str,
 ) -> LlmRoleRoute:
@@ -353,6 +378,11 @@ def create_route(
         daily_cost_limit_krw=daily_cost_limit_krw,
         prompt_version=prompt_version.strip(),
         output_schema_version=output_schema_version.strip(),
+        temperature_override=temperature_override,
+        top_p_override=top_p_override,
+        max_output_tokens_override=max_output_tokens_override,
+        reasoning_effort_override=reasoning_effort_override,
+        seed_override=seed_override,
         reason=reason.strip(),
     )
     db.add(route)
@@ -388,6 +418,11 @@ def validate_route(
     if route.state != "DRAFT":
         raise LlmProfileError("ROUTE_STATE_CONFLICT", 409)
     model = get_model(db, user.id, route.primary_model_profile_id)
+    capabilities = ModelCapabilities.model_validate_json(model.capabilities_json)
+    if route.reasoning_effort_override is not None and not capabilities.reasoning:
+        raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_REASONING")
+    if route.seed_override is not None and not capabilities.seed:
+        raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_SEED")
     try:
         validate_foundation_route(route, model)
     except RouteBoundaryError as exc:
@@ -406,3 +441,132 @@ def validate_route(
     db.commit()
     db.refresh(route)
     return route
+
+
+def effective_generation_parameters(
+    route: LlmRoleRoute, model: LlmModelProfile
+) -> dict[str, object]:
+    return {
+        "temperature": route.temperature_override
+        if route.temperature_override is not None
+        else model.temperature,
+        "temperature_source": "ROLE_OVERRIDE"
+        if route.temperature_override is not None
+        else "MODEL_DEFAULT",
+        "top_p": route.top_p_override if route.top_p_override is not None else model.top_p,
+        "top_p_source": "ROLE_OVERRIDE"
+        if route.top_p_override is not None
+        else ("MODEL_DEFAULT" if model.top_p is not None else "ADAPTER_DEFAULT"),
+        "max_output_tokens": route.max_output_tokens_override
+        if route.max_output_tokens_override is not None
+        else model.max_output_tokens,
+        "max_output_tokens_source": "ROLE_OVERRIDE"
+        if route.max_output_tokens_override is not None
+        else "MODEL_DEFAULT",
+        "reasoning_effort": route.reasoning_effort_override
+        if route.reasoning_effort_override is not None
+        else model.reasoning_effort,
+        "reasoning_effort_source": "ROLE_OVERRIDE"
+        if route.reasoning_effort_override is not None
+        else (
+            "MODEL_DEFAULT" if model.reasoning_effort is not None else "ADAPTER_DEFAULT"
+        ),
+        "seed": route.seed_override if route.seed_override is not None else model.seed,
+        "seed_source": "ROLE_OVERRIDE"
+        if route.seed_override is not None
+        else ("MODEL_DEFAULT" if model.seed is not None else "ADAPTER_DEFAULT"),
+    }
+
+
+def _assignment_routes(
+    db: Session, *, owner_id: str, route_ids: dict[str, str], lock: bool = False
+) -> list[LlmRoleRoute]:
+    if set(route_ids) != set(ASSIGNMENT_ROLES):
+        raise LlmProfileError("ROLE_ASSIGNMENT_SET_INCOMPLETE")
+    query = select(LlmRoleRoute).where(LlmRoleRoute.id.in_(route_ids.values()))
+    if lock:
+        query = query.with_for_update()
+    routes = list(db.scalars(query))
+    by_id = {route.id: route for route in routes}
+    selected: list[LlmRoleRoute] = []
+    for role in ASSIGNMENT_ROLES:
+        route = by_id.get(route_ids[role])
+        if (
+            route is None
+            or route.owner_id != owner_id
+            or route.role != role
+            or route.state not in {"VALIDATED", "ACTIVE"}
+            or route.execution_stage != "SHADOW"
+        ):
+            raise LlmProfileError("ROLE_ASSIGNMENT_NOT_READY")
+        model = get_model(db, owner_id, route.primary_model_profile_id)
+        if model.state != "VALIDATED":
+            raise LlmProfileError("ROLE_ASSIGNMENT_NOT_READY")
+        selected.append(route)
+    return selected
+
+
+def assignment_target_id(route_ids: dict[str, str]) -> str:
+    canonical = json.dumps(route_ids, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def preview_assignment_activation(
+    db: Session, *, owner_id: str, route_ids: dict[str, str]
+) -> tuple[str, list[LlmRoleRoute]]:
+    routes = _assignment_routes(db, owner_id=owner_id, route_ids=route_ids)
+    return assignment_target_id(route_ids), routes
+
+
+def activate_assignments(
+    db: Session,
+    *,
+    user: User,
+    route_ids: dict[str, str],
+    reauth_proof: str,
+    correlation_id: str,
+) -> list[LlmRoleRoute]:
+    selected = _assignment_routes(db, owner_id=user.id, route_ids=route_ids, lock=True)
+    target_id = assignment_target_id(route_ids)
+    consume_reauth_proof(
+        db,
+        user=user,
+        raw_proof=reauth_proof,
+        target_action=ASSIGNMENT_REAUTH_ACTION,
+        target_id=target_id,
+    )
+    current = list(
+        db.scalars(
+            select(LlmRoleRoute)
+            .where(
+                LlmRoleRoute.owner_id == user.id,
+                LlmRoleRoute.role.in_(ASSIGNMENT_ROLES),
+                LlmRoleRoute.state == "ACTIVE",
+            )
+            .with_for_update()
+        )
+    )
+    selected_ids = {route.id for route in selected}
+    now = datetime.now(UTC)
+    for route in current:
+        if route.id not in selected_ids:
+            route.state = "SUPERSEDED"
+            route.version += 1
+    db.flush()
+    for route in selected:
+        if route.state != "ACTIVE":
+            route.state = "ACTIVE"
+            route.activated_at = now
+            route.version += 1
+    _audit(
+        db,
+        user=user,
+        action="LLM_ROLE_ASSIGNMENTS_ACTIVATED",
+        target=target_id,
+        correlation_id=correlation_id,
+        metadata={"route_ids": route_ids, "roles": list(ASSIGNMENT_ROLES)},
+    )
+    db.commit()
+    for route in selected:
+        db.refresh(route)
+    return selected

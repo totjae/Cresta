@@ -915,6 +915,14 @@ class LlmModelProfile(Base):
             "temperature >= 0 AND temperature <= 2",
             name="ck_llm_model_profiles_temperature",
         ),
+        CheckConstraint(
+            "top_p IS NULL OR (top_p >= 0 AND top_p <= 1)",
+            name="ck_llm_model_profiles_top_p",
+        ),
+        CheckConstraint(
+            "reasoning_effort IS NULL OR reasoning_effort IN ('LOW','MEDIUM','HIGH')",
+            name="ck_llm_model_profiles_reasoning_effort",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
@@ -927,6 +935,9 @@ class LlmModelProfile(Base):
     max_context_tokens: Mapped[int | None] = mapped_column(Integer)
     max_output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=1024)
     temperature: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False, default=0)
+    top_p: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
+    reasoning_effort: Mapped[str | None] = mapped_column(String(12))
+    seed: Mapped[int | None] = mapped_column(Integer)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="DRAFT")
     validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -961,6 +972,24 @@ class LlmRoleRoute(Base):
         ),
         CheckConstraint("timeout_ms BETWEEN 1000 AND 60000", name="ck_llm_role_routes_timeout"),
         CheckConstraint("max_attempts = 1", name="ck_llm_role_routes_attempts"),
+        CheckConstraint(
+            "temperature_override IS NULL OR "
+            "(temperature_override >= 0 AND temperature_override <= 2)",
+            name="ck_llm_role_routes_temperature_override",
+        ),
+        CheckConstraint(
+            "top_p_override IS NULL OR (top_p_override >= 0 AND top_p_override <= 1)",
+            name="ck_llm_role_routes_top_p_override",
+        ),
+        CheckConstraint(
+            "max_output_tokens_override IS NULL OR max_output_tokens_override > 0",
+            name="ck_llm_role_routes_max_output_override",
+        ),
+        CheckConstraint(
+            "reasoning_effort_override IS NULL OR "
+            "reasoning_effort_override IN ('LOW','MEDIUM','HIGH')",
+            name="ck_llm_role_routes_reasoning_effort_override",
+        ),
         Index(
             "uq_llm_role_routes_active",
             "owner_id",
@@ -990,6 +1019,11 @@ class LlmRoleRoute(Base):
     )
     prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
     output_schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    temperature_override: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
+    top_p_override: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
+    max_output_tokens_override: Mapped[int | None] = mapped_column(Integer)
+    reasoning_effort_override: Mapped[str | None] = mapped_column(String(12))
+    seed_override: Mapped[int | None] = mapped_column(Integer)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="DRAFT")
     reason: Mapped[str] = mapped_column(String(500), nullable=False)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

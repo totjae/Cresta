@@ -7,19 +7,26 @@ from app.api.dependencies import AuthContext, get_auth_context, require_csrf
 from app.db import get_db
 from app.llm.contracts import ModelCapabilities
 from app.llm.profiles import (
+    activate_assignments,
     create_model,
     create_provider,
     create_route,
+    effective_generation_parameters,
     get_model,
     list_models,
     list_providers,
     list_routes,
+    preview_assignment_activation,
     test_provider,
     validate_model,
     validate_route,
 )
 from app.models import LlmModelProfile, LlmProviderProfile, LlmRoleRoute
 from app.schemas import (
+    LlmAssignmentActivateRequest,
+    LlmAssignmentActivationRequest,
+    LlmAssignmentActivationResponse,
+    LlmAssignmentPreviewResponse,
     LlmCapabilitiesPayload,
     LlmModelCreateRequest,
     LlmModelListResponse,
@@ -28,6 +35,8 @@ from app.schemas import (
     LlmProviderListResponse,
     LlmProviderResponse,
     LlmProviderTestResponse,
+    LlmRoleAssignmentItem,
+    LlmRoleAssignmentListResponse,
     LlmRouteCreateRequest,
     LlmRouteListResponse,
     LlmRouteResponse,
@@ -62,6 +71,9 @@ def _model_response(model: LlmModelProfile) -> LlmModelResponse:
         max_context_tokens=model.max_context_tokens,
         max_output_tokens=model.max_output_tokens,
         temperature=model.temperature,
+        top_p=model.top_p,
+        reasoning_effort=model.reasoning_effort,
+        seed=model.seed,
         state=model.state,
         validated_at=model.validated_at,
         version=model.version,
@@ -84,6 +96,12 @@ def _route_response(db: Session, owner_id: str, route: LlmRoleRoute) -> LlmRoute
         daily_cost_limit_krw=route.daily_cost_limit_krw,
         prompt_version=route.prompt_version,
         output_schema_version=route.output_schema_version,
+        temperature_override=route.temperature_override,
+        top_p_override=route.top_p_override,
+        max_output_tokens_override=route.max_output_tokens_override,
+        reasoning_effort_override=route.reasoning_effort_override,
+        seed_override=route.seed_override,
+        effective_parameters=effective_generation_parameters(route, model),
         state=route.state,
         reason=route.reason,
         validated_at=route.validated_at,
@@ -175,6 +193,9 @@ def post_model(
         max_context_tokens=payload.max_context_tokens,
         max_output_tokens=payload.max_output_tokens,
         temperature=payload.temperature,
+        top_p=payload.top_p,
+        reasoning_effort=payload.reasoning_effort,
+        seed=payload.seed,
         correlation_id=request.state.request_id,
     )
     return _model_response(model)
@@ -210,6 +231,48 @@ def get_routes(
     )
 
 
+@router.get("/role-assignments", response_model=LlmRoleAssignmentListResponse)
+def get_role_assignments(
+    request: Request,
+    context: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+) -> LlmRoleAssignmentListResponse:
+    routes = list_routes(db, context.user.id)
+    roles = (
+        "TECHNICAL_SCOUT",
+        "NEWS_DISCLOSURE_SCOUT",
+        "MARKET_SECTOR_SCOUT",
+        "POSITION_RISK_SCOUT",
+        "CORE",
+    )
+    items: list[LlmRoleAssignmentItem] = []
+    for role in roles:
+        role_routes = [route for route in routes if route.role == role]
+        active = next((route for route in role_routes if route.state == "ACTIVE"), None)
+        candidates = [route for route in role_routes if route.state == "VALIDATED"]
+        status_value = (
+            "ACTIVE"
+            if active
+            else "AMBIGUOUS"
+            if len(candidates) > 1
+            else "CANDIDATE"
+            if len(candidates) == 1
+            else "UNASSIGNED"
+        )
+        items.append(
+            LlmRoleAssignmentItem(
+                role=role,
+                current=_route_response(db, context.user.id, active) if active else None,
+                candidates=[
+                    _route_response(db, context.user.id, route) for route in candidates
+                ],
+                history_count=len(role_routes),
+                status=status_value,
+            )
+        )
+    return LlmRoleAssignmentListResponse(request_id=request.state.request_id, items=items)
+
+
 @router.post("/routes", response_model=LlmRouteResponse, status_code=status.HTTP_201_CREATED)
 def post_route(
     payload: LlmRouteCreateRequest,
@@ -227,6 +290,11 @@ def post_route(
         daily_cost_limit_krw=payload.daily_cost_limit_krw,
         prompt_version=payload.prompt_version,
         output_schema_version=payload.output_schema_version,
+        temperature_override=payload.temperature_override,
+        top_p_override=payload.top_p_override,
+        max_output_tokens_override=payload.max_output_tokens_override,
+        reasoning_effort_override=payload.reasoning_effort_override,
+        seed_override=payload.seed_override,
         reason=payload.reason,
         correlation_id=request.state.request_id,
     )
@@ -247,3 +315,46 @@ def post_route_validate(
         correlation_id=request.state.request_id,
     )
     return _route_response(db, context.user.id, route)
+
+
+@router.post(
+    "/role-assignments/activation-preview",
+    response_model=LlmAssignmentPreviewResponse,
+)
+def post_assignment_activation_preview(
+    payload: LlmAssignmentActivationRequest,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> LlmAssignmentPreviewResponse:
+    target_id, routes = preview_assignment_activation(
+        db, owner_id=context.user.id, route_ids=payload.route_ids
+    )
+    return LlmAssignmentPreviewResponse(
+        request_id=request.state.request_id,
+        target_id=target_id,
+        routes=[_route_response(db, context.user.id, route) for route in routes],
+    )
+
+
+@router.post(
+    "/role-assignments/activate",
+    response_model=LlmAssignmentActivationResponse,
+)
+def post_assignment_activate(
+    payload: LlmAssignmentActivateRequest,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> LlmAssignmentActivationResponse:
+    routes = activate_assignments(
+        db,
+        user=context.user,
+        route_ids=payload.route_ids,
+        reauth_proof=payload.reauth_proof,
+        correlation_id=request.state.request_id,
+    )
+    return LlmAssignmentActivationResponse(
+        request_id=request.state.request_id,
+        routes=[_route_response(db, context.user.id, route) for route in routes],
+    )

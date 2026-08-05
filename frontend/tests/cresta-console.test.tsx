@@ -278,6 +278,7 @@ describe("execution policy settings", () => {
       if (path === "/api/v1/ai/providers") return jsonResponse({ schema_version: "1.0", request_id: "providers-1", items: [] });
       if (path === "/api/v1/ai/models") return jsonResponse({ schema_version: "1.0", request_id: "models-1", items: [] });
       if (path === "/api/v1/ai/routes") return jsonResponse({ schema_version: "1.0", request_id: "routes-1", items: [] });
+      if (path === "/api/v1/ai/role-assignments") return jsonResponse({ schema_version: "1.0", request_id: "assignments-1", items: [] });
       return jsonResponse({}, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -287,9 +288,11 @@ describe("execution policy settings", () => {
     await user.click(await screen.findByRole("button", { name: /전략·설정/ }));
     expect(await screen.findByText("SHADOW ONLY")).toBeInTheDocument();
     expect(screen.queryByLabelText(/credential/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Provider" }));
+    await user.click(screen.getByRole("button", { name: "Provider 추가" }));
     await user.clear(screen.getByLabelText("Provider 이름"));
     await user.type(screen.getByLabelText("Provider 이름"), "foundation-mock");
-    await user.click(screen.getAllByRole("button", { name: "초안 생성" })[0]);
+    await user.click(screen.getByRole("button", { name: "Mock Provider 생성" }));
     expect(await screen.findByText("Mock Provider 초안이 생성되었습니다.")).toBeInTheDocument();
 
     const createCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/ai/providers" && init?.method === "POST");
@@ -304,6 +307,63 @@ describe("execution policy settings", () => {
       credential_secret_ref: null,
       data_policy: "NONE",
     });
+  });
+
+  it("selects one reusable model per role and activates the set with one TOTP", async () => {
+    const roles = ["TECHNICAL_SCOUT", "NEWS_DISCLOSURE_SCOUT", "MARKET_SECTOR_SCOUT", "POSITION_RISK_SCOUT", "CORE"];
+    const route = (role: string, index: number, state = "VALIDATED") => ({
+      id: `assignment-route-${index}`, role, primary_model_profile_id: "model-shared", primary_model_alias: "shared-model",
+      fallback_policy: "NONE", execution_stage: "SHADOW", timeout_ms: 10000, max_attempts: 1,
+      daily_call_limit: 100, daily_cost_limit_krw: "0", prompt_version: `${role}-v1`,
+      output_schema_version: role === "CORE" ? "agent-core-v1" : "agent-assessment-v1",
+      temperature_override: "0.1", top_p_override: null, max_output_tokens_override: 512,
+      reasoning_effort_override: null, seed_override: 11,
+      effective_parameters: {
+        temperature: "0.100", temperature_source: "ROLE_OVERRIDE", top_p: "0.900",
+        top_p_source: "MODEL_DEFAULT", max_output_tokens: 512, max_output_tokens_source: "ROLE_OVERRIDE",
+        reasoning_effort: null, reasoning_effort_source: "ADAPTER_DEFAULT", seed: 11, seed_source: "ROLE_OVERRIDE",
+      },
+      state, reason: "fixture", validated_at: "2026-08-06T01:00:00Z", version: 2,
+      created_at: `2026-08-06T00:0${index}:00Z`,
+    });
+    const routes = roles.map((roleName, index) => route(roleName, index));
+    let active = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-assign", login_id: "admin", expires_at: "2026-08-06T09:00:00Z", csrf_token: "csrf-assign" });
+      if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
+      if (path === "/api/v1/settings/execution-policy") return jsonResponse({ active_version_id: null, source: "SAFE_DEFAULT", policy: { buy: "MANUAL_APPROVAL", partial_sell: "MANUAL_APPROVAL", full_sell: "MANUAL_APPROVAL", take_profit: "MANUAL_APPROVAL", fixed_stop_loss: "AUTOMATIC", trailing_stop: "AUTOMATIC", end_of_day_liquidation: "AUTOMATIC", emergency_exit: "AUTOMATIC" } });
+      if (path === "/api/v1/ai/providers") return jsonResponse({ items: [] });
+      if (path === "/api/v1/ai/models") return jsonResponse({ items: [] });
+      if (path === "/api/v1/ai/routes") return jsonResponse({ items: active ? routes.map((item) => ({ ...item, state: "ACTIVE" })) : routes });
+      if (path === "/api/v1/ai/role-assignments" && !init?.method) return jsonResponse({ items: roles.map((role, index) => ({ role, current: active ? { ...routes[index], state: "ACTIVE" } : null, candidates: active ? [] : [routes[index]], history_count: 1, status: active ? "ACTIVE" : "CANDIDATE" })) });
+      if (path.endsWith("/activation-preview")) return jsonResponse({ target_action: "LLM_ROLE_ASSIGNMENT_ACTIVATE", target_id: "assignment-target", routes });
+      if (path === "/api/v1/auth/reauth/totp") return jsonResponse({ reauth_proof: "assignment-proof", expires_at: "2026-08-06T01:05:00Z" });
+      if (path.endsWith("/role-assignments/activate")) { active = true; return jsonResponse({ routes: routes.map((item) => ({ ...item, state: "ACTIVE" })) }); }
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CrestaConsole />);
+
+    await user.click(await screen.findByRole("button", { name: /전략·설정/ }));
+    expect(await screen.findByText("역할별 현재 모델")).toBeInTheDocument();
+    expect(screen.getByText("0/5 ACTIVE")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "현재 배정 적용" }));
+    expect(await screen.findByRole("dialog", { name: "역할별 모델 배정 적용" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("현재 TOTP 코드"), "123456");
+    await user.click(screen.getByRole("button", { name: "5개 역할 적용" }));
+    expect(await screen.findByText(/원자적으로 적용/)).toBeInTheDocument();
+    expect(await screen.findByText("5/5 ACTIVE")).toBeInTheDocument();
+
+    const proofCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/auth/reauth/totp");
+    expect(JSON.parse(String(proofCall?.[1]?.body))).toEqual(expect.objectContaining({
+      target_action: "LLM_ROLE_ASSIGNMENT_ACTIVATE", target_id: "assignment-target",
+    }));
+    const activationCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/ai/role-assignments/activate");
+    expect(JSON.parse(String(activationCall?.[1]?.body)).route_ids).toEqual(
+      Object.fromEntries(roles.map((role, index) => [role, `assignment-route-${index}`])),
+    );
   });
 });
 
@@ -356,7 +416,7 @@ describe("Agent Runtime v1", () => {
       id: `route-${index}`, role, primary_model_profile_id: "model-1", primary_model_alias: "agent-runtime-v1",
       fallback_policy: "NONE", execution_stage: "SHADOW", timeout_ms: 10000, max_attempts: 1,
       daily_call_limit: 100, daily_cost_limit_krw: "0", prompt_version: `${role}-v1`,
-      output_schema_version: "agent-assessment-v1", state: "VALIDATED", reason: "fixture",
+      output_schema_version: "agent-assessment-v1", state: "ACTIVE", reason: "fixture",
       validated_at: "2026-08-06T01:00:00Z", version: 2, created_at: "2026-08-06T00:00:00Z",
     }));
     const run = {

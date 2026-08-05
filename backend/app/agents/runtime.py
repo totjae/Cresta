@@ -90,7 +90,7 @@ def _load_routes(
             route is None
             or route.owner_id != owner_id
             or route.role != role
-            or route.state != "VALIDATED"
+            or route.state not in {"VALIDATED", "ACTIVE"}
             or route.execution_stage != "SHADOW"
             or route.fallback_policy != "NONE"
             or route.max_attempts != 1
@@ -191,8 +191,25 @@ def _invoke_mock(
         messages=[{"role": "user", "content": _canonical(role_input)}],
         output_json_schema={"type": "object"},
         timeout_ms=binding.route.timeout_ms,
-        max_output_tokens=binding.model.max_output_tokens,
-        temperature=float(binding.model.temperature),
+        max_output_tokens=binding.route.max_output_tokens_override
+        or binding.model.max_output_tokens,
+        temperature=float(
+            binding.route.temperature_override
+            if binding.route.temperature_override is not None
+            else binding.model.temperature
+        ),
+        top_p=float(
+            binding.route.top_p_override
+            if binding.route.top_p_override is not None
+            else binding.model.top_p
+        )
+        if (binding.route.top_p_override is not None or binding.model.top_p is not None)
+        else None,
+        reasoning_effort=binding.route.reasoning_effort_override
+        or binding.model.reasoning_effort,
+        seed=binding.route.seed_override
+        if binding.route.seed_override is not None
+        else binding.model.seed,
     )
     result = provider_registry.resolve(binding.provider.adapter_type).generate_structured(
         request, binding.model.provider_model_id

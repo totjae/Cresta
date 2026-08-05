@@ -232,6 +232,7 @@
 | T-LLM-008 | LLM-070~074, LLM-080~085, API-130~137, UI-110~117 | Web UI Mock profile·model·SHADOW route 초안·검증 흐름 | credential 입력 없음, validation 분리, activation·agent run endpoint 없음 | 부분 통과 (2026-08-05, API·component) |
 | T-LLM-009 | DB-115~123, LLM-080 | Foundation migration·profile/model/route 참조와 주문 경계 | `0013` head·FK·SHADOW 제약, invocation·approval·order 0건 | 부분 통과 (2026-08-05, Foundation 범위) |
 | T-LLM-010 | MAO-080~083, LLM-013·042·053 | 동일 fixture로 cloud 모델·Gateway·Ollama SHADOW 비교 | schema 통과율·환각·p95 지연·비용 보고, 운영 판단 영향 0건 | 계획 |
+| T-LLM-011 | LLM-015~019·075~077, CFG-096~100, DB-128~131, API-138~142, UI-120~126 | 여러 Provider·Model 등록 후 동일 모델을 복수 역할에 배정하고 역할 모델·파라미터 변경, 중복 VALIDATED 이력 조회·일괄 활성화 | 역할별 현재 배정 정확히 1개, model 재사용, 파라미터 상속·capability 거부, TOTP 1회 원자 전환, 기존 배정 이력 보존, 누적형 기본 UI 제거 | 통과 (2026-08-06, API·component·migration fixture) |
 
 ### 3.13 데이터베이스 및 영속성
 
@@ -326,15 +327,15 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 140개 통과 | 기존 범위와 Agent Runtime 고정 DAG·route 검증·멱등성·stage/invocation provenance·Core WAIT·주문 0건 포함 |
-| Console component 시험 | `npm test` | 10개 통과 | 기존 범위와 5개 route 준비도·DIAGNOSTIC DAG 실행·SHADOW 주문 없음 표시 포함 |
+| Python 단위·API 시험 | `python -m pytest` | 142개 통과 | 기존 범위와 역할별 모델 재사용·파라미터 상속·capability 거부·중복 후보·TOTP 원자 활성화·주문 0건 포함 |
+| Console component 시험 | `npm test` | 11개 통과 | Provider/Models/역할 배정/이력 분리, 5개 후보 일괄 적용과 ACTIVE route DIAGNOSTIC 포함 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
 | Console HTTP smoke | standalone server에 HTTP 요청 | 통과 | `/` 응답 200과 Cresta metadata 확인 |
 | Console production dependency audit | `npm audit --omit=dev --audit-level=high` | 취약점 0건 | Next 하위 PostCSS·Sharp를 검증된 패치 버전으로 고정 |
 | 정적 검사 | `python -m ruff check app tests migrations` | 통과 | FastAPI dependency의 B008은 프레임워크 관용구로 제외 |
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
-| migration 적용 | `alembic upgrade head`·`current` | 통과 | 빈 SQLite에서 Agent Runtime 4개 테이블을 포함한 `20260806_0014` upgrade→downgrade→upgrade 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
+| migration 적용 | `alembic upgrade head`·`current` | 통과 | 빈 SQLite에서 모델 기본값·역할 override를 포함한 `20260806_0015` upgrade→downgrade→upgrade 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
 | Docker Compose·HTTPS | Ubuntu 서버에서 전체 서비스 기동, migration, host Nginx·TLS 접속과 로그인 | 통과 | PostgreSQL·Redis healthy, secret 읽기, API·Frontend·gateway, HTTPS와 ID·비밀번호·TOTP 로그인 확인 |
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |

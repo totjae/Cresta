@@ -33,6 +33,9 @@ class LlmRequest(ContractModel):
     timeout_ms: int = Field(ge=1000, le=60000)
     max_output_tokens: int = Field(gt=0, le=32768)
     temperature: float = Field(ge=0, le=2)
+    top_p: float | None = Field(default=None, ge=0, le=1)
+    reasoning_effort: Literal["LOW", "MEDIUM", "HIGH"] | None = None
+    seed: int | None = None
     tool_policy: Literal["NONE", "ALLOWLIST"] = "NONE"
     allowed_tools: list[str] = Field(default_factory=list)
 

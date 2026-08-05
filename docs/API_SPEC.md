@@ -321,7 +321,12 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-135 | `/ai/agent-runs` 목록·상세는 run·stage·입력/출력 schema·provider/model·상태·지연·비용·evidence 참조를 반환하되 raw prompt·원문 응답·credential은 제외한다. |
 | API-136 | Provider·model·route mutation과 연결 시험은 `Idempotency-Key`를 지원하고 timeout 후 같은 key의 결과 조회를 허용한다. |
 | API-137 | Provider health·circuit·rate/cost limit과 agent run 상태 변경은 resource ID·version을 포함한 실시간 이벤트로 전달하고 주문·체결 이벤트와 구분한다. |
+| API-138 | 역할 배정 조회는 역할별 current assignment, draft, 선택 가능한 검증 model과 model 기본값·role override·최종 generation parameter를 구분해 반환한다. |
+| API-139 | 역할별 draft 저장은 `expected_version`과 `Idempotency-Key`를 요구하며 같은 역할의 편집 저장이 무제한 신규 행 생성으로 보이지 않도록 현재 draft를 교체한다. |
+| API-140 | 역할 배정 활성화는 대상 route·role·version에 결합된 TOTP proof를 요구하고 기존 활성 배정의 `SUPERSEDED` 전환과 새 배정의 `ACTIVE` 전환을 원자 수행한다. |
+| API-141 | model capability가 지원하지 않는 generation parameter, 범위 밖 값과 중복 활성 배정은 안정된 4xx 오류로 거부하며 Adapter 호출을 수행하지 않는다. |
+| API-142 | 역할 배정 일괄 활성화 preview는 선택 route map의 canonical hash를 TOTP `target_id`로 반환한다. activate 요청은 같은 map·hash에 결합된 proof를 소비하고 전 역할 변경을 한 transaction으로 처리한다. |
 
-Foundation v1에서는 `POST /ai/providers/{id}/test`, `POST /ai/models/{id}/validate`, `POST /ai/routes/{id}/validate`까지만 구현한다. `/activate`, credential mutation과 model discovery는 명세된 후속 endpoint로 남겨 두며 존재하는 것처럼 응답하지 않는다.
+Foundation v1에서는 `POST /ai/providers/{id}/test`, `POST /ai/models/{id}/validate`, `POST /ai/routes/{id}/validate`를 구현했다. 역할 배정 관리 단계에서 `GET /ai/role-assignments`, activation preview와 5개 역할 일괄 activate를 추가했으며 일반 단일 route `/activate`, credential mutation과 model discovery는 아직 제공하지 않는다.
 
 Agent Runtime v1에서는 `GET /ai/agent-runs`, `GET /ai/agent-runs/{id}`, `POST /ai/agent-runs/diagnostic`을 추가한다. 생성 요청은 market·symbol과 5개 필수 role의 검증된 SHADOW route ID를 전달하며 응답은 `created`로 멱등 신규·기존 반환을 구분한다. 이 endpoint는 decision·execution·approval·order를 생성하지 않는다.
