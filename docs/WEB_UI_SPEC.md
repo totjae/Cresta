@@ -396,3 +396,5 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 | UI-115 | agent run 화면은 DAG, stage 상태, 입력·증거·출력 schema, 실제 provider/model, 지연·사용량·비용과 실패 이유를 표시하되 raw prompt·원문 응답은 기본 표시하지 않는다. |
 | UI-116 | SHADOW 비교 화면은 같은 입력에서 모델별 출력·schema 통과·latency·cost 차이를 표시하고 어떤 결과도 승인·주문을 생성하지 않았음을 고정 표시한다. |
 | UI-117 | provider 장애·circuit open·rate/cost limit·필수 stage 실패는 `연결됨`이나 `판단 성공`으로 표시하지 않고 신규매수에 미치는 차단 이유를 함께 표시한다. |
+| UI-118 | AI 판단 화면의 Agent Runtime v1 패널은 종목·시장과 5개 필수 role의 검증된 SHADOW route 준비 상태를 표시하고 모두 준비된 경우에만 DIAGNOSTIC run 생성을 허용한다. |
+| UI-119 | run 목록·상세는 DAG·stage 상태·실제 provider/model·evidence bundle 상태·Core action을 표시하고 `SHADOW · 주문 없음`을 고정 표시한다. raw prompt·응답·credential은 입력하거나 표시하지 않는다. |

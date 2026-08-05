@@ -256,3 +256,7 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-121 | `llm_invocations`는 요청·실제 provider/model, route, request ID, 상태, 사용량, 지연, 비용, retry/fallback과 redacted hash를 저장하고 prompt 원문은 별도 보존 정책 없이는 저장하지 않는다. |
 | DB-122 | agent stage 완료와 invocation 완료, Core 판단 enqueue는 유실·중복을 막는 transaction 또는 transactional outbox로 연결한다. |
 | DB-123 | invocation·evidence 보존 삭제는 판단·감사 legal hold와 참조 무결성을 확인하고 hash·최소 provenance를 유지한다. |
+| DB-124 | Agent Runtime v1의 `agent_runs`는 owner, purpose, market·symbol, market snapshot·input hash, DAG·route map, 상태·Core action, valid_until과 unique idempotency key를 저장한다. |
+| DB-125 | `agent_stage_runs`는 run+role unique, dependency·route·invocation 참조, 불변 input/output JSON·hash, 상태·오류·시각을 저장하며 완료 stage를 API로 수정하지 않는다. |
+| DB-126 | `evidence_items`는 출처·시각·facts·content hash를 저장하고 `evidence_bundles`는 owner·run·상태·evidence ID·canonical hash를 저장한다. v1은 외부 수집 없이 `PARTIAL` 빈 bundle 하나만 생성한다. |
+| DB-127 | `agent_stage_runs.invocation_id`는 `llm_invocations`를 unique FK로 참조해 stage당 invocation을 최대 하나로 제한하고 invocation의 `stage_run_id`와 같은 식별자를 기록한다. |

@@ -67,6 +67,60 @@ export type DecisionData = {
   created_at: string;
 };
 
+export type AgentStageData = {
+  stage_run_id: string;
+  role: string;
+  sequence: number;
+  dependencies: string[];
+  route_id: string | null;
+  state: string;
+  input_hash: string;
+  output: Record<string, unknown> | null;
+  output_hash: string | null;
+  error_code: string | null;
+  invocation: null | {
+    invocation_id: string;
+    state: string;
+    actual_provider: string | null;
+    actual_model: string | null;
+    latency_ms: number;
+    validation_status: string;
+    error_code: string | null;
+  };
+  started_at: string | null;
+  completed_at: string | null;
+};
+
+export type AgentRunData = {
+  schema_version: "1.0";
+  request_id: string;
+  run_id: string;
+  created: boolean;
+  purpose: "DIAGNOSTIC";
+  execution_stage: "SHADOW";
+  market: "KRX" | "NXT";
+  symbol: string;
+  market_snapshot_id: string;
+  input_hash: string;
+  dag_version: string;
+  route_versions: Record<string, unknown>;
+  state: string;
+  core_action: "WAIT" | null;
+  valid_until: string;
+  stages: AgentStageData[];
+  evidence_bundle: null | {
+    bundle_id: string;
+    state: string;
+    policy_version: string;
+    evidence_ids: string[];
+    reason_codes: string[];
+    bundle_hash: string;
+    as_of: string;
+  };
+  created_at: string;
+  completed_at: string | null;
+};
+
 export type WatchlistItem = {
   id: string;
   symbol: string;
@@ -487,7 +541,7 @@ export const llmApi = {
         daily_call_limit: 100,
         daily_cost_limit_krw: "0",
         prompt_version: `${role.toLowerCase()}-shadow-v1`,
-        output_schema_version: "agent-assessment-v1",
+        output_schema_version: role === "CORE" ? "agent-core-v1" : "agent-assessment-v1",
         reason,
       }),
     });
@@ -509,6 +563,32 @@ export const decisionApi = {
       method: "POST", headers: { "X-CSRF-Token": csrfToken },
       body: JSON.stringify({
         schema_version: "1.0", evaluation_request_id: globalThis.crypto.randomUUID(), symbol, market,
+      }),
+    });
+  },
+};
+
+export const agentApi = {
+  list(signal?: AbortSignal) {
+    return request<{ schema_version: "1.0"; request_id: string; items: AgentRunData[] }>(
+      "/api/v1/ai/agent-runs",
+      { signal },
+    );
+  },
+  diagnostic(
+    csrfToken: string,
+    symbol: string,
+    market: "KRX" | "NXT",
+    routeIds: Record<string, string>,
+  ) {
+    return request<AgentRunData>("/api/v1/ai/agent-runs/diagnostic", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        schema_version: "1.0",
+        symbol,
+        market,
+        route_ids: routeIds,
       }),
     });
   },

@@ -13,7 +13,6 @@ from tests.conftest import TEST_PASSWORD, TEST_TOTP_SECRET
 
 
 def _login(client: TestClient) -> str:
-    now = datetime.now(UTC)
     challenge = client.post(
         "/api/v1/auth/login/password",
         json={"schema_version": "1.0", "login_id": "admin", "password": TEST_PASSWORD},
@@ -23,7 +22,9 @@ def _login(client: TestClient) -> str:
         json={
             "schema_version": "1.0",
             "challenge_id": challenge.json()["challenge_id"],
-            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(now - timedelta(seconds=30)),
+            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(
+                datetime.now(UTC) - timedelta(seconds=30)
+            ),
         },
     )
     assert response.status_code == 200

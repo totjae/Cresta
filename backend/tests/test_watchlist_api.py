@@ -28,7 +28,7 @@ def _login(client: TestClient) -> str:
         json={
             "schema_version": "1.0",
             "challenge_id": challenge.json()["challenge_id"],
-            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(datetime.now(UTC) - timedelta(seconds=30)),
+            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(datetime.now(UTC)),
         },
     )
     assert completed.status_code == 200

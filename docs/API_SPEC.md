@@ -322,4 +322,6 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-136 | Provider·model·route mutation과 연결 시험은 `Idempotency-Key`를 지원하고 timeout 후 같은 key의 결과 조회를 허용한다. |
 | API-137 | Provider health·circuit·rate/cost limit과 agent run 상태 변경은 resource ID·version을 포함한 실시간 이벤트로 전달하고 주문·체결 이벤트와 구분한다. |
 
-Foundation v1에서는 `POST /ai/providers/{id}/test`, `POST /ai/models/{id}/validate`, `POST /ai/routes/{id}/validate`까지만 구현한다. `/activate`, credential mutation, model discovery와 agent run API는 명세된 후속 endpoint로 남겨 두며 존재하는 것처럼 응답하지 않는다.
+Foundation v1에서는 `POST /ai/providers/{id}/test`, `POST /ai/models/{id}/validate`, `POST /ai/routes/{id}/validate`까지만 구현한다. `/activate`, credential mutation과 model discovery는 명세된 후속 endpoint로 남겨 두며 존재하는 것처럼 응답하지 않는다.
+
+Agent Runtime v1에서는 `GET /ai/agent-runs`, `GET /ai/agent-runs/{id}`, `POST /ai/agent-runs/diagnostic`을 추가한다. 생성 요청은 market·symbol과 5개 필수 role의 검증된 SHADOW route ID를 전달하며 응답은 `created`로 멱등 신규·기존 반환을 구분한다. 이 endpoint는 decision·execution·approval·order를 생성하지 않는다.

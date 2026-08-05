@@ -29,6 +29,8 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ApiError,
+  agentApi,
+  AgentRunData,
   authApi,
   BrokerStatus,
   decisionApi,
@@ -581,9 +583,93 @@ function DecisionsPage({ session, onSessionExpired }: { session: SessionData; on
     <PageHeading kicker="MOCK SCOUT · CORE" title="AI 판단" description="결정론적 Mock 모델로 판단 계약과 실행 권한 분기를 검증합니다." />
     <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> 이 화면의 판단은 주문이나 승인을 생성하지 않습니다. AUTOMATIC도 Guard 미구현 상태에서는 차단됩니다.</div>
     {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
+    <AgentRuntimePanel session={session} onSessionExpired={onSessionExpired} />
     <section className="panel decision-control"><div className="panel-head"><div><Bot size={18} /><span>최신 snapshot 진단</span></div><span className="status-pill neutral">deterministic-mock-v2</span></div><form className="diagnostic-form" onSubmit={evaluate}><label htmlFor="decision-symbol">종목코드</label><input id="decision-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required /><label htmlFor="decision-market">시장</label><select id="decision-market" value={market} onChange={(event) => setMarket(event.target.value as "KRX" | "NXT")}><option value="KRX">KRX</option><option value="NXT">NXT</option></select><button className="primary-button" disabled={busy || symbol.length !== 6}>{busy ? "판단 중" : "Mock 판단 실행"}</button></form></section>
     <section className="decision-grid">{items.length === 0 ? <article className="panel empty-state"><Bot size={26} /><h3>저장된 AI 판단이 없습니다</h3><p>최신 시세 snapshot이 준비된 종목으로 진단을 실행하세요.</p></article> : items.map((item) => <article className="panel decision-card" key={item.decision_id}><div className="panel-head"><div><Bot size={17} /><span>{item.symbol} · {item.market}</span></div><OrderStatus status={item.execution?.state ?? item.purpose} /></div><div className="decision-action"><strong>{item.core.action}</strong><span>confidence {Number(item.core.confidence).toFixed(2)}</span></div><dl><div><dt>Scout</dt><dd>{item.scout.trend_state} · {item.scout.entry_score}점</dd></div><div><dt>판단 목적</dt><dd>{item.purpose}</dd></div><div><dt>실행 단계</dt><dd>{item.execution?.stage ?? "진단 전용"}</dd></div><div><dt>실행 결과</dt><dd>{item.execution?.state ?? "실행 없음"}</dd></div><div><dt>입력 schema</dt><dd>{item.input_schema_version ?? "legacy"}</dd></div><div><dt>지표 버전</dt><dd>{item.indicator_calculator_version ?? "미준비"}</dd></div><div><dt>입력 hash</dt><dd className="mono">{item.input_hash ? item.input_hash.slice(0, 12) : "없음"}</dd></div><div><dt>snapshot</dt><dd className="mono">{item.input_snapshot_id}</dd></div></dl><p className="reason-codes">{item.core.reason_codes.join(" · ")}</p><small>{formatDateTime(item.created_at)} · {item.model_id}</small></article>)}</section>
   </>;
+}
+
+const agentRuntimeRoles = [
+  "TECHNICAL_SCOUT",
+  "NEWS_DISCLOSURE_SCOUT",
+  "MARKET_SECTOR_SCOUT",
+  "POSITION_RISK_SCOUT",
+  "CORE",
+] as const;
+
+function AgentRuntimePanel({
+  session,
+  onSessionExpired,
+}: {
+  session: SessionData;
+  onSessionExpired: () => void;
+}) {
+  const [runs, setRuns] = useState<AgentRunData[]>([]);
+  const [routes, setRoutes] = useState<LlmRoleRoute[]>([]);
+  const [symbol, setSymbol] = useState("005930");
+  const [market, setMarket] = useState<"KRX" | "NXT">("KRX");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const [runResult, routeResult] = await Promise.all([
+        agentApi.list(signal),
+        llmApi.routes(signal),
+      ]);
+      setRuns(runResult.items);
+      setRoutes(routeResult.items);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("Agent Runtime 상태를 불러오지 못했습니다.");
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+
+  const routeIds = Object.fromEntries(agentRuntimeRoles.map((role) => [
+    role,
+    routes.find((route) => route.role === role && route.state === "VALIDATED")?.id ?? "",
+  ]));
+  const missingRoles = agentRuntimeRoles.filter((role) => !routeIds[role]);
+
+  async function runDiagnostic(event: FormEvent) {
+    event.preventDefault();
+    if (missingRoles.length) return;
+    setBusy(true); setMessage("");
+    try {
+      const run = await agentApi.diagnostic(session.csrf_token, symbol, market, routeIds);
+      setRuns((current) => [run, ...current.filter((item) => item.run_id !== run.run_id)]);
+      setMessage(run.created ? "DIAGNOSTIC Agent run을 생성했습니다. 주문은 생성되지 않았습니다." : "같은 입력의 기존 Agent run을 반환했습니다.");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("최신 snapshot과 검증된 SHADOW route를 확인해 주세요.");
+    } finally { setBusy(false); }
+  }
+
+  return <section className="panel execution-policy-panel" aria-labelledby="agent-runtime-title">
+    <div className="panel-head"><div><Bot size={18} /><span id="agent-runtime-title">Agent Runtime v1</span></div><span className="status-pill neutral">DIAGNOSTIC · SHADOW · 주문 없음</span></div>
+    <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> Intel → Verify → 4 Scout → Core 고정 DAG를 Mock Provider로만 실행합니다. 외부 웹·LLM·승인·주문은 연결되지 않습니다.</div>
+    <form className="diagnostic-form" onSubmit={runDiagnostic}>
+      <label htmlFor="agent-symbol">Agent 종목코드</label><input id="agent-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required />
+      <label htmlFor="agent-market">Agent 시장</label><select id="agent-market" value={market} onChange={(event) => setMarket(event.target.value as "KRX" | "NXT")}><option value="KRX">KRX</option><option value="NXT">NXT</option></select>
+      <button className="primary-button" disabled={busy || symbol.length !== 6 || missingRoles.length > 0}>{busy ? "DAG 실행 중" : "DIAGNOSTIC DAG 실행"}</button>
+    </form>
+    <p className="policy-version-note">Route 준비: {agentRuntimeRoles.length - missingRoles.length}/{agentRuntimeRoles.length}{missingRoles.length ? ` · 누락 ${missingRoles.join(", ")}` : " · READY"}</p>
+    {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
+    <div className="decision-grid">{runs.map((run) => <article className="panel decision-card" key={run.run_id}>
+      <div className="panel-head"><div><Bot size={17} /><span>{run.symbol} · {run.market}</span></div><OrderStatus status={run.state} /></div>
+      <div className="decision-action"><strong>{run.core_action ?? "-"}</strong><span>{run.dag_version}</span></div>
+      <dl><div><dt>목적</dt><dd>{run.purpose}</dd></div><div><dt>실행 경계</dt><dd>{run.execution_stage} · 주문 없음</dd></div><div><dt>증거</dt><dd>{run.evidence_bundle?.state ?? "없음"}</dd></div><div><dt>Stage</dt><dd>{run.stages.length}개</dd></div><div><dt>Mock 호출</dt><dd>{run.stages.filter((stage) => stage.invocation).length}개</dd></div><div><dt>입력 hash</dt><dd className="mono">{run.input_hash.slice(0, 12)}</dd></div></dl>
+      <p className="reason-codes">{run.stages.map((stage) => `${stage.role}: ${stage.state}`).join(" · ")}</p>
+      <small>{formatDateTime(run.created_at)} · {run.run_id}</small>
+    </article>)}</div>
+  </section>;
 }
 
 function SystemPage({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {

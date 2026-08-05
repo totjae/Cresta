@@ -7,6 +7,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.agents.runtime import AgentRuntimeError
+from app.api.agent_runs import router as agent_runs_router
 from app.api.auth import router as auth_router
 from app.api.decisions import router as decisions_router
 from app.api.llm import router as llm_router
@@ -143,6 +145,20 @@ def create_app() -> FastAPI:
             },
         )
 
+    @application.exception_handler(AgentRuntimeError)
+    async def agent_runtime_error(request: Request, exc: AgentRuntimeError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": "Agent Runtime 요청을 안전하게 처리할 수 없습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": False,
+                }
+            },
+        )
+
     @application.exception_handler(WatchlistError)
     async def watchlist_error(request: Request, exc: WatchlistError) -> JSONResponse:
         return JSONResponse(
@@ -207,6 +223,7 @@ def create_app() -> FastAPI:
     application.include_router(auth_router, prefix="/api/v1")
     application.include_router(decisions_router, prefix="/api/v1")
     application.include_router(llm_router, prefix="/api/v1")
+    application.include_router(agent_runs_router, prefix="/api/v1")
     application.include_router(orders_router, prefix="/api/v1")
     application.include_router(positions_router, prefix="/api/v1")
     application.include_router(quotes_router, prefix="/api/v1")

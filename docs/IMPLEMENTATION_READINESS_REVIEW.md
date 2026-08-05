@@ -94,9 +94,13 @@
 
 `T-LLM-001~003`, `T-LLM-007~009` 중 외부 네트워크가 필요 없는 fixture 범위, migration `20260805_0013`, API·Console 회귀시험을 통과했다. 실제 PostgreSQL 적용과 외부 Adapter는 미검증 상태다.
 
-### 4.2 다음 구현 slice: Agent Runtime v1
+### 4.2 완료된 구현 slice: Agent Runtime v1
 
-다음 작업은 Foundation의 Mock route만 사용하는 DIAGNOSTIC 다중 에이전트 runtime이다. `agent_runs`, `agent_stage_runs`, evidence 저장과 Intel→Verify→Scout→Core DAG를 구현하되 실제 웹 수집·외부 LLM·승인·주문은 연결하지 않는다. 상세 경계와 인수조건은 구현 전에 `MULTI_AGENT_ORCHESTRATION_SPEC.md`, `DATABASE_SPEC.md`, `API_SPEC.md`, `WEB_UI_SPEC.md`, `TEST_PLAN.md`에 보강한다.
+Foundation의 Mock route만 사용하는 DIAGNOSTIC 다중 에이전트 runtime은 2026-08-06 로컬 구현·검증을 완료했다. `agent_runs`, `agent_stage_runs`, evidence 저장과 Intel→Verify→4 Scout→Core DAG, API·Console, 멱등 재요청과 주문 0건을 검증했다. 실제 웹 수집·외부 LLM·승인·주문은 연결하지 않았다.
+
+### 4.3 다음 구현 slice: Agent Worker v2
+
+실서버 PostgreSQL에서 `0014`와 수동 DIAGNOSTIC run을 확인한 뒤 stage claim·lease·fencing·timeout과 scheduler admission을 설계한다. 이 단계도 deterministic Mock만 사용하며 외부 source·provider 연결은 별도 게이트로 유지한다.
 
 ## 5. 검증·인수 조건
 

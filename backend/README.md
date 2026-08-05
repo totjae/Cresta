@@ -21,3 +21,7 @@ cresta-worker kiwoom
 `cresta-worker kiwoom`은 PostgreSQL lease를 획득한 한 프로세스만 LOGIN·`00`/`04` 구독과 REST 재동기화를 수행한다. WebSocket과 clean 대조가 모두 정상일 때만 `READY`다. READY worker는 내부 키움 MOCK 계좌의 `CREATED` 주문을 한 건씩 polling하며, `UNKNOWN`이면 다음 주문을 중단하고 즉시 재동기화한다. 공개 주문 생성 경로는 아직 없고 외부 주문·포지션도 자동 편입하지 않는다.
 
 운영 시작 전 `CRESTA_DATABASE_URL`, `CRESTA_TOTP_ENCRYPTION_KEY`와 HTTPS cookie 설정을 비밀 파일 또는 안전한 환경 주입으로 제공해야 한다. 운영 Origin은 `https://trade.mihoservice.xyz`이며 호스트 Nginx가 `127.0.0.1:7788`의 Compose gateway로 전달한다.
+
+## Agent Runtime v1
+
+`POST /api/v1/ai/agent-runs/diagnostic`은 최신 영속 snapshot과 5개 검증 완료 SHADOW Mock route로 Intel → Verify → 4 Scout → Core DAG를 동기 실행한다. 결과는 항상 DIAGNOSTIC이며 Core는 `WAIT`만 반환하고 decision·approval·order를 생성하지 않는다. 조회 endpoint는 `/api/v1/ai/agent-runs`와 `/api/v1/ai/agent-runs/{run_id}`다.

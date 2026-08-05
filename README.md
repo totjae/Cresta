@@ -60,6 +60,8 @@ npm test
 npm run build
 ```
 
+현재 AI 실험 경로는 검증된 Mock Provider route만 사용하는 Agent Runtime v1을 포함한다. Web Console의 AI 판단 화면에서 5개 role route 준비도를 확인하고 DIAGNOSTIC DAG를 실행할 수 있으며 외부 웹·LLM·승인·주문은 연결되지 않는다.
+
 `deploy/.env.example`은 키 이름과 비밀 파일 경로만 제공하며 실제 값은 `secrets/`에 생성해야 합니다. secret 생성 또는 교체 후 `sudo deploy/prepare-secrets.sh`를 실행해 비밀값을 출력하지 않고 API 고정 UID/GID `10001:10001`과 읽기 전용 권한을 적용합니다. 이 준비 없이 migration이나 API를 시작하지 않습니다.
 
 운영 Web 진입점은 `https://trade.mihoservice.xyz`이며, Compose gateway는 `127.0.0.1:7788`에만 바인딩됩니다. 호스트 Nginx 예시는 `deploy/host-nginx.example.conf`에 있으며 7788 포트는 인터넷에 직접 개방하지 않습니다.

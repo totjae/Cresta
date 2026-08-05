@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pyotp
 from fastapi.testclient import TestClient
@@ -33,7 +33,7 @@ def _login(client: TestClient) -> str:
         json={
             "schema_version": "1.0",
             "challenge_id": challenge.json()["challenge_id"],
-            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(now - timedelta(seconds=30)),
+            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(now),
         },
     )
     assert response.status_code == 200

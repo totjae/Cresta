@@ -579,3 +579,83 @@ class LlmRouteListResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str
     items: list[LlmRouteResponse]
+
+
+AgentRouteRole = Literal[
+    "TECHNICAL_SCOUT",
+    "NEWS_DISCLOSURE_SCOUT",
+    "MARKET_SECTOR_SCOUT",
+    "POSITION_RISK_SCOUT",
+    "CORE",
+]
+
+
+class AgentDiagnosticRunRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    market: Literal["KRX", "NXT"]
+    symbol: str = Field(pattern=r"^[0-9]{6}$")
+    route_ids: dict[AgentRouteRole, str]
+
+
+class AgentInvocationResponse(StrictModel):
+    invocation_id: str
+    state: str
+    actual_provider: str | None
+    actual_model: str | None
+    latency_ms: int
+    validation_status: str
+    error_code: str | None
+
+
+class AgentStageRunResponse(StrictModel):
+    stage_run_id: str
+    role: str
+    sequence: int
+    dependencies: list[str]
+    route_id: str | None
+    state: str
+    input_hash: str
+    output: dict[str, object] | None
+    output_hash: str | None
+    error_code: str | None
+    invocation: AgentInvocationResponse | None
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class AgentEvidenceBundleResponse(StrictModel):
+    bundle_id: str
+    state: str
+    policy_version: str
+    evidence_ids: list[str]
+    reason_codes: list[str]
+    bundle_hash: str
+    as_of: datetime
+
+
+class AgentRunResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    run_id: str
+    created: bool = False
+    purpose: Literal["DIAGNOSTIC"]
+    execution_stage: Literal["SHADOW"]
+    market: Literal["KRX", "NXT"]
+    symbol: str
+    market_snapshot_id: str
+    input_hash: str
+    dag_version: str
+    route_versions: dict[str, object]
+    state: str
+    core_action: Literal["WAIT"] | None
+    valid_until: datetime
+    stages: list[AgentStageRunResponse]
+    evidence_bundle: AgentEvidenceBundleResponse | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class AgentRunListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[AgentRunResponse]

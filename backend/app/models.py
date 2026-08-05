@@ -1044,3 +1044,128 @@ class LlmInvocation(Base):
     error_code: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+    __table_args__ = (
+        CheckConstraint("purpose = 'DIAGNOSTIC'", name="ck_agent_runs_foundation_purpose"),
+        CheckConstraint("market IN ('KRX','NXT')", name="ck_agent_runs_market"),
+        CheckConstraint(
+            "state IN ('CREATED','RUNNING','SUCCEEDED','PARTIAL','FAILED','CANCELLED')",
+            name="ck_agent_runs_state",
+        ),
+        CheckConstraint("execution_stage = 'SHADOW'", name="ck_agent_runs_execution_stage"),
+        Index("ix_agent_runs_owner_created", "owner_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False, default="DIAGNOSTIC")
+    execution_stage: Mapped[str] = mapped_column(String(24), nullable=False, default="SHADOW")
+    market: Mapped[str] = mapped_column(String(16), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    market_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("market_snapshots.id"), nullable=False, index=True
+    )
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    dag_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    route_versions_json: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="CREATED")
+    core_action: Mapped[str | None] = mapped_column(String(32))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentStageRun(Base):
+    __tablename__ = "agent_stage_runs"
+    __table_args__ = (
+        UniqueConstraint("run_id", "role", name="uq_agent_stage_runs_run_role"),
+        CheckConstraint(
+            "role IN ('INTEL_COLLECTOR','EVIDENCE_VERIFIER','TECHNICAL_SCOUT',"
+            "'NEWS_DISCLOSURE_SCOUT','MARKET_SECTOR_SCOUT','POSITION_RISK_SCOUT','CORE')",
+            name="ck_agent_stage_runs_role",
+        ),
+        CheckConstraint(
+            "state IN ('PENDING','RUNNING','SUCCEEDED','INSUFFICIENT_DATA','CONFLICTED',"
+            "'TIMED_OUT','FAILED','INVALID_OUTPUT')",
+            name="ck_agent_stage_runs_state",
+        ),
+        Index("ix_agent_stage_runs_run_sequence", "run_id", "sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    dependency_roles_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    route_id: Mapped[str | None] = mapped_column(ForeignKey("llm_role_routes.id"))
+    invocation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("llm_invocations.id"), unique=True
+    )
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    output_json: Mapped[str | None] = mapped_column(Text)
+    output_hash: Mapped[str | None] = mapped_column(String(64))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EvidenceItem(Base):
+    __tablename__ = "evidence_items"
+    __table_args__ = (
+        CheckConstraint("market IN ('KRX','NXT')", name="ck_evidence_items_market"),
+        Index("ix_evidence_items_stream_received", "market", "symbol", "received_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"), nullable=False, index=True)
+    market: Mapped[str] = mapped_column(String(16), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_tier: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_url: Mapped[str | None] = mapped_column(String(1000))
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    facts_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    extraction_method: Mapped[str] = mapped_column(String(16), nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EvidenceBundle(Base):
+    __tablename__ = "evidence_bundles"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('VERIFIED','PARTIAL','CONFLICTED','REJECTED')",
+            name="ck_evidence_bundles_state",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    market: Mapped[str] = mapped_column(String(16), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    evidence_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    contradiction_groups_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    stale_evidence_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    reason_codes_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    bundle_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

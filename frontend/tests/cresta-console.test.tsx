@@ -346,3 +346,57 @@ describe("Mock AI decisions", () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/orders"))).toBe(false);
   });
 });
+
+describe("Agent Runtime v1", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("runs only when five validated SHADOW routes are ready and shows no-order boundary", async () => {
+    const roles = ["TECHNICAL_SCOUT", "NEWS_DISCLOSURE_SCOUT", "MARKET_SECTOR_SCOUT", "POSITION_RISK_SCOUT", "CORE"];
+    const routes = roles.map((role, index) => ({
+      id: `route-${index}`, role, primary_model_profile_id: "model-1", primary_model_alias: "agent-runtime-v1",
+      fallback_policy: "NONE", execution_stage: "SHADOW", timeout_ms: 10000, max_attempts: 1,
+      daily_call_limit: 100, daily_cost_limit_krw: "0", prompt_version: `${role}-v1`,
+      output_schema_version: "agent-assessment-v1", state: "VALIDATED", reason: "fixture",
+      validated_at: "2026-08-06T01:00:00Z", version: 2, created_at: "2026-08-06T00:00:00Z",
+    }));
+    const run = {
+      schema_version: "1.0", request_id: "agent-1", run_id: "run-1", created: true,
+      purpose: "DIAGNOSTIC", execution_stage: "SHADOW", market: "KRX", symbol: "005930",
+      market_snapshot_id: "snapshot-1", input_hash: "a".repeat(64), dag_version: "agent-dag-v1",
+      route_versions: {}, state: "PARTIAL", core_action: "WAIT", valid_until: "2026-08-06T01:01:00Z",
+      stages: roles.map((role, index) => ({
+        stage_run_id: `stage-${index}`, role, sequence: index + 1, dependencies: [], route_id: `route-${index}`,
+        state: role === "NEWS_DISCLOSURE_SCOUT" ? "INSUFFICIENT_DATA" : "SUCCEEDED",
+        input_hash: "b".repeat(64), output: {}, output_hash: "c".repeat(64), error_code: null,
+        invocation: { invocation_id: `inv-${index}`, state: "SUCCEEDED", actual_provider: "CRESTA_MOCK", actual_model: "deterministic-mock-v2", latency_ms: 0, validation_status: "PASSED", error_code: null },
+        started_at: "2026-08-06T01:00:00Z", completed_at: "2026-08-06T01:00:00Z",
+      })),
+      evidence_bundle: { bundle_id: "bundle-1", state: "PARTIAL", policy_version: "fixture-none-v1", evidence_ids: [], reason_codes: ["NO_EXTERNAL_EVIDENCE_FIXTURE"], bundle_hash: "d".repeat(64), as_of: "2026-08-06T01:00:00Z" },
+      created_at: "2026-08-06T01:00:00Z", completed_at: "2026-08-06T01:00:00Z",
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-agent", login_id: "admin", expires_at: "2026-08-06T09:00:00Z", csrf_token: "csrf-agent" });
+      if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
+      if (path === "/api/v1/decisions") return jsonResponse({ items: [] });
+      if (path === "/api/v1/ai/agent-runs" && !init?.method) return jsonResponse({ schema_version: "1.0", request_id: "runs-1", items: [] });
+      if (path === "/api/v1/ai/routes") return jsonResponse({ schema_version: "1.0", request_id: "routes-1", items: routes });
+      if (path === "/api/v1/ai/agent-runs/diagnostic") return jsonResponse(run, 201);
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CrestaConsole />);
+
+    await user.click(await screen.findByRole("button", { name: /AI 판단/ }));
+    expect(await screen.findByText("DIAGNOSTIC · SHADOW · 주문 없음")).toBeInTheDocument();
+    expect(await screen.findByText(/Route 준비: 5\/5/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "DIAGNOSTIC DAG 실행" }));
+    expect(await screen.findByText(/주문은 생성되지 않았습니다/)).toBeInTheDocument();
+    expect(await screen.findByText("WAIT")).toBeInTheDocument();
+
+    const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/ai/agent-runs/diagnostic");
+    expect(call?.[1]).toEqual(expect.objectContaining({ headers: expect.objectContaining({ "X-CSRF-Token": "csrf-agent" }) }));
+    expect(JSON.parse(String(call?.[1]?.body)).route_ids).toEqual(Object.fromEntries(roles.map((role, index) => [role, `route-${index}`])));
+  });
+});

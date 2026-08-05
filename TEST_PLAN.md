@@ -216,6 +216,7 @@
 | T-MAO-007 | MAO-060~063 | N100 동시 호출·queue 지연·비용 한도 초과 | admission·우선순위·유효시간 준수, Guard 지속 | 계획 |
 | T-MAO-008 | MAO-070~074 | 웹 원문에 주문·비밀·내부 URL 접근 지시 삽입 | 명령 무시, SSRF·도구·Broker 접근 차단, 안전 escape | 계획 |
 | T-MAO-009 | MAO-080~083 | 신규 model·prompt·DAG를 SHADOW로 실행·활성화 시도 | 회귀시험·TOTP 전 활성화 불가, SHADOW 승인·주문 0건 | 계획 |
+| T-MAO-010 | MAO-090~098, DB-124~127, API-135, UI-118~119 | 5개 Mock route로 DIAGNOSTIC DAG 실행·중복 요청·route 변조 | run 1개, stage 7개·invocation 5개 provenance, Core WAIT, decision·approval·order 0건 | 통과 (2026-08-06, API·component fixture) |
 
 ### 3.12.2 LLM Provider 및 Gateway
 
@@ -325,15 +326,15 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 138개 통과 | 기존 범위와 LLM Foundation Mock Adapter·profile/model/SHADOW route API·비밀값 차단·주문 0건 검증 포함 |
-| Console component 시험 | `npm test` | 9개 통과 | 기존 범위와 credential 입력 없는 Mock Provider 초안·CSRF·SHADOW 전용 표시 포함 |
+| Python 단위·API 시험 | `python -m pytest` | 140개 통과 | 기존 범위와 Agent Runtime 고정 DAG·route 검증·멱등성·stage/invocation provenance·Core WAIT·주문 0건 포함 |
+| Console component 시험 | `npm test` | 10개 통과 | 기존 범위와 5개 route 준비도·DIAGNOSTIC DAG 실행·SHADOW 주문 없음 표시 포함 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
 | Console HTTP smoke | standalone server에 HTTP 요청 | 통과 | `/` 응답 200과 Cresta metadata 확인 |
 | Console production dependency audit | `npm audit --omit=dev --audit-level=high` | 취약점 0건 | Next 하위 PostCSS·Sharp를 검증된 패치 버전으로 고정 |
 | 정적 검사 | `python -m ruff check app tests migrations` | 통과 | FastAPI dependency의 B008은 프레임워크 관용구로 제외 |
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
-| migration 적용 | `alembic upgrade head`·`current` | 통과 | 빈 SQLite에서 LLM Foundation 4개 테이블을 포함한 `20260805_0013` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
+| migration 적용 | `alembic upgrade head`·`current` | 통과 | 빈 SQLite에서 Agent Runtime 4개 테이블을 포함한 `20260806_0014` upgrade→downgrade→upgrade 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
 | Docker Compose·HTTPS | Ubuntu 서버에서 전체 서비스 기동, migration, host Nginx·TLS 접속과 로그인 | 통과 | PostgreSQL·Redis healthy, secret 읽기, API·Frontend·gateway, HTTPS와 ID·비밀번호·TOTP 로그인 확인 |
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |

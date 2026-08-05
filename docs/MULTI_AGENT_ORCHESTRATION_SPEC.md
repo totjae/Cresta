@@ -230,6 +230,22 @@ app/llm/*                     Provider/Gateway 호출 계층
 5. run·stage·invocation 조회 UI
 6. 승인·주문 리소스가 0건임을 검증하는 시험
 
+### 12.1 Agent Runtime v1 고정 계약
+
+이번 구현은 외부 웹·LLM을 연결하기 전 영속성·DAG·안전 경계를 검증하는 동기식 DIAGNOSTIC runtime이다.
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-090 | `POST /ai/agent-runs/diagnostic`은 로그인 사용자, KRX/NXT 종목, 최신 영속 market snapshot, `dag_version=agent-dag-v1`과 명시적인 role별 route ID를 입력으로 받는다. |
+| MAO-091 | route가 필요한 역할은 `TECHNICAL_SCOUT`, `NEWS_DISCLOSURE_SCOUT`, `MARKET_SECTOR_SCOUT`, `POSITION_RISK_SCOUT`, `CORE`이다. 각 route는 요청 사용자 소유, `VALIDATED`, `SHADOW`, `fallback=NONE`, 해당 role 일치, 검증된 Mock model이어야 하며 하나라도 실패하면 run을 만들지 않는다. |
+| MAO-092 | `INTEL_COLLECTOR`는 외부 네트워크 없이 빈 fixture를 만들고 `EVIDENCE_VERIFIER`는 이를 `PARTIAL` 빈 bundle로 고정한다. 외부 정보 없음은 긍정 신호로 해석하지 않는다. |
+| MAO-093 | 실행 순서는 Intel → Verify → 4개 Scout → Core로 고정한다. v1은 한 DB 작업 단위에서 순차 실행하지만 stage dependency를 저장해 이후 병렬 worker가 동일 DAG를 재현할 수 있어야 한다. |
+| MAO-094 | 각 route stage는 Mock Adapter 호출 전 `RUNNING` invocation을 저장하고 완료 후 실제 provider/model, 입력·응답 hash, latency와 schema 검증 결과를 기록한다. 외부 Adapter나 도구 사용은 거부한다. |
+| MAO-095 | Technical은 최신 Watch 지표가 없으면, News는 검증된 외부 증거가 없으면, Position Risk는 열린 position이 없으면 `INSUFFICIENT_DATA`를 출력한다. Market은 정상·최신 snapshot만 평가한다. |
+| MAO-096 | Core는 필수 Scout 중 하나라도 `SUCCEEDED`가 아니면 `WAIT`만 출력한다. v1 Core는 `BUY`, 승인, 판단 실행, 주문을 생성할 수 없다. |
+| MAO-097 | 멱등 key는 사용자·purpose·market·symbol·market snapshot·DAG version·정렬된 route version map의 canonical SHA-256이다. 같은 key의 재요청은 기존 run을 반환하고 stage·invocation을 추가하지 않는다. |
+| MAO-098 | API는 run·stage·evidence bundle·invocation provenance를 반환하되 raw prompt·원문 provider 응답·credential은 반환하지 않는다. Console은 `DIAGNOSTIC · SHADOW · 주문 없음`을 고정 표시한다. |
+
 ## 13. 검증·인수 조건
 
 - 동일 입력·DAG·route version의 run이 중복 생성되지 않는다.
