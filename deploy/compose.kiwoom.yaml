@@ -34,6 +34,24 @@ services:
     mem_limit: 512m
     cpus: 0.5
     networks: [backend]
+  scheduler:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    command: ["cresta-worker", "scheduler"]
+    env_file: [.env]
+    environment:
+      CRESTA_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: 0.25
+    networks: [backend]
 
 secrets:
   kiwoom_mock_app_key:

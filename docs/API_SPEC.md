@@ -304,3 +304,4 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-122 | 실행 단계 `SHADOW | APPROVAL_ONLY | MOCK_AUTOMATIC` 조회와 변경은 설정 API에서 제공하고 단계 확대는 TOTP proof·변경 사유·서버 시험 gate를 요구한다. |
 | API-123 | `/system/health`는 현재 실행 단계와 `BUY` 기능 gate의 준비·차단 reason을 반환한다. |
 | API-124 | `approval.requested`, `approval.updated`, `decision.execution_updated`, `risk.evaluated` 이벤트는 REST resource ID·version을 포함하고 주문 이벤트와 구분한다. |
+| API-125 | `/system/health`는 scheduler의 `NOT_STARTED | RUNNING | IDLE | DEGRADED | STALE | STOPPED`, lease 유효 여부, 최근 heartbeat·tick·완료 시각, 다음 예정 시각과 최근 집계만 반환한다. owner ID와 fencing token은 반환하지 않는다. |

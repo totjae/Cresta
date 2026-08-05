@@ -294,7 +294,7 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 126개 통과 | 기존 범위와 DIAGNOSTIC 실행 차단, SHADOW 멱등 실행·Guard 차단·주문 0건 검증 포함 |
+| Python 단위·API 시험 | `python -m pytest` | 131개 통과 | 기존 범위와 KST scheduler 슬롯·lease·TRADING SHADOW 인계·주문 0건 검증 포함 |
 | Console component 시험 | `npm test` | 8개 통과 | 기존 범위와 감시 종목 등록·시세 대기, DIAGNOSTIC 목적·실행 없음 표시 포함 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
@@ -302,7 +302,7 @@
 | Console production dependency audit | `npm audit --omit=dev --audit-level=high` | 취약점 0건 | Next 하위 PostCSS·Sharp를 검증된 패치 버전으로 고정 |
 | 정적 검사 | `python -m ruff check app tests migrations` | 통과 | FastAPI dependency의 B008은 프레임워크 관용구로 제외 |
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
-| migration 적용 | `alembic upgrade head`·`current` | 통과 | SQLite에서 판단 실행·Guard·승인 기반 `20260805_0010` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
+| migration 적용 | `alembic upgrade head`·`current` | 통과 | SQLite에서 scheduler lease·상태를 포함한 `20260805_0011` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
 | Docker Compose·HTTPS | Ubuntu 서버에서 전체 서비스 기동, migration, host Nginx·TLS 접속과 로그인 | 통과 | PostgreSQL·Redis healthy, secret 읽기, API·Frontend·gateway, HTTPS와 ID·비밀번호·TOTP 로그인 확인 |
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
@@ -337,4 +337,6 @@
 | T-APR-001 | EXE-040~045, STM-006~009, API-112~121 | 승인·거절·만료·가격/상태 변경·동시 탭·TOTP 재사용 | 한 번만 terminal 전이, 유효 승인만 CREATED 주문과 원자 commit | 계획 |
 | T-ORD-010 | EXE-060~064, ORD-039~043 | Guard 통과 후 주문 생성과 Broker polling 경쟁 | intent·CREATED·감사 원자 생성, worker만 송신, 활성/UNKNOWN 중복 차단 | 계획 |
 | T-EXE-004 | EXE-070~073, API-122~124 | SHADOW→APPROVAL_ONLY→MOCK_AUTOMATIC 확대와 축소 | 시험·TOTP 없는 확대 거부, 축소 즉시 적용, 실거래 권한 변화 없음 | 계획 |
+| T-AI-010 | AI-080~085, SES-050~053, DB-108~110 | 평일 집중·일반·장외 슬롯, 재시작·중복 tick, snapshot 없음·정상 | 현재 슬롯만 멱등 평가, 정상 TRADING 판단은 SHADOW로 전달, snapshot 없음은 건너뜀, 승인·주문 0건 | 부분 통과 (2026-08-05, 자동; 실제 장중 연속 운전·종목별 예외 주입 대기) |
+| T-OPS-014 | OPS-017~018, API-125, UI-106 | scheduler Compose 계약, lease·heartbeat·IDLE·STALE 상태와 대시보드 조회 | scheduler 장애가 API·Broker를 중단하지 않고 상태에 비밀·owner/token을 노출하지 않음 | 통과 (2026-08-05, 자동 계약·API·component fixture) |
 | T-UI-016 | UI-055~059, UI-075~076, UI-088~089 | 승인 카드·Guard reason·실행 단계 데스크톱/모바일 흐름 | 주문 상태 오인 없음, 만료/무효화 원인 표시, TOTP·접근성 준수 | 계획 |

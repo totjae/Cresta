@@ -196,3 +196,9 @@ core_output:
 | AI-077 | 판단 저장과 실행 인계 작업 enqueue는 같은 transaction 또는 transactional outbox로 연결해 판단 유실과 중복 실행을 방지한다. |
 | AI-078 | 실행 결과는 불변 판단을 수정하지 않고 별도 execution record로 연결한다. |
 | AI-079 | 결정론적 Mock 모델은 내부 `TRADING` 판단에도 사용할 수 있지만 모델 식별자가 같다는 이유만으로 진단 판단을 거래 판단으로 승격하지 않는다. |
+| AI-080 | 정기 AI scheduler는 API·Broker worker와 분리된 단일 장기 실행 프로세스이며 활성 감시 종목만 평가한다. 첫 구현은 `deterministic-mock-v1`을 사용한다. |
+| AI-081 | scheduler가 만든 판단은 처음부터 `purpose=TRADING`으로 저장하며 공개 진단 판단을 승격하거나 복사하지 않는다. |
+| AI-082 | evaluation request ID는 사용자·시장·종목·KST 분석 슬롯·모델·프롬프트 버전으로 결정론적으로 만들고 DB unique 제약으로 재시작·중복 tick을 억제한다. 같은 슬롯에서는 snapshot이 바뀌어도 최초 판단을 유지한다. |
+| AI-083 | 활성 감시 종목에 현재 snapshot이 없으면 판단을 생성하지 않고 `SNAPSHOT_NOT_READY`로 scheduler 결과를 기록한다. snapshot이 존재하지만 stale·degraded이면 기존 판단 계약에 따라 `RISK_BLOCK` 판단을 저장할 수 있다. |
+| AI-084 | 종목 하나의 평가 실패는 같은 tick의 다른 종목을 중단시키지 않는다. 판단·SHADOW 실행·Guard·감사는 종목별 transaction으로 commit하며 실패 종목은 rollback한다. |
+| AI-085 | scheduler lease의 현재 owner만 tick을 실행한다. lease를 잃으면 새 판단 생성을 즉시 중단하며 다른 인스턴스가 만료 후 현재 슬롯을 멱등 재처리할 수 있다. |

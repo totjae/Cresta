@@ -299,6 +299,7 @@ EMERGENCY_LIQUIDATE
 | UI-087 | API가 `ORDER_QUEUED/CREATED`를 반환하면 체결 성공으로 표시하지 않고 주문 ID와 Worker 처리 대기 상태를 안내한다. |
 | UI-088 | 시스템 상태는 실행 단계 `SHADOW | APPROVAL_ONLY | MOCK_AUTOMATIC`과 단계별 가능한 행동, `BUY` 기능 gate 차단 reason을 고정 표시한다. |
 | UI-089 | 실행 단계 확대는 변경 영향·필수 시험 통과 여부·변경 사유를 표시한 뒤 TOTP 재인증을 요구하며 일반 자동/승인 mode 선택과 구분한다. |
+| UI-106 | 대시보드는 AI scheduler 상태와 다음 판단 예정 시각을 표시한다. `IDLE`은 장외 정상 상태로 표현하고 `STALE | DEGRADED`는 주문 성공이나 실행 중으로 표현하지 않는다. |
 
 ### 3.10 공통 화면 상태
 

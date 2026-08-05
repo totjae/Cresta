@@ -55,6 +55,8 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | `reconciliation_mismatches` | id, run_id, code, symbol, severity, state, broker_value, internal_value | 해결 이력 |
 | `broker_leases` | account_alias, owner_id, fencing_token, expires_at, version | account_alias PK |
 | `broker_worker_states` | account_alias, state, fencing_token, websocket_connected, subscriptions_ready, heartbeat/reconciliation 시각, error_code | account_alias PK, 비밀 저장 금지 |
+| `analysis_scheduler_leases` | scheduler_name, owner_id, fencing_token, expires_at, version | scheduler_name PK |
+| `analysis_scheduler_states` | scheduler_name, state, fencing_token, heartbeat/tick/완료/다음 시각, 집계, error_code | scheduler_name PK, 비밀 저장 금지 |
 | `audit_logs` | id, actor_type, actor_id, action, target, result, metadata, correlation_id, created_at | append-only |
 
 ### 3.3 주문·체결 제약과 트랜잭션
@@ -224,3 +226,6 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-105 | 승인 처리 transaction은 reauth proof 1회 소비, expected approval version 조건부 갱신, 새 Guard 평가, order intent·order와 감사를 함께 commit하거나 모두 rollback한다. |
 | DB-106 | 승인 scope snapshot은 수량·기준가격/범위·snapshot·position·설정 version과 만료시각을 저장하고 승인 후 수정하지 않는다. |
 | DB-107 | execution·approval·order 생성 transaction의 commit 결과가 불명확하면 execution key와 idempotency key를 조회한 뒤에만 재처리한다. |
+| DB-108 | `analysis_scheduler_leases`는 scheduler 이름을 PK로 하고 owner ID, fencing token, 만료시각과 version을 저장한다. 획득·갱신은 행 잠금과 owner/token 비교로 원자 처리한다. |
+| DB-109 | `analysis_scheduler_states`는 상태, 현재 fencing token, heartbeat, 최근 tick·완료·다음 예정 시각, 최근 처리·생성·건너뜀·실패 수와 비밀이 아닌 오류 code만 저장한다. |
+| DB-110 | scheduler lease·state에는 모델 API key, 계좌번호, 원본 시세 payload와 사용자 인증정보를 저장하지 않는다. |

@@ -20,6 +20,11 @@ def test_long_running_services_restart_after_docker_daemon_restart() -> None:
     for name in ("postgres", "redis", "api", "frontend", "nginx"):
         assert "restart: unless-stopped" in _service(base, name)
     assert "restart: unless-stopped" in _service(overlay, "worker")
+    scheduler = _service(overlay, "scheduler")
+    assert "restart: unless-stopped" in scheduler
+    assert 'command: ["cresta-worker", "scheduler"]' in scheduler
+    assert "mem_limit: 256m" in scheduler
+    assert "cpus: 0.25" in scheduler
     assert "restart: on-failure" not in base
 
 

@@ -8,6 +8,7 @@ import pyotp
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.analysis_scheduler_state import acquire_scheduler_lease, update_scheduler_state
 from app.config import Settings
 from app.trading.paper import (
     PaperOrderRequest,
@@ -45,6 +46,19 @@ def test_paper_read_models_require_auth_and_report_empty_state(client: TestClien
     assert health.json()["environment"] == "MOCK"
     assert health.json()["live_trading_enabled"] is False
     assert health.json()["paper_broker_status"] == "NOT_INITIALIZED"
+    assert health.json()["analysis_scheduler"] == {
+        "state": "NOT_STARTED",
+        "lease_valid": False,
+        "last_heartbeat_at": None,
+        "last_tick_at": None,
+        "last_completed_at": None,
+        "next_due_at": None,
+        "processed_count": 0,
+        "decision_count": 0,
+        "skipped_count": 0,
+        "failed_count": 0,
+        "last_error_code": None,
+    }
     assert health.json()["counts"] == {"orders": 0, "active_orders": 0, "open_positions": 0}
 
     positions = client.get("/api/v1/positions")
@@ -77,6 +91,29 @@ def test_system_health_caps_kiwoom_at_configured_without_runtime_worker(
     assert health.status_code == 200
     assert health.json()["kiwoom_broker_status"] == "CONFIGURED"
     assert health.json()["kiwoom_broker_status"] not in {"AUTHENTICATED", "READY"}
+
+
+def test_system_health_reports_scheduler_without_internal_lease_identity(
+    client: TestClient,
+    db: Session,
+) -> None:
+    identity = acquire_scheduler_lease(db, "private-owner-id", lease_seconds=30)
+    assert identity is not None
+    assert update_scheduler_state(
+        db,
+        identity,
+        "IDLE",
+        next_due_at=datetime(2026, 8, 6, 23, 0, tzinfo=UTC),
+    )
+    login(client)
+
+    scheduler = client.get("/api/v1/system/health").json()["analysis_scheduler"]
+
+    assert scheduler["state"] == "IDLE"
+    assert scheduler["lease_valid"] is True
+    assert scheduler["next_due_at"].startswith("2026-08-06T23:00:00")
+    assert "owner_id" not in scheduler
+    assert "fencing_token" not in scheduler
 
 
 def test_paper_health_and_position_use_persisted_fill_data(

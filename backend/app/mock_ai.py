@@ -95,13 +95,62 @@ def evaluate_mock_decision(
     settings: Settings,
     now: datetime | None = None,
 ) -> Decision:
+    decision, created = create_mock_decision(
+        db,
+        evaluation_request_id=evaluation_request_id,
+        symbol=symbol,
+        market=market,
+        settings=settings,
+        purpose="DIAGNOSTIC",
+        now=now,
+    )
+    if created:
+        db.commit()
+        db.refresh(decision)
+    return decision
+
+
+def create_mock_trading_decision(
+    db: Session,
+    *,
+    evaluation_request_id: str,
+    symbol: str,
+    market: str,
+    settings: Settings,
+    now: datetime | None = None,
+) -> tuple[Decision, bool]:
+    return create_mock_decision(
+        db,
+        evaluation_request_id=evaluation_request_id,
+        symbol=symbol,
+        market=market,
+        settings=settings,
+        purpose="TRADING",
+        now=now,
+    )
+
+
+def create_mock_decision(
+    db: Session,
+    *,
+    evaluation_request_id: str,
+    symbol: str,
+    market: str,
+    settings: Settings,
+    purpose: str,
+    now: datetime | None = None,
+) -> tuple[Decision, bool]:
     existing = db.scalar(
         select(Decision).where(Decision.evaluation_request_id == evaluation_request_id)
     )
     if existing is not None:
-        if existing.symbol != symbol or existing.market != market:
+        if (
+            existing.symbol != symbol
+            or existing.market != market
+            or existing.purpose != purpose
+        ):
             raise MockDecisionError("DECISION_IDEMPOTENCY_CONFLICT")
-        return existing
+        return existing, False
     state = db.get(MarketStreamState, (market, symbol))
     if state is None or state.current_snapshot_id is None:
         raise MockDecisionError("DECISION_SNAPSHOT_NOT_FOUND", 404)
@@ -112,7 +161,7 @@ def evaluate_mock_decision(
     scout, core = _outputs(snapshot, state, settings, current)
     action = str(core["action"])
     decision = Decision(
-        purpose="DIAGNOSTIC",
+        purpose=purpose,
         evaluation_request_id=evaluation_request_id,
         input_snapshot_id=snapshot.id,
         symbol=symbol,
@@ -136,9 +185,8 @@ def evaluate_mock_decision(
         latency_ms=0,
     )
     db.add(decision)
-    db.commit()
-    db.refresh(decision)
-    return decision
+    db.flush()
+    return decision, True
 
 
 def list_decisions(db: Session, limit: int = 50) -> list[Decision]:

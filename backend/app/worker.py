@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 from websockets.exceptions import WebSocketException
 
+from app.analysis_scheduler import AnalysisSchedulerWorker
 from app.broker.kiwoom import KiwoomAdapterError, KiwoomMockClient
 from app.broker.kiwoom_ws import KiwoomAccountWebSocket, KiwoomWebSocketError
 from app.broker.order_sender import KiwoomSendResult, send_next_created_order
@@ -358,8 +359,12 @@ def _safe_error_code(exc: Exception) -> str:
     return "KIWOOM_WORKER_ERROR"
 
 
-async def _run_worker() -> int:
-    worker = KiwoomBrokerWorker(get_settings())
+async def _run_worker(worker_name: str) -> int:
+    worker = (
+        KiwoomBrokerWorker(get_settings())
+        if worker_name == "kiwoom"
+        else AnalysisSchedulerWorker(get_settings())
+    )
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
@@ -369,9 +374,9 @@ async def _run_worker() -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="cresta-worker")
-    parser.add_argument("worker", choices=["kiwoom"])
-    parser.parse_args()
-    raise SystemExit(asyncio.run(_run_worker()))
+    parser.add_argument("worker", choices=["kiwoom", "scheduler"])
+    args = parser.parse_args()
+    raise SystemExit(asyncio.run(_run_worker(args.worker)))
 
 
 if __name__ == "__main__":

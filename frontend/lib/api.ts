@@ -105,6 +105,19 @@ export type SystemHealth = {
   decision_execution_status: string;
   buy_execution_ready: boolean;
   buy_execution_block_reason: string | null;
+  analysis_scheduler: {
+    state: string;
+    lease_valid: boolean;
+    last_heartbeat_at: string | null;
+    last_tick_at: string | null;
+    last_completed_at: string | null;
+    next_due_at: string | null;
+    processed_count: number;
+    decision_count: number;
+    skipped_count: number;
+    failed_count: number;
+    last_error_code: string | null;
+  };
   database_status: string;
   paper_broker_status: string;
   kiwoom_broker_status: string;

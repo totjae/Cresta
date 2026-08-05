@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.analysis_scheduler_state import get_scheduler_status
 from app.api.dependencies import AuthContext, get_auth_context, require_csrf
 from app.broker.mock_order_test import create_mock_order_test
 from app.broker.worker_state import get_broker_status
@@ -13,6 +14,7 @@ from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import MarketStreamState, Position, TradingGate, TradingOrder
 from app.schemas import (
+    AnalysisSchedulerStatusResponse,
     BrokerStatusResponse,
     MockOrderTestRequest,
     MockOrderTestResponse,
@@ -60,6 +62,7 @@ def system_health(
 ) -> SystemHealthResponse:
     db.scalar(select(1))
     gate = db.get(TradingGate, "PAPER")
+    scheduler = get_scheduler_status(db)
     counts = SystemCountResponse(
         orders=int(
             db.scalar(
@@ -107,6 +110,19 @@ def system_health(
         decision_execution_status="SHADOW_ONLY",
         buy_execution_ready=False,
         buy_execution_block_reason="ORDER_SIZE_NOT_CONFIGURED",
+        analysis_scheduler=AnalysisSchedulerStatusResponse(
+            state=scheduler.state,
+            lease_valid=scheduler.lease_valid,
+            last_heartbeat_at=scheduler.last_heartbeat_at,
+            last_tick_at=scheduler.last_tick_at,
+            last_completed_at=scheduler.last_completed_at,
+            next_due_at=scheduler.next_due_at,
+            processed_count=scheduler.processed_count,
+            decision_count=scheduler.decision_count,
+            skipped_count=scheduler.skipped_count,
+            failed_count=scheduler.failed_count,
+            last_error_code=scheduler.last_error_code,
+        ),
         database_status="CONNECTED",
         paper_broker_status="AVAILABLE" if gate else "NOT_INITIALIZED",
         kiwoom_broker_status=settings.kiwoom_configuration_status(),

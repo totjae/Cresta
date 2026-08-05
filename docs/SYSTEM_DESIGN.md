@@ -146,6 +146,8 @@ SELECTED -> PRECHECK -> ENTRY_WATCH -> ENTRY_READY -> BUY_PENDING
 
 ## 8. 배포 단위와 관측성
 
+AI 정기 판단은 키움 주문 worker와 분리된 `scheduler` 장기 실행 서비스가 담당한다. scheduler 장애는 신규 판단만 중단하며 API·Console·Broker worker의 상태와 주문 복구 경로에는 영향을 주지 않는다.
+
 초기에는 `console`, `api`, `worker`, `postgres`, `redis`, `nginx`의 Docker Compose 구성을 사용한다. Compose의 gateway는 `127.0.0.1:7788`에만 게시하고 호스트 Nginx가 `trade.mihoservice.xyz`의 TLS를 종료한다. gateway는 Docker embedded DNS로 API·Frontend 서비스명을 주기적으로 다시 해석해 컨테이너 재생성 후 이전 IP를 유지하지 않는다. 모든 장기 실행 컨테이너는 Docker daemon 재시작 후 복구되는 `unless-stopped` 정책을 사용하고, 호스트의 `cresta-boot.service`가 부팅 때 Compose 전체 구성을 한 번 조정한 뒤 user-facing health를 기다린다. 이 oneshot은 상시 프로세스 관리자가 아니며 런타임 재시작은 Docker가 담당한다. Watch/Broker worker는 API 프로세스와 분리하고 외부 키움 장애가 Console health를 차단하지 않도록 자체 재연결한다. 메트릭은 시세 지연, 이벤트 큐 지연, 판단 시간, 주문 성공률, reconciliation 불일치, 활성 비상정지를 포함한다. 구조화 로그에는 비밀정보 없이 `correlation_id`, symbol, module, `event_type`을 담는다.
 
 초기 구현 저장소 구조는 다음으로 고정한다.

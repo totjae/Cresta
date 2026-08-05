@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     environment: str = "MOCK"
     live_trading_enabled: bool = False
     execution_stage: str = "SHADOW"
+    analysis_scheduler_poll_seconds: int = Field(default=5, ge=1, le=30)
+    analysis_scheduler_lease_seconds: int = Field(default=30, ge=15, le=120)
     database_url: str = "sqlite:///./cresta.db"
     database_password_file: str | None = None
     redis_url: str = "redis://localhost:6379/0"
@@ -80,6 +82,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Live trading must remain disabled in the first release")
         if self.execution_stage != "SHADOW":
             raise RuntimeError("Only the SHADOW decision execution stage is currently implemented")
+        if self.analysis_scheduler_poll_seconds * 2 >= self.analysis_scheduler_lease_seconds:
+            raise RuntimeError("Analysis scheduler poll must be less than half the lease duration")
         if self.kiwoom_rest_base_url.rstrip("/") != "https://mockapi.kiwoom.com":
             raise RuntimeError("Only the Kiwoom MOCK REST endpoint is allowed in the first release")
         if self.kiwoom_ws_base_url.rstrip("/") != "wss://mockapi.kiwoom.com:10000":

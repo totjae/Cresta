@@ -284,6 +284,20 @@ class SystemCountResponse(StrictModel):
     open_positions: int
 
 
+class AnalysisSchedulerStatusResponse(StrictModel):
+    state: str
+    lease_valid: bool
+    last_heartbeat_at: datetime | None
+    last_tick_at: datetime | None
+    last_completed_at: datetime | None
+    next_due_at: datetime | None
+    processed_count: int
+    decision_count: int
+    skipped_count: int
+    failed_count: int
+    last_error_code: str | None
+
+
 class SystemHealthResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str
@@ -293,6 +307,7 @@ class SystemHealthResponse(StrictModel):
     decision_execution_status: str
     buy_execution_ready: bool
     buy_execution_block_reason: str | None
+    analysis_scheduler: AnalysisSchedulerStatusResponse
     database_status: str
     paper_broker_status: str
     kiwoom_broker_status: str

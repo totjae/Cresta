@@ -412,6 +412,53 @@ class BrokerWorkerState(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class AnalysisSchedulerLease(Base):
+    __tablename__ = "analysis_scheduler_leases"
+    __table_args__ = (
+        CheckConstraint("fencing_token > 0", name="ck_analysis_scheduler_leases_fencing"),
+        CheckConstraint("version > 0", name="ck_analysis_scheduler_leases_version"),
+    )
+
+    scheduler_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AnalysisSchedulerState(Base):
+    __tablename__ = "analysis_scheduler_states"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('STARTING','RUNNING','IDLE','DEGRADED','STOPPED')",
+            name="ck_analysis_scheduler_states_state",
+        ),
+        CheckConstraint("fencing_token > 0", name="ck_analysis_scheduler_states_fencing"),
+        CheckConstraint(
+            "processed_count >= 0 AND decision_count >= 0 AND skipped_count >= 0 "
+            "AND failed_count >= 0",
+            name="ck_analysis_scheduler_states_counts",
+        ),
+    )
+
+    scheduler_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="STARTING")
+    fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_slot_key: Mapped[str | None] = mapped_column(String(64))
+    last_heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_tick_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    decision_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error_code: Mapped[str | None] = mapped_column(String(64))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ReconciliationRun(Base):
     __tablename__ = "reconciliation_runs"
     __table_args__ = (
