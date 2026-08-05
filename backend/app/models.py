@@ -219,6 +219,7 @@ class Decision(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False, default="DIAGNOSTIC")
     evaluation_request_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     input_snapshot_id: Mapped[str] = mapped_column(
         ForeignKey("market_snapshots.id"), nullable=False, index=True
@@ -243,6 +244,108 @@ class Decision(Base):
     validation_status: Mapped[str] = mapped_column(String(16), nullable=False)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DecisionExecution(Base):
+    __tablename__ = "decision_executions"
+    __table_args__ = (
+        UniqueConstraint("execution_key", name="uq_decision_executions_key"),
+        CheckConstraint(
+            "mode IN ('AUTOMATIC','MANUAL_APPROVAL','DISABLED')",
+            name="ck_decision_executions_mode",
+        ),
+        CheckConstraint(
+            "stage IN ('SHADOW','APPROVAL_ONLY','MOCK_AUTOMATIC')",
+            name="ck_decision_executions_stage",
+        ),
+        CheckConstraint(
+            "state IN ('ROUTING','NO_ACTION','DISABLED','GUARD_BLOCKED',"
+            "'SHADOW_RECORDED','APPROVAL_PENDING','EXPIRED','REJECTED',"
+            "'INVALIDATED','ORDER_CREATED','FAILED_SAFE')",
+            name="ck_decision_executions_state",
+        ),
+        Index("ix_decision_executions_decision", "decision_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    execution_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    decision_id: Mapped[str] = mapped_column(
+        ForeignKey("decisions.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    market: Mapped[str] = mapped_column(String(16), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    mode: Mapped[str] = mapped_column(String(24), nullable=False)
+    stage: Mapped[str] = mapped_column(String(24), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="ROUTING")
+    result_code: Mapped[str | None] = mapped_column(String(64))
+    execution_policy_version_id: Mapped[str | None] = mapped_column(String(36))
+    risk_policy_version_id: Mapped[str | None] = mapped_column(String(36))
+    strategy_config_version_id: Mapped[str | None] = mapped_column(String(36))
+    guard_evaluation_id: Mapped[str | None] = mapped_column(String(36))
+    approval_id: Mapped[str | None] = mapped_column(String(36))
+    order_intent_id: Mapped[str | None] = mapped_column(String(36))
+    correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class GuardEvaluation(Base):
+    __tablename__ = "guard_evaluations"
+    __table_args__ = (
+        CheckConstraint("result IN ('PASSED','BLOCKED')", name="ck_guard_evaluations_result"),
+        Index("ix_guard_evaluations_execution", "execution_id", "evaluated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    execution_id: Mapped[str] = mapped_column(
+        ForeignKey("decision_executions.id", ondelete="CASCADE"), nullable=False
+    )
+    phase: Mapped[str] = mapped_column(String(24), nullable=False)
+    subject_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    result: Mapped[str] = mapped_column(String(16), nullable=False)
+    rule_results_json: Mapped[str] = mapped_column(Text, nullable=False)
+    halt_scope: Mapped[str | None] = mapped_column(String(24))
+    snapshot_id: Mapped[str | None] = mapped_column(String(36))
+    position_version: Mapped[int | None] = mapped_column(Integer)
+    execution_policy_version_id: Mapped[str | None] = mapped_column(String(36))
+    risk_policy_version_id: Mapped[str | None] = mapped_column(String(36))
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Approval(Base):
+    __tablename__ = "approvals"
+    __table_args__ = (
+        UniqueConstraint("execution_id", name="uq_approvals_execution"),
+        CheckConstraint(
+            "state IN ('PENDING','APPROVED','REJECTED','EXPIRED','INVALIDATED')",
+            name="ck_approvals_state",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    execution_id: Mapped[str] = mapped_column(
+        ForeignKey("decision_executions.id", ondelete="CASCADE"), nullable=False
+    )
+    decision_id: Mapped[str] = mapped_column(ForeignKey("decisions.id"), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
+    scope_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    actor_id: Mapped[str | None] = mapped_column(String(36))
+    reauth_proof_id: Mapped[str | None] = mapped_column(String(36))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 class TradingGate(Base):

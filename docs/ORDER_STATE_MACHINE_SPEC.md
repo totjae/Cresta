@@ -40,6 +40,10 @@ REJECTED | UNKNOWN | RECONCILING
 | STM-003 | 키움 REST 성공 응답은 체결 완료가 아니라 주문 접수 확인으로 처리한다. |
 | STM-004 | 키움 신규주문 성공 응답의 숫자 7자리 `ord_no`를 확인한 경우에만 `SUBMITTING → ACKNOWLEDGED`로 전이한다. |
 | STM-005 | `SUBMITTING`은 HTTP 호출 전에 영속화하며 해당 상태가 이미 존재하면 자동 재송신하지 않는다. |
+| STM-006 | 판단 실행과 승인은 주문 상태와 별도 상태 머신으로 관리하며 `ORDER_CREATED`·`APPROVED`를 Broker 접수나 체결로 표시하지 않는다. |
+| STM-007 | 승인 transaction은 `PENDING → APPROVED`와 주문 `CREATED` 생성을 함께 commit하고 주문 생성 없이 `APPROVED`만 남기지 않는다. |
+| STM-008 | 승인 만료·거절·무효화는 terminal이며 새 판단 또는 새 실행 없이는 `PENDING`으로 되돌리지 않는다. |
+| STM-009 | 동일 decision execution에는 승인 최대 1개, 주문 의도 최대 1개를 허용하고 조건부 version 갱신과 unique 제약을 함께 사용한다. |
 
 ### 3.2 정상 상태 전이
 

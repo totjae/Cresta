@@ -8,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.execution_policy import active_policy, policy_payload
 from app.models import Decision, MarketSnapshot, MarketStreamState, User
 
 MODEL_ID = "deterministic-mock-v1"
@@ -111,19 +110,9 @@ def evaluate_mock_decision(
         raise MockDecisionError("DECISION_SNAPSHOT_NOT_FOUND", 404)
     current = now or datetime.now(UTC)
     scout, core = _outputs(snapshot, state, settings, current)
-    config = active_policy(db, user.id)
-    policy = policy_payload(config)
     action = str(core["action"])
-    mode: str | None = policy.buy if action == "BUY" else None
-    if action != "BUY":
-        outcome = "NO_ACTION"
-    elif mode == "DISABLED":
-        outcome = "DISABLED"
-    elif mode == "MANUAL_APPROVAL":
-        outcome = "APPROVAL_REQUIRED"
-    else:
-        outcome = "GUARD_BLOCKED"
     decision = Decision(
+        purpose="DIAGNOSTIC",
         evaluation_request_id=evaluation_request_id,
         input_snapshot_id=snapshot.id,
         symbol=symbol,
@@ -140,9 +129,9 @@ def evaluate_mock_decision(
         risk_level=str(core["risk_level"]),
         reason_codes_json=json.dumps(core["reason_codes"], separators=(",", ":")),
         valid_until=current + timedelta(seconds=60),
-        configuration_version_id=config.id if config else None,
-        execution_mode=mode,
-        execution_outcome=outcome,
+        configuration_version_id=None,
+        execution_mode=None,
+        execution_outcome="NO_ACTION",
         validation_status="VALID",
         latency_ms=0,
     )

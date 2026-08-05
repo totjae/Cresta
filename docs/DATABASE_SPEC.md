@@ -39,9 +39,11 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | `market_snapshots` | id, symbol, market, observed_at, quality, payload_hash, payload | 판단 참조 불변 |
 | `minute_bars` | id, market, symbol, bucket_start, OHLCV, turnover, snapshot 범위, version | market+symbol+bucket unique |
 | `indicator_snapshots` | id, market_snapshot_id, calculator_version, VWAP, SMA5, session_high, drawdown, spread | input snapshot 1:1 |
-| `decisions` | id, kind, symbol, input_snapshot_id, output, action, valid_until | 구조화 스키마 검증 결과 포함 |
-| `approvals` | id, decision_id, status, expires_at, actor_id, reauth_id | 상태 전이 제약 |
-| `order_intents` | id, order_group_id, symbol, side, requested_quantity, action, config_version | 의도 단위 |
+| `decisions` | id, purpose, kind, symbol, input_snapshot_id, output, action, valid_until | 구조화 스키마 검증 결과 포함·불변 |
+| `decision_executions` | id, decision/rule source, action, mode, policy versions, state, version | source+action+policy unique |
+| `guard_evaluations` | id, phase, subject, result, rule_results, input versions, valid_until | 불변 평가 |
+| `approvals` | id, execution_id, decision_id, status, scope_snapshot, expires_at, actor_id, reauth_id, version | execution당 최대 1개 |
+| `order_intents` | id, execution_id, guard_evaluation_id, order_group_id, symbol, side, requested_quantity, action, config_version | execution당 최대 1개 |
 | `orders` | id, intent_id, parent_order_id, client_order_id, idempotency_key, broker_order_id, status, quantities | client/idempotency unique |
 | `order_events` | id, order_id, event_type, source, source_key, payload_hash, occurred_at | source 중복 방지 |
 | `fills` | id, order_id, broker_fill_key, quantity, price, fee, tax, filled_at | broker fill 중복 방지 |
@@ -115,6 +117,10 @@ orders(order_group_id, created_at)
 fills(order_id, filled_at)
 positions(account_alias, symbol)
 decisions(symbol, created_at desc)
+decision_executions(decision_id, state)
+decision_executions(user_id, state, created_at)
+guard_evaluations(subject_type, subject_id, evaluated_at desc)
+approvals(user_id, status, expires_at)
 audit_logs(created_at, action)
 market_snapshots(symbol, market, observed_at desc)
 ```
@@ -186,22 +192,35 @@ market_snapshots(symbol, market, observed_at desc)
 
 | ID | 요구사항 |
 | --- | --- |
-| DB-026 | `configuration_versions`는 scope, target, category, sequence, state, payload hash와 생성·검증·활성화 시각을 저장하고 동일 대상·범주의 `ACTIVE` 행을 하나로 제한한다. |
-| DB-027 | 실행 권한 payload는 정규화된 JSON과 SHA-256 해시로 저장하고 `ACTIVE` 또는 `SUPERSEDED` 행을 API로 수정하지 않는다. |
+| DB-090 | `configuration_versions`는 scope, target, category, sequence, state, payload hash와 생성·검증·활성화 시각을 저장하고 동일 대상·범주의 `ACTIVE` 행을 하나로 제한한다. |
+| DB-091 | 실행 권한 payload는 정규화된 JSON과 SHA-256 해시로 저장하고 `ACTIVE` 또는 `SUPERSEDED` 행을 API로 수정하지 않는다. |
 
 ### 6.2 AI 판단 저장 계약
 
 | ID | 요구사항 |
 | --- | --- |
-| DB-028 | `decisions`는 고유 evaluation request, 입력 snapshot, 모델·프롬프트·스키마 버전, Scout/Core 출력, 실행 권한 버전·모드와 실행 결과를 저장한다. |
-| DB-029 | 판단 유효시간·confidence·reason code와 JSON 출력은 검증된 값만 저장하며 API에서 기존 판단을 수정·삭제하지 않는다. |
+| DB-092 | `decisions`는 고유 evaluation request, `DIAGNOSTIC | TRADING` purpose, 입력 snapshot, 모델·프롬프트·스키마 버전과 Scout/Core 출력을 저장한다. 실행의 가변 상태를 판단 행에 덮어쓰지 않는다. |
+| DB-093 | 판단 유효시간·confidence·reason code와 JSON 출력은 검증된 값만 저장하며 API에서 기존 판단을 수정·삭제하지 않는다. |
 
 ### 6.3 감시 종목 저장 계약
 
 | ID | 요구사항 |
 | --- | --- |
-| DB-030 | `watchlist_items`는 사용자, 숫자 6자리 종목, 시장과 생성·수정시각을 저장하고 `user_id + market + symbol`을 unique로 제한한다. |
-| DB-031 | 사용자별 최대 3개 검사는 등록 transaction의 사용자 행 잠금과 count로 직렬화한다. 삭제는 시세 snapshot을 삭제하지 않는다. |
-| DB-032 | worker는 전체 사용자의 활성 KRX 종목 합집합만 읽으며 사용자·인증 정보를 WebSocket payload에 포함하지 않는다. |
-| DB-033 | `minute_bars`는 market·symbol·KST 1분 bucket을 unique로 하고 OHLC, 거래량, turnover, 입력 snapshot 범위와 version을 저장한다. |
-| DB-034 | `indicator_snapshots`는 입력 market snapshot과 1:1로 연결하며 calculator version, VWAP, SMA5, session high, drawdown, spread와 분봉 수를 저장한다. |
+| DB-094 | `watchlist_items`는 사용자, 숫자 6자리 종목, 시장과 생성·수정시각을 저장하고 `user_id + market + symbol`을 unique로 제한한다. |
+| DB-095 | 사용자별 최대 3개 검사는 등록 transaction의 사용자 행 잠금과 count로 직렬화한다. 삭제는 시세 snapshot을 삭제하지 않는다. |
+| DB-096 | worker는 전체 사용자의 활성 KRX 종목 합집합만 읽으며 사용자·인증 정보를 WebSocket payload에 포함하지 않는다. |
+| DB-097 | `minute_bars`는 market·symbol·KST 1분 bucket을 unique로 하고 OHLC, 거래량, turnover, 입력 snapshot 범위와 version을 저장한다. |
+| DB-098 | `indicator_snapshots`는 입력 market snapshot과 1:1로 연결하며 calculator version, VWAP, SMA5, session high, drawdown, spread와 분봉 수를 저장한다. |
+
+### 6.4 판단 실행·Guard·승인 저장 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-100 | `decision_executions`는 decision 또는 rule trigger source, 사용자·계좌·종목, 정규 행동, 실행 mode·단계, 실행권한·위험·전략 설정 version, state, correlation ID와 낙관적 version을 저장한다. |
+| DB-101 | `decision_id + execution_action + execution_policy_version_id`의 null-safe unique execution key로 같은 판단의 중복 실행을 차단한다. rule trigger는 동등한 안정 source key를 사용한다. |
+| DB-102 | `guard_evaluations`는 execution/order subject, phase, 결과·rule results·halt scope, snapshot·position·설정 version과 평가·만료시각을 불변 저장한다. |
+| DB-103 | `approvals.execution_id`와 `order_intents.execution_id`는 각각 unique이며 한 execution에 승인과 주문 의도를 하나씩만 허용한다. |
+| DB-104 | 승인 생성 transaction은 execution 전이, Guard 평가, approval, risk/audit event를 함께 저장한다. 자동 주문 transaction은 execution 전이, Guard 평가, order intent, `CREATED` order, risk/audit event를 함께 저장한다. |
+| DB-105 | 승인 처리 transaction은 reauth proof 1회 소비, expected approval version 조건부 갱신, 새 Guard 평가, order intent·order와 감사를 함께 commit하거나 모두 rollback한다. |
+| DB-106 | 승인 scope snapshot은 수량·기준가격/범위·snapshot·position·설정 version과 만료시각을 저장하고 승인 후 수정하지 않는다. |
+| DB-107 | execution·approval·order 생성 transaction의 commit 결과가 불명확하면 execution key와 idempotency key를 조회한 뒤에만 재처리한다. |

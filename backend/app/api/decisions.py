@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import AuthContext, get_auth_context, require_csrf
@@ -10,9 +11,10 @@ from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import ResourceNotFoundError
 from app.mock_ai import evaluate_mock_decision, list_decisions
-from app.models import Decision
+from app.models import Decision, DecisionExecution
 from app.schemas import (
     CoreOutputResponse,
+    DecisionExecutionResponse,
     DecisionListResponse,
     DecisionResponse,
     MockDecisionRequest,
@@ -22,10 +24,32 @@ from app.schemas import (
 router = APIRouter(prefix="/decisions", tags=["decisions"])
 
 
-def _response(request_id: str, decision: Decision) -> DecisionResponse:
+def _response(request_id: str, decision: Decision, db: Session) -> DecisionResponse:
+    execution = db.scalar(
+        select(DecisionExecution)
+        .where(DecisionExecution.decision_id == decision.id)
+        .order_by(DecisionExecution.created_at.desc())
+        .limit(1)
+    )
+    execution_response = None
+    if execution is not None:
+        execution_response = DecisionExecutionResponse(
+            execution_id=execution.id,
+            action=execution.action,
+            mode=execution.mode,
+            stage=execution.stage,
+            state=execution.state,
+            result_code=execution.result_code,
+            guard_evaluation_id=execution.guard_evaluation_id,
+            approval_id=execution.approval_id,
+            order_intent_id=execution.order_intent_id,
+            created_at=execution.created_at,
+            updated_at=execution.updated_at,
+        )
     return DecisionResponse(
         request_id=request_id,
         decision_id=decision.id,
+        purpose=decision.purpose,
         evaluation_request_id=decision.evaluation_request_id,
         symbol=decision.symbol,
         market=decision.market,
@@ -37,6 +61,7 @@ def _response(request_id: str, decision: Decision) -> DecisionResponse:
         configuration_version_id=decision.configuration_version_id,
         execution_mode=decision.execution_mode,
         execution_outcome=decision.execution_outcome,
+        execution=execution_response,
         valid_until=decision.valid_until,
         created_at=decision.created_at,
     )
@@ -51,7 +76,7 @@ def get_decisions(
 ) -> DecisionListResponse:
     return DecisionListResponse(
         request_id=request.state.request_id,
-        items=[_response(request.state.request_id, item) for item in list_decisions(db, limit)],
+        items=[_response(request.state.request_id, item, db) for item in list_decisions(db, limit)],
     )
 
 
@@ -65,7 +90,7 @@ def get_decision(
     decision = db.get(Decision, decision_id)
     if decision is None:
         raise ResourceNotFoundError("DECISION_NOT_FOUND", "AI 판단을 찾을 수 없습니다.")
-    return _response(request.state.request_id, decision)
+    return _response(request.state.request_id, decision, db)
 
 
 @router.post("/mock-evaluate", response_model=DecisionResponse)
@@ -84,4 +109,4 @@ def post_mock_decision(
         market=payload.market,
         settings=settings,
     )
-    return _response(request.state.request_id, decision)
+    return _response(request.state.request_id, decision, db)

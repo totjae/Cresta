@@ -2,7 +2,7 @@
 
 기본 경로는 `/api/v1`이며 로그인 시작·완료 API를 제외한 변경 요청은 항상 인증 세션을 요구하고 필요한 경우 `Idempotency-Key`도 요구한다. 시간은 UTC ISO 8601, 비율은 퍼센트 단위로 명시한다. 인증 정책은 [인증 및 보안 명세](SECURITY_SPEC.md)를 따른다.
 
-제품 동작은 [제품 요구사항](PRODUCT_REQUIREMENTS.md), [거래 세션 명세](TRADING_SESSION_SPEC.md), [주문 실행 명세](ORDER_EXECUTION_SPEC.md), [주문 상태 머신 명세](ORDER_STATE_MACHINE_SPEC.md), [재동기화 명세](RECONCILIATION_SPEC.md), [키움 Broker Adapter 명세](KIWOOM_BROKER_SPEC.md), [인증 및 보안 명세](SECURITY_SPEC.md)를 따른다.
+제품 동작은 [제품 요구사항](PRODUCT_REQUIREMENTS.md), [거래 세션 명세](TRADING_SESSION_SPEC.md), [주문 실행 명세](ORDER_EXECUTION_SPEC.md), [주문 상태 머신 명세](ORDER_STATE_MACHINE_SPEC.md), [판단 실행 및 승인 명세](DECISION_EXECUTION_SPEC.md), [Guard 명세](GUARD_RISK_SPEC.md), [재동기화 명세](RECONCILIATION_SPEC.md), [키움 Broker Adapter 명세](KIWOOM_BROKER_SPEC.md), [인증 및 보안 명세](SECURITY_SPEC.md)를 따른다.
 
 ## 1. 공통 계약
 
@@ -39,6 +39,7 @@
 | GET/POST | `/watchlist` | 감시 종목 조회/등록 |
 | DELETE | `/watchlist/{id}` | 감시 해제 |
 | GET/PATCH | `/settings/execution-policy` | 행동별 자동·승인·비활성 정책 조회/수정 |
+| GET/PATCH | `/settings/execution-stage` | SHADOW·승인형·MOCK 자동 실행 단계 조회/변경 |
 | GET/PATCH | `/settings/trading-session` | 감시·분석·신규매수·장 마감 시간 조회/수정 |
 | GET/PATCH | `/settings/overnight-policy` | 익일 보유 정책 조회/수정 |
 | GET/PATCH | `/settings/order-policy` | 가격, 승인 범위, 미체결·재호가 정책 조회/수정 |
@@ -55,6 +56,8 @@
 | GET | `/decisions` | 필터 가능한 AI 판단 기록 |
 | GET | `/decisions/{id}` | 입력 snapshot·모델·검증·실행 결과 조회 |
 | GET | `/approvals` | 대기·완료·만료 승인 조회 |
+| GET | `/approvals/{id}` | 승인 scope, Guard 결과, 상태·version 조회 |
+| GET | `/guard/evaluations/{id}` | 비밀 없는 Guard rule 결과 조회 |
 | GET | `/orders` | 주문 및 체결 기록 |
 | GET | `/orders/{id}` | 주문 상태, 수량, 원주문·정정 관계와 이벤트 조회 |
 | GET | `/reconciliation/status` | 현재 거래 게이트, 최근 대조 실행과 미해결 불일치 조회 |
@@ -167,7 +170,7 @@ PATCH는 활성 설정을 직접 수정하지 않고 초안 version을 생성한
 | API-091 | 응답은 `quality`, `age_seconds`, `is_fresh`를 분리해 제공하며 `is_fresh`만으로 주문 가능 여부를 표현하지 않는다. |
 | API-092 | KRX와 NXT 조회는 명시적인 `market`으로 분리하고 지원하지 않는 시장은 검증 오류로 거부한다. |
 | API-093 | 시스템 상태의 시장데이터 값은 stream이 없으면 `NOT_STARTED`, 갭이 있으면 `DEGRADED`, 정상 stream이 모두 오래됐으면 `STALE`, 최신 정상 stream이 있으면 `AVAILABLE`로 표시한다. |
-| API-094 | 공개 또는 인증된 HTTP mutation으로 fixture·quote·stream 상태를 주입하지 않는다. |
+| API-106 | 공개 또는 인증된 HTTP mutation으로 fixture·quote·stream 상태를 주입하지 않는다. |
 
 ## 4. 공통 오류
 
@@ -204,7 +207,7 @@ PATCH는 활성 설정을 직접 수정하지 않고 초안 version을 생성한
 
 ## 5. 실시간 이벤트
 
-WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `approval.requested`, `order.updated`, `order.reconciliation_required`, `position.updated`, `risk.triggered`, `system.health_changed` 이벤트를 제공한다. 이벤트에는 증가하는 sequence와 발생 시각을 포함하며, 누락 감지 시 REST snapshot을 다시 조회한다.
+WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.execution_updated`, `approval.requested`, `approval.updated`, `risk.evaluated`, `risk.triggered`, `order.updated`, `order.reconciliation_required`, `position.updated`, `system.health_changed` 이벤트를 제공한다. 이벤트에는 증가하는 sequence와 발생 시각을 포함하며, 누락 감지 시 REST snapshot을 다시 조회한다.
 
 재동기화 관련 이벤트는 `reconciliation.started`, `reconciliation.mismatch_detected`, `reconciliation.completed`, `reconciliation.failed`를 추가로 제공한다. 외부 주문 취소나 포지션 청산은 위 재동기화 API에서 직접 실행하지 않고 별도 승인·주문 API를 사용한다.
 
@@ -261,3 +264,43 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `approval.req
 | API-103 | `POST /watchlist`는 CSRF, `schema_version=1.0`, 숫자 6자리 종목코드와 `market=KRX`를 요구한다. 중복은 `409`, 활성 3개 초과와 MOCK 미지원 시장은 `422`로 거부한다. |
 | API-104 | `DELETE /watchlist/{id}`는 CSRF와 소유권을 검사하고 DB에서 삭제한다. WebSocket worker는 늦어도 설정된 동기화 주기 안에 구독을 해제한다. |
 | API-105 | 감시 종목 항목은 최신 snapshot과 같은 입력에 결합된 `watch-indicators-v1` 요약을 선택적으로 포함한다. 지표가 아직 없으면 null이며 시세 대기와 구분한다. |
+
+### 8.4 판단 실행·Guard·승인 API 계약
+
+판단 상세의 실행 요약은 다음 필드를 제공한다.
+
+`SHADOW`에서 Guard를 통과한 경우 상태는 `SHADOW_RECORDED`, 차단된 경우 `GUARD_BLOCKED`다. 공개 Mock 진단의 `execution`은 항상 `null`이다.
+
+```json
+{
+  "purpose": "TRADING",
+  "execution": {
+    "execution_id": "01J...",
+    "action": "BUY",
+    "mode": "MANUAL_APPROVAL",
+    "stage": "APPROVAL_ONLY",
+    "state": "APPROVAL_PENDING",
+    "guard_evaluation_id": "01J...",
+    "approval_id": "01J...",
+    "order_intent_id": null
+  }
+}
+```
+
+| ID | 요구사항 |
+| --- | --- |
+| API-110 | 판단 목록·상세는 `purpose`, execution action·mode·stage·state와 연결된 Guard·승인·주문 ID를 반환하되 진단 판단에는 execution이 null이어야 한다. |
+| API-111 | 운영 HTTP API는 기존 판단을 임의로 `TRADING`으로 승격하거나 라우팅하는 endpoint를 제공하지 않는다. 거래 판단 생성·인계는 내부 scheduler와 영속 작업만 수행한다. |
+| API-112 | `GET /approvals`는 기본적으로 현재 사용자의 `PENDING`을 만료시각 오름차순으로 반환하고 상태·종목·행동 필터와 안정 cursor를 지원한다. |
+| API-113 | 승인 상세는 수량, 판단 기준가격·현재가격, 허용 가격범위, snapshot·position·설정 version, 만료시각, Core reason과 Guard rule 결과를 제공한다. |
+| API-114 | `POST /approvals/{id}/approve`는 `Idempotency-Key`, CSRF, expected approval version과 승인 ID·version에 결합된 `APPROVE_ORDER` TOTP proof를 요구한다. |
+| API-115 | 승인 요청은 최신 상태 Guard 재검사와 주문 생성까지 성공했을 때 `APPROVED`와 `order_intent_id`, `order_id`, `order_status=CREATED`를 반환한다. Broker 접수·체결 성공 문구를 반환하지 않는다. |
+| API-116 | `POST /approvals/{id}/reject`는 `Idempotency-Key`, CSRF와 expected version을 요구하지만 TOTP proof는 요구하지 않는다. 성공 시 `REJECTED`만 반환한다. |
+| API-117 | 만료 승인은 `410 APPROVAL_EXPIRED`, 이미 처리되거나 version이 바뀐 승인은 `409 APPROVAL_STATE_CONFLICT`를 반환하고 새 주문을 만들지 않는다. |
+| API-118 | 가격범위·snapshot·position·설정·세션 변경 또는 Guard 차단은 승인을 원자적으로 `INVALIDATED`로 만들고 안정된 reason code를 반환한다. |
+| API-119 | Guard 차단 응답은 evaluation ID, `BLOCKED`, rule code·severity·scope와 재시도 가능 여부를 제공하되 내부 계산 원문·전체 계좌·비밀을 포함하지 않는다. |
+| API-120 | `GET /guard/evaluations/{id}`는 해당 판단·승인·주문을 볼 수 있는 사용자에게만 평가 요약을 제공한다. |
+| API-121 | 상태 변경 API가 timeout되면 UI는 같은 Idempotency-Key로 재조회하며 새 승인·주문 요청을 만들지 않는다. |
+| API-122 | 실행 단계 `SHADOW | APPROVAL_ONLY | MOCK_AUTOMATIC` 조회와 변경은 설정 API에서 제공하고 단계 확대는 TOTP proof·변경 사유·서버 시험 gate를 요구한다. |
+| API-123 | `/system/health`는 현재 실행 단계와 `BUY` 기능 gate의 준비·차단 reason을 반환한다. |
+| API-124 | `approval.requested`, `approval.updated`, `decision.execution_updated`, `risk.evaluated` 이벤트는 REST resource ID·version을 포함하고 주문 이벤트와 구분한다. |

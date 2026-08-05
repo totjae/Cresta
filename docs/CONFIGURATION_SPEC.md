@@ -177,3 +177,13 @@ configuration_change:
 | CFG-072 | 변경은 `DRAFT → VALIDATED → ACTIVE` 순서로만 진행하고 활성화 시 기존 활성 버전은 `SUPERSEDED`가 된다. |
 | CFG-073 | 실행 권한 활성화는 변경 사유와 대상 버전에 결합된 `EXECUTION_POLICY_ACTIVATE` TOTP 재인증 증명을 요구한다. |
 | CFG-074 | AI·Guard·주문 생성기는 활성 실행 권한 버전 ID와 최종 행동 모드를 함께 기록할 수 있어야 하며 초안이나 검증 버전을 사용하지 않는다. |
+
+### 6.2 Guard 1차 위험 설정 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| CFG-080 | 첫 Guard 구현은 `USER_DEFAULT / RISK_POLICY`에 `entry_order_amount`, 1회·종목·전체 한도, 최대 보유종목·일일진입, 고정손절률, 시세 지연, 최대 spread와 가격편차를 저장한다. |
+| CFG-081 | `entry_order_amount`는 최소 10,000원이며 `entry_order_amount ≤ max_single_order_amount ≤ max_position_amount_per_symbol ≤ max_total_position_amount`를 위반하면 활성화를 거부한다. |
+| CFG-082 | 위험 설정이 활성화되지 않은 상태에서 조회용 시스템 안전 기본값은 제공할 수 있지만 `entry_order_amount` 기본값은 제공하지 않는다. 사용자가 값을 포함한 위험 설정을 활성화하기 전에는 신규매수를 차단한다. |
+| CFG-083 | 판단 실행과 Guard 평가는 사용한 risk policy version ID와 각 최종값의 출처를 저장한다. |
+| CFG-084 | 실행 단계 `SHADOW | APPROVAL_ONLY | MOCK_AUTOMATIC`은 별도 시스템 gate이며 일반 실행 권한보다 우선한다. 단계 확대는 TOTP 재인증, 변경 사유와 요구 시험 근거를 요구한다. |

@@ -200,6 +200,11 @@ AI 판단
 | UI-052 | 승인 후 주문 상태를 `SUBMITTING`부터 체결·취소까지 실시간 표시한다. |
 | UI-053 | 주문 결과가 `UNKNOWN`이면 실패나 재시도 버튼 대신 재동기화 상태를 표시한다. |
 | UI-054 | 취소·정정·재주문 관계와 주문 그룹 전체 체결수량을 조회할 수 있어야 한다. |
+| UI-055 | 승인 목록은 `PENDING`을 만료 임박 순으로 표시하고 진단 판단·만료·거절·무효화 승인과 구분한다. |
+| UI-056 | 승인 카드는 execution mode·단계, 정확한 수량, 기준/현재가격과 허용범위, snapshot·position·설정 version, Core reason과 Guard rule 결과를 표시한다. |
+| UI-057 | 승인 버튼은 별도 TOTP 재인증 후 활성화하며 재인증 proof를 승인 ID·version에 결합한다. 거절은 TOTP 없이 가능하되 확인과 중복 제출 방지를 적용한다. |
+| UI-058 | 승인 직전 서버가 `INVALIDATED`를 반환하면 이전 수치로 주문 성공을 표시하지 않고 변경된 가격·position·설정 또는 Guard reason을 표시한다. |
+| UI-059 | `APPROVED` 응답은 `주문 생성됨(CREATED)`으로 표시하고 접수·체결로 표현하지 않는다. timeout 시 같은 요청 결과를 조회하며 새 주문 버튼을 만들지 않는다. |
 
 #### 3.6.1 첫 Paper Broker Console 연동
 
@@ -267,6 +272,8 @@ EMERGENCY_LIQUIDATE
 | UI-072 | 실행 후 모든 화면에 활성 비상정지 수준과 원인·시각을 고정 표시한다. |
 | UI-073 | 비상정지 해제는 별도 재인증·재동기화 흐름을 사용한다. |
 | UI-074 | 비상정지 정책 편집과 실제 비상정지 실행을 같은 토글로 합치지 않는다. |
+| UI-075 | 위험 설정 화면은 `entry_order_amount`와 1회·종목·전체 한도의 관계를 함께 표시하며 진입금액 미설정 시 신규매수 차단 영향을 미리보기로 보여준다. |
+| UI-076 | Guard 결과는 `PASSED/BLOCKED`, 평가 단계·시각, rule code의 한국어 설명, severity와 중지 범위를 표시하고 사용자가 결과를 직접 수정하지 못하게 한다. |
 
 ### 3.9 시스템 상태와 재동기화
 
@@ -290,6 +297,8 @@ EMERGENCY_LIQUIDATE
 | UI-085 | 시스템 상태 화면은 키움 MOCK Broker의 worker·gate·lease·WebSocket·구독 상태와 1주 연결 시험 폼을 제공한다. |
 | UI-086 | 연결 시험은 종목코드와 시장가·지정가를 선택하고 MOCK·KRX·BUY·1주 영향을 미리 표시한 뒤 별도 TOTP 재인증 모달을 거친다. |
 | UI-087 | API가 `ORDER_QUEUED/CREATED`를 반환하면 체결 성공으로 표시하지 않고 주문 ID와 Worker 처리 대기 상태를 안내한다. |
+| UI-088 | 시스템 상태는 실행 단계 `SHADOW | APPROVAL_ONLY | MOCK_AUTOMATIC`과 단계별 가능한 행동, `BUY` 기능 gate 차단 reason을 고정 표시한다. |
+| UI-089 | 실행 단계 확대는 변경 영향·필수 시험 통과 여부·변경 사유를 표시한 뒤 TOTP 재인증을 요구하며 일반 자동/승인 mode 선택과 구분한다. |
 
 ### 3.10 공통 화면 상태
 

@@ -29,6 +29,7 @@ Scout와 Core가 사용할 입력 snapshot, 제한된 출력 스키마, 호출 �
 ```yaml
 decision_input:
   schema_version:
+  purpose: DIAGNOSTIC | TRADING
   snapshot_id:
   symbol:
   market:
@@ -185,3 +186,13 @@ core_output:
 | AI-072 | 진단 판단은 최신 활성 실행 권한 버전을 읽어 `DISABLED`, `APPROVAL_REQUIRED`, `GUARD_BLOCKED`, `NO_ACTION` 중 하나의 실행 결과만 기록한다. |
 | AI-073 | Guard와 승인 서비스가 구현되기 전에는 `AUTOMATIC`과 `MANUAL_APPROVAL` 모두 주문·승인 리소스를 생성하지 않으며 실행 결과로 미구현 안전 차단을 명시한다. |
 | AI-074 | 같은 `evaluation_request_id`는 하나의 판단만 생성하며 모델·snapshot·설정 버전·구조화 출력·유효시간을 저장한다. |
+
+### 6.2 거래 목적 판단의 실행 인계 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| AI-075 | 내부 scheduler가 만든 `purpose=TRADING` 판단만 [판단 실행 및 승인 오케스트레이션 명세](DECISION_EXECUTION_SPEC.md)에 인계할 수 있다. |
+| AI-076 | `/decisions/mock-evaluate` 결과는 항상 `purpose=DIAGNOSTIC`이며 향후 Guard가 구현돼도 승인·주문 생성 경로에 인계하지 않는다. |
+| AI-077 | 판단 저장과 실행 인계 작업 enqueue는 같은 transaction 또는 transactional outbox로 연결해 판단 유실과 중복 실행을 방지한다. |
+| AI-078 | 실행 결과는 불변 판단을 수정하지 않고 별도 execution record로 연결한다. |
+| AI-079 | 결정론적 Mock 모델은 내부 `TRADING` 판단에도 사용할 수 있지만 모델 식별자가 같다는 이유만으로 진단 판단을 거래 판단으로 승격하지 않는다. |

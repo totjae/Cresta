@@ -147,6 +147,14 @@ order_guard:
 
 주문시장과 참조 호가시장은 일치해야 한다. SOR 사용 시 실제 주문시장과 체결시장을 함께 저장한다.
 
+| ID | 요구사항 |
+| --- | --- |
+| ORD-039 | 주문 전 안전검사는 [판단 실행 및 승인 오케스트레이션 명세](DECISION_EXECUTION_SPEC.md)의 불변 Guard evaluation을 생성하고 주문이 해당 evaluation ID를 참조하게 한다. |
+| ORD-040 | 자동 실행은 `PRE_ORDER`, 승인 실행은 `APPROVAL_CREATION`과 승인 시 새 `PRE_ORDER` 평가를 통과해야 한다. 이전 평가를 최신 검사로 재사용하지 않는다. |
+| ORD-041 | Guard 통과, 주문 의도, 첫 `CREATED` 주문과 감사 로그는 하나의 transaction에서 생성하며 중간 상태를 Broker polling에 노출하지 않는다. |
+| ORD-042 | `BUY` 수량은 활성 `entry_order_amount`를 기준가격으로 나눈 정수 주식 수이며 AI confidence·한도 최대값·브라우저 입력으로 확대하지 않는다. |
+| ORD-043 | 매도 수량은 실제 포지션에서 활성 매도 주문 예약수량을 뺀 값을 넘을 수 없고 position version 변경 시 기존 승인을 무효화한다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 시장가와 시장성 지정가는 목표 손실률 또는 표시가격 체결을 보장하지 않는다.

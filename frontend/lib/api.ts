@@ -33,6 +33,7 @@ export type ExecutionPolicyVersion = {
 };
 export type DecisionData = {
   decision_id: string;
+  purpose: "DIAGNOSTIC" | "TRADING";
   evaluation_request_id: string;
   symbol: string;
   market: string;
@@ -44,6 +45,19 @@ export type DecisionData = {
   configuration_version_id: string | null;
   execution_mode: string | null;
   execution_outcome: string;
+  execution: null | {
+    execution_id: string;
+    action: string;
+    mode: string;
+    stage: string;
+    state: string;
+    result_code: string | null;
+    guard_evaluation_id: string | null;
+    approval_id: string | null;
+    order_intent_id: string | null;
+    created_at: string;
+    updated_at: string;
+  };
   valid_until: string;
   created_at: string;
 };
@@ -87,6 +101,10 @@ export type SystemHealth = {
   request_id: string;
   environment: string;
   live_trading_enabled: boolean;
+  execution_stage: string;
+  decision_execution_status: string;
+  buy_execution_ready: boolean;
+  buy_execution_block_reason: string | null;
   database_status: string;
   paper_broker_status: string;
   kiwoom_broker_status: string;

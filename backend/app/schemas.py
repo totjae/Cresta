@@ -133,10 +133,25 @@ class CoreOutputResponse(StrictModel):
     reason_codes: list[str]
 
 
+class DecisionExecutionResponse(StrictModel):
+    execution_id: str
+    action: str
+    mode: str
+    stage: str
+    state: str
+    result_code: str | None
+    guard_evaluation_id: str | None
+    approval_id: str | None
+    order_intent_id: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class DecisionResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str
     decision_id: str
+    purpose: Literal["DIAGNOSTIC", "TRADING"]
     evaluation_request_id: str
     symbol: str
     market: str
@@ -148,6 +163,7 @@ class DecisionResponse(StrictModel):
     configuration_version_id: str | None
     execution_mode: str | None
     execution_outcome: str
+    execution: DecisionExecutionResponse | None
     valid_until: datetime
     created_at: datetime
 
@@ -273,6 +289,10 @@ class SystemHealthResponse(StrictModel):
     request_id: str
     environment: str
     live_trading_enabled: bool
+    execution_stage: str
+    decision_execution_status: str
+    buy_execution_ready: bool
+    buy_execution_block_reason: str | None
     database_status: str
     paper_broker_status: str
     kiwoom_broker_status: str

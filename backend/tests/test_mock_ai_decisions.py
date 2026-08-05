@@ -4,15 +4,15 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pyotp
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.execution_policy import SAFE_DEFAULT_POLICY
 from app.models import (
-    ConfigurationVersion,
+    Approval,
     Decision,
+    DecisionExecution,
+    GuardEvaluation,
     MarketSnapshot,
     MarketStreamState,
     TradingOrder,
@@ -61,30 +61,13 @@ def _snapshot(db: Session, *, stale: bool = False) -> MarketSnapshot:
     return snapshot
 
 
-def _active_policy(db: Session, user: User, mode: str) -> ConfigurationVersion:
-    payload = SAFE_DEFAULT_POLICY.model_copy(update={"buy": mode})
-    version = ConfigurationVersion(
-        scope="USER_DEFAULT", target_id=user.id, category="EXECUTION_POLICY",
-        sequence=1, state="ACTIVE", payload_json=payload.model_dump_json(),
-        payload_hash="b" * 64, reason="AI 분기 시험", created_by=user.id,
-        validated_at=datetime.now(UTC), activated_at=datetime.now(UTC),
-    )
-    db.add(version); db.commit(); db.refresh(version)
-    return version
-
-
-@pytest.mark.parametrize(
-    ("mode", "outcome"),
-    [("MANUAL_APPROVAL", "APPROVAL_REQUIRED"), ("AUTOMATIC", "GUARD_BLOCKED"), ("DISABLED", "DISABLED")],
-)
-def test_mock_ai_buy_uses_active_policy_without_creating_orders(
-    client: TestClient, db: Session, admin: User, mode: str, outcome: str
+def test_public_mock_ai_is_diagnostic_without_creating_execution_or_orders(
+    client: TestClient, db: Session, admin: User
 ) -> None:
     _snapshot(db)
-    version = _active_policy(db, admin, mode)
     csrf = _login(client)
     payload = {
-        "schema_version": "1.0", "evaluation_request_id": f"ai-evaluation-{mode.lower()}",
+        "schema_version": "1.0", "evaluation_request_id": "ai-evaluation-diagnostic-0001",
         "symbol": "005930", "market": "KRX",
     }
     response = client.post(
@@ -96,9 +79,11 @@ def test_mock_ai_buy_uses_active_policy_without_creating_orders(
     body = response.json()
     assert body["model_id"] == "deterministic-mock-v1"
     assert body["core"]["action"] == "BUY"
-    assert body["execution_mode"] == mode
-    assert body["execution_outcome"] == outcome
-    assert body["configuration_version_id"] == version.id
+    assert body["purpose"] == "DIAGNOSTIC"
+    assert body["execution"] is None
+    assert body["execution_mode"] is None
+    assert body["execution_outcome"] == "NO_ACTION"
+    assert body["configuration_version_id"] is None
     repeated = client.post(
         "/api/v1/decisions/mock-evaluate",
         headers={"Origin": "https://testserver", "X-CSRF-Token": csrf},
@@ -106,6 +91,9 @@ def test_mock_ai_buy_uses_active_policy_without_creating_orders(
     )
     assert repeated.json()["decision_id"] == body["decision_id"]
     assert db.scalar(select(func.count()).select_from(Decision)) == 1
+    assert db.scalar(select(func.count()).select_from(DecisionExecution)) == 0
+    assert db.scalar(select(func.count()).select_from(GuardEvaluation)) == 0
+    assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
 
 

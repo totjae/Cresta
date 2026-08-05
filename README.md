@@ -78,6 +78,7 @@ npm run build
 - [인증 및 보안 명세](docs/SECURITY_SPEC.md)
 - [시장데이터 및 Watch 명세](docs/MARKET_DATA_SPEC.md)
 - [Scout·Core AI 판단 계약](docs/AI_DECISION_SPEC.md)
+- [판단 실행 및 승인 오케스트레이션 명세](docs/DECISION_EXECUTION_SPEC.md)
 - [데이터베이스 및 영속성 명세](docs/DATABASE_SPEC.md)
 - [배포·운영·장애복구 명세](docs/OPERATIONS_RUNBOOK.md)
 - [구현 착수 준비도 검토](docs/IMPLEMENTATION_READINESS_REVIEW.md)

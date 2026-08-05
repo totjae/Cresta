@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     environment: str = "MOCK"
     live_trading_enabled: bool = False
+    execution_stage: str = "SHADOW"
     database_url: str = "sqlite:///./cresta.db"
     database_password_file: str | None = None
     redis_url: str = "redis://localhost:6379/0"
@@ -77,6 +78,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Only MOCK broker environment is allowed in the first release")
         if self.live_trading_enabled:
             raise RuntimeError("Live trading must remain disabled in the first release")
+        if self.execution_stage != "SHADOW":
+            raise RuntimeError("Only the SHADOW decision execution stage is currently implemented")
         if self.kiwoom_rest_base_url.rstrip("/") != "https://mockapi.kiwoom.com":
             raise RuntimeError("Only the Kiwoom MOCK REST endpoint is allowed in the first release")
         if self.kiwoom_ws_base_url.rstrip("/") != "wss://mockapi.kiwoom.com:10000":

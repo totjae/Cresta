@@ -256,7 +256,8 @@ describe("Mock AI decisions", () => {
       input_snapshot_id: "snapshot-1", model_id: "deterministic-mock-v1", prompt_version: "mock-entry-v1",
       scout: { trend_state: "UPTREND", entry_score: 75, reason_codes: ["BREAKOUT_CONFIRMED"] },
       core: { action: "BUY", confidence: "0.75", risk_level: "MEDIUM", reason_codes: ["BREAKOUT_CONFIRMED"] },
-      configuration_version_id: "policy-1", execution_mode: "AUTOMATIC", execution_outcome: "GUARD_BLOCKED",
+      purpose: "DIAGNOSTIC", configuration_version_id: null, execution_mode: null,
+      execution_outcome: "NO_ACTION", execution: null,
       valid_until: "2026-08-04T01:01:00Z", created_at: "2026-08-04T01:00:00Z",
     };
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
@@ -274,8 +275,8 @@ describe("Mock AI decisions", () => {
     await user.click(await screen.findByRole("button", { name: /AI 판단/ }));
     expect(await screen.findByText(/주문이나 승인을 생성하지 않습니다/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Mock 판단 실행" }));
-    expect(await screen.findByText(/BUY \/ GUARD_BLOCKED/)).toBeInTheDocument();
-    expect(await screen.findByText("GUARD_BLOCKED")).toBeInTheDocument();
+    expect(await screen.findByText(/진단 판단이 BUY/)).toBeInTheDocument();
+    expect((await screen.findAllByText("DIAGNOSTIC")).length).toBeGreaterThan(0);
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/orders"))).toBe(false);
   });
 });

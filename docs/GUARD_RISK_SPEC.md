@@ -32,6 +32,7 @@
 
 ```yaml
 risk_limits:
+  entry_order_amount: null
   max_position_amount_per_symbol: 1_000_000
   max_total_position_amount: 3_000_000
   max_single_order_amount: 1_000_000
@@ -62,6 +63,8 @@ risk_limits:
 | GRD-013 | 현재 노출이 새 한도를 초과하면 즉시 강제매도하지 않고 신규매수 차단과 경고를 기본으로 한다. |
 | GRD-014 | 외부 관리 포지션도 전체 투자한도 계산에 포함한다. |
 | GRD-015 | 수치 설정은 서버 허용 범위를 벗어나면 자동 보정하지 않고 거부한다. |
+| GRD-016 | `entry_order_amount`는 신규진입 목표금액이며 10,000원 이상, `max_single_order_amount` 이하여야 한다. AI confidence나 Guard 한도 자체를 목표금액으로 사용하지 않는다. |
+| GRD-017 | 첫 구현은 `entry_order_amount` 시스템 기본값을 제공하지 않는다. 사용자가 Web UI에서 위험 설정을 검증·활성화하기 전에는 신규매수를 `ORDER_SIZE_NOT_CONFIGURED`로 차단한다. |
 
 ### 3.3 손실 제한
 
@@ -201,6 +204,36 @@ SYMBOL_HALT | ENTRY_HALT | ACCOUNT_HALT | SYSTEM_HALT
 | --- | --- |
 | GRD-070 | Web UI는 변경 불가 안전장치의 현재 상태를 표시할 수 있지만 해제 기능은 제공하지 않는다. |
 | GRD-071 | 변경 불가 규칙을 우회하는 API 요청은 서버에서 거부하고 감사한다. |
+
+### 3.9 Guard 1차 평가 계약
+
+Guard는 상태를 가진 주문 실행기가 아니라 같은 입력에서 같은 규칙 결과를 반환하는 결정론적 평가기다. 실행·승인 흐름과 평가 record 형식은 [판단 실행 및 승인 오케스트레이션 명세](DECISION_EXECUTION_SPEC.md)를 따른다.
+
+첫 구현 범위:
+
+```text
+BUY
+  환경·기능 단계·판단 만료·거래시간·감시종목·시세 품질
+  Broker/gate/reconciliation·비상정지·halt·활성/불명 주문
+  포지션·진입금액·예수금·종목/전체 노출·보유종목/일일진입 한도
+  spread·가격편차
+
+PARTIAL_SELL | FULL_SELL | FIXED_STOP
+  판단/trigger 유효성·실제 포지션/version·매도가능수량
+  Broker/gate/reconciliation·활성/불명 주문·거래 가능 상태
+```
+
+| ID | 요구사항 |
+| --- | --- |
+| GRD-080 | Guard는 `APPROVAL_CREATION`, `PRE_ORDER`, `BROKER_SEND` 단계에 필요한 검사를 구분하고 각 평가를 불변 record로 저장한다. |
+| GRD-081 | `PASSED`는 blocking rule 결과가 하나도 없을 때만 가능하며 예외·timeout·알 수 없는 상태는 통과로 간주하지 않는다. |
+| GRD-082 | 신규매수 검사는 현재 포지션과 미체결 매수의 예약금액, 외부 포지션, 예수금, 당일 신규진입 횟수를 같은 기준시각으로 합산한다. |
+| GRD-083 | 매도·손절에는 신규매수 한도 초과를 차단 사유로 사용하지 않지만 실제 수량, 활성·불명 주문과 Broker 송신 가능성은 검사한다. |
+| GRD-084 | 승인 생성 시 Guard 통과는 주문 권한이 아니며 승인 처리와 자동 주문 생성 직전에 최신 상태로 다시 평가한다. |
+| GRD-085 | 고정손절 trigger는 평균단가, 활성 stop 설정 버전, 최신 정상 시세와 position version에 결합해 중복 생성하지 않는다. trigger 후 주문 불가 상태에서도 `EXIT_PENDING` 위험을 유지한다. |
+| GRD-086 | Guard 결과에는 안정된 reason code, severity, halt scope, 사용한 snapshot·position·실행권한·위험설정 version과 유효시간을 기록한다. |
+| GRD-087 | 첫 구현 미지원 trigger와 행동은 `ACTION_NOT_IMPLEMENTED`로 차단하며 다른 청산·보유 행동으로 자동 변환하지 않는다. |
+| GRD-088 | 자동 또는 승인형 `BUY` 기능 gate는 신규진입 Guard, 고정손절 trigger, `PAUSE_ENTRY` 비상정지와 관련 장애시험이 모두 준비되기 전 열지 않는다. |
 
 ## 4. 오류·예외 또는 경계 조건
 

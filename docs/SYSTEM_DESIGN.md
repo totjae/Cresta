@@ -18,6 +18,7 @@ Cresta MVP는 사용자가 등록한 국내주식 최대 3종목을 감시하고
 - [인증 및 보안 명세](SECURITY_SPEC.md)
 - [시장데이터 및 Watch 명세](MARKET_DATA_SPEC.md)
 - [Scout·Core AI 판단 계약](AI_DECISION_SPEC.md)
+- [판단 실행 및 승인 오케스트레이션 명세](DECISION_EXECUTION_SPEC.md)
 - [데이터베이스 및 영속성 명세](DATABASE_SPEC.md)
 - [배포·운영·장애복구 명세](OPERATIONS_RUNBOOK.md)
 - [HTTP 및 WebSocket API 명세](API_SPEC.md)
@@ -40,8 +41,13 @@ Browser ─HTTPS─> Host Nginx (trade.mihoservice.xyz)
                          └> API (FastAPI) ─> PostgreSQL/TimescaleDB
                                   │          Redis (cache/queue/lock)
 Market stream ─> Watch ─> Event Bus
-                          ├─> Scout ─> Core ─> Guard ─> Approval ─> Broker
-                          └──────────────────> Guard (real-time stop)
+                          ├─> Scout ─> Core ───────────────┐
+                          └─> Guard trigger (real-time) ───┤
+                                                         v
+                                              Execution Orchestrator
+                                                ├─> Guard evaluation
+                                                ├─> Approval
+                                                └─> CREATED order ─> Broker
 ```
 
 | 모듈 | 책임 | 주문 권한 |
@@ -49,11 +55,14 @@ Market stream ─> Watch ─> Event Bus
 | Watch | 시세 정규화, 지표 계산, 지연·급변 감지 | 없음 |
 | Scout | 추세 및 매도 위험 점수 산출 | 없음 |
 | Core | 제한된 행동 코드와 근거 생성 | 없음 |
-| Guard | 한도·손절·데이터·연결 상태의 최종 판정 | 차단/강제청산 |
+| Guard | 한도·손절·데이터·연결 상태의 결정론적 평가 | 통과/차단·중지 범위 |
+| Execution Orchestrator | 거래 목적 판단·Guard trigger를 실행 권한에 따라 승인 또는 주문으로 변환 | 승인·주문 생성, Broker 호출 없음 |
 | Broker | 키움 REST API 계좌 동기화, 주문·정정·취소, 체결 확인 | 검증된 명령만 |
 | Console | 설정, 승인, 관찰, 비상정지 | 사용자 의도 생성 |
 
 의사결정 우선순위는 `Guard > 사용자 수동 명령 > 실제 계좌/주문 상태 > Core > Scout`로 고정한다.
+
+Core 판단과 Guard trigger의 후속 실행은 [판단 실행 및 승인 오케스트레이션 명세](DECISION_EXECUTION_SPEC.md)를 따른다. 진단 판단은 이 경로에 진입하지 않으며, 거래 목적 판단도 실행 권한과 Guard의 현재 상태를 다시 확인한 뒤에만 승인 또는 내부 `CREATED` 주문을 만든다.
 
 첫 Console 구현은 Next.js App Router와 TypeScript를 사용한다. 브라우저는 같은 origin의 `/api/v1`만 호출하고 세션 token은 `HttpOnly` cookie로, CSRF token은 React 메모리 상태로만 유지한다. 새로고침 시 `/api/v1/auth/session`으로 서버 세션을 다시 검증하고 새 CSRF token을 받는다. 미인증·만료 응답에서는 보호 화면 상태를 즉시 폐기하며 로그인 요청을 자동 재전송하지 않는다.
 
@@ -66,8 +75,8 @@ Market stream ─> Watch ─> Event Bus
 1. 사용자가 전략과 투자 한도를 포함한 종목을 등록한다.
 2. Watch가 실시간 데이터의 최신성과 완전성을 검증한다.
 3. Scout와 Core가 `BUY | WAIT | REJECT | RISK_BLOCK` 중 하나를 출력한다.
-4. Guard가 화이트리스트, 잔고, 노출 한도, 손실 한도, 스프레드, 중복 주문을 원자적으로 검사한다.
-5. 해당 행동이 승인형이면 유효시간과 가격 허용범위가 있는 승인 요청을 만들고, 자동형이면 승인 단계를 생략하며, 비활성형이면 실행하지 않는다.
+4. Execution Orchestrator가 거래 목적 판단만 정규 행동으로 변환하고 활성 실행 권한과 기능 단계를 조회한다.
+5. 비활성형은 기록만 남긴다. 승인형은 승인 생성 Guard를 통과한 뒤 유효시간과 가격 허용범위가 있는 요청을 만들고, 자동형은 주문 직전 Guard를 통과해야 한다.
 6. 검증된 주문을 PostgreSQL에 `CREATED`로 저장한다. Active Broker worker는 `READY` 상태에서 `FOR UPDATE SKIP LOCKED`로 가장 오래된 주문 한 건을 선택한다.
 7. worker는 현재 lease·fencing token·거래 gate를 재검증하고 `SUBMITTING`을 먼저 commit한 뒤 키움에 정확히 한 번 전송한다.
 8. 응답이 불명확하면 `UNKNOWN`으로 영속화하고 다음 주문을 중지한 뒤 즉시 전체 계좌 재동기화를 수행한다.
@@ -77,7 +86,7 @@ Market stream ─> Watch ─> Event Bus
 - Watch와 Guard는 AI 주기와 무관하게 손절, 급락, 데이터 단절, 비상정지를 검사한다.
 - Scout는 설정 주기로 위험도를 갱신하며 임계치 초과 시 Core 재판단을 요청한다.
 - Core는 `HOLD | TIGHTEN_STOP | PARTIAL_SELL | FULL_SELL | EMERGENCY_EXIT`만 반환한다.
-- Guard의 강제청산은 승인 대기보다 우선한다. 연결 이상처럼 안전한 주문 실행 자체가 불가능한 경우 신규 주문을 중지하고 경보를 유지한다.
+- Guard의 청산 trigger는 일반 승인 대기보다 우선해 오케스트레이터에 전달한다. 연결 이상처럼 안전한 주문 실행 자체가 불가능한 경우 포지션을 종료로 오인하지 않고 `EXIT_PENDING` 위험과 경보를 유지한다.
 
 ## 4. 상태 머신
 
@@ -102,8 +111,10 @@ SELECTED -> PRECHECK -> ENTRY_WATCH -> ENTRY_READY -> BUY_PENDING
 | instruments | symbol, name, market, tradable |
 | strategies | symbol, entry_mode, limits, stops, intervals, execution_policy, overnight_policy, version |
 | positions | symbol, quantity, average_price, high_watermark, stop_price, state, version |
-| decisions | model/version, input_snapshot_id, action, confidence, reasons, valid_until |
-| approvals | decision_id, status, expires_at, actor_id |
+| decisions | purpose, model/version, input_snapshot_id, action, confidence, reasons, valid_until |
+| decision_executions | decision/rule source, action, execution mode/policy version, state, version |
+| guard_evaluations | phase, subject, result, rule results, input versions, valid_until |
+| approvals | execution_id, decision_id, status, scope snapshot, expires_at, actor_id |
 | orders | order_group_id, parent_order_id, client_order_id, idempotency_key, broker_order_id, side, quantities, status |
 | fills | order_id, quantity, price, fee, filled_at |
 | risk_events | rule_code, severity, input_snapshot, resolution |

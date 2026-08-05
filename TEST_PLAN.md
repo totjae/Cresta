@@ -155,7 +155,7 @@
 | T-UI-009 | UI-080~084 | 외부 주문 발견 | 격리·해결 선택과 거래 차단 범위 표시 | 계획 |
 | T-UI-010 | UI-090~093 | WebSocket 단절·복구 | 마지막 정상시각·재조회·상태 전환 표시 | 계획 |
 | T-UI-011 | UI-085~087, API-094~098 | 시스템 상태에서 MOCK 시장가 1주 시험 | Broker READY 후만 활성, TOTP 재인증·CSRF, CREATED를 체결로 표시하지 않음 | 통과 (2026-08-04, 자동 fixture) |
-| T-UI-011 | UI-100~105 | 데스크톱·태블릿·모바일·키보드 검사 | 반응형·포커스·대비·감소된 움직임 통과 | 부분 통과 |
+| T-UI-017 | UI-100~105 | 데스크톱·태블릿·모바일·키보드 검사 | 반응형·포커스·대비·감소된 움직임 통과 | 부분 통과 |
 
 ### 3.10 인증 및 보안
 
@@ -214,7 +214,7 @@
 | T-DB-006 | DB-050~053 | Redis 전체 삭제 후 worker 재시작 | DB·Broker로 복구, 작업 중복 없음 | 계획 |
 | T-DB-007 | DB-060~063 | schema 불일치·migration 실패·seed 재실행 | worker 시작 차단, 중복 seed 없음 | 계획 |
 | T-DB-008 | DB-064, SEC-033 | `/` 등 예약문자가 포함된 DB 비밀번호로 Alembic 실행 | URL은 정상 해석되고 오류·로그에 비밀번호 또는 완성된 인증 URL 미노출 | 단위 통과·PostgreSQL 재검증 대기 |
-| T-DB-008 | DB-070~073 | 암호화 백업 복원·보존 삭제 | 불변조건 통과, hold 데이터 보존 | 계획 |
+| T-DB-009 | DB-070~073 | 암호화 백업 복원·보존 삭제 | 불변조건 통과, hold 데이터 보존 | 계획 |
 
 ### 3.14 HTTP·WebSocket API
 
@@ -260,7 +260,7 @@
 | T-KIW-039 | KIW-137, SEC-065, API-094~098 | Web MOCK 진단 주문 요청·proof 재사용·worker 비준비 | READY에서만 BUY 1주 CREATED·감사, proof 재사용 403, 비준비 409 | 통과 (2026-08-04, 자동) |
 | T-OPS-011 | OPS-003 | API 컨테이너 IP 변경 후 gateway를 재시작하지 않고 health·login 요청 | Docker DNS 재해석 후 새 API로 연결되고 502가 지속되지 않음 | 설정 계약 통과·실서버 대기 |
 | T-OPS-012 | OPS-014 | 배포 Compose의 장기 실행 서비스 재시작·health 설정 검사 | API·Frontend 포함 전 서비스 `unless-stopped`, PostgreSQL·Redis·API·Frontend·gateway healthcheck 존재 | 통과 (2026-08-05, 자동 계약) |
-| T-OPS-013 | OPS-015~016 | `cresta-boot.service` 정적 계약과 Ubuntu 부팅 시험 | Docker·network-online 이후 두 Compose 파일을 `up -d --wait --wait-timeout 180`으로 조정하고 실패 재시도; 부팅 후 core 5종 healthy·worker Up·내부 health 200 | 정적 계약 통과·실서버 재부팅 대기 |
+| T-OPS-013 | OPS-015~016 | `cresta-boot.service` 정적 계약과 Ubuntu 부팅 시험 | Docker·network-online 이후 두 Compose 파일을 `up -d --wait --wait-timeout 180`으로 조정하고 실패 재시도; 부팅 후 core 5종 healthy·worker Up·내부 health 200 | 통과 (2026-08-05, 자동 계약·Ubuntu 재부팅 9초 복구) |
 
 ## 4. 시험 환경
 
@@ -294,32 +294,47 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 122개 통과 | 기존 범위와 감시 종목, 키움 실시간 fixture, 분봉·지표·거래일 초기화, Mock Scout/Core 검증 포함 |
-| Console component 시험 | `npm test` | 8개 통과 | 기존 범위와 감시 종목 등록·시세 대기, Mock AI 진단·GUARD_BLOCKED 표시 포함 |
+| Python 단위·API 시험 | `python -m pytest` | 126개 통과 | 기존 범위와 DIAGNOSTIC 실행 차단, SHADOW 멱등 실행·Guard 차단·주문 0건 검증 포함 |
+| Console component 시험 | `npm test` | 8개 통과 | 기존 범위와 감시 종목 등록·시세 대기, DIAGNOSTIC 목적·실행 없음 표시 포함 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
 | Console HTTP smoke | standalone server에 HTTP 요청 | 통과 | `/` 응답 200과 Cresta metadata 확인 |
 | Console production dependency audit | `npm audit --omit=dev --audit-level=high` | 취약점 0건 | Next 하위 PostCSS·Sharp를 검증된 패치 버전으로 고정 |
 | 정적 검사 | `python -m ruff check app tests migrations` | 통과 | FastAPI dependency의 B008은 프레임워크 관용구로 제외 |
 | 문법 검사 | `python -m compileall -q app tests migrations` | 통과 | Python 3.14 로컬, 배포 기준은 3.12 |
-| migration 적용 | `alembic upgrade head`·`current` | 통과 | SQLite에서 분봉·지표 저장 `20260804_0009` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
+| migration 적용 | `alembic upgrade head`·`current` | 통과 | SQLite에서 판단 실행·Guard·승인 기반 `20260805_0010` head 검증; 실서버 PostgreSQL 적용은 배포 시 확인 필요 |
 | gateway 정적 검사 | Compose YAML·환경·Nginx 설정 assertion | 통과 | Backend·Frontend route 분리, `127.0.0.1:7788` 단독 게시 |
 | Docker Compose·HTTPS | Ubuntu 서버에서 전체 서비스 기동, migration, host Nginx·TLS 접속과 로그인 | 통과 | PostgreSQL·Redis healthy, secret 읽기, API·Frontend·gateway, HTTPS와 ID·비밀번호·TOTP 로그인 확인 |
 | Paper Console 브라우저 점검 | 데스크톱·390px 모바일에서 상태·주문 상세·포지션 화면 확인 | 통과 | 실제 API 계약과 동일한 로컬 조회 fixture 사용, 브라우저 console error 없음, 운영 생성 컨트롤 없음 |
 | Watch 상태 UI 변경 점검 | component·TypeScript·production build | 통과 | 인앱 브라우저의 로컬 URL 정책 차단으로 이번 변경의 추가 시각 점검은 미실행 |
 
-검증된 세부 동작은 인증·Paper·Watch 외에 키움 MOCK 인증·snapshot, WebSocket worker 안전 게이트, 계좌 이벤트 수신 즉시 polling 차단과 debounce된 REST 대조, 주문 TR·limiter·FIFO polling·ACK/REJECTED/UNKNOWN과 즉시 재동기화를 포함한다. 실제 서버의 MOCK 인증·시세·계좌 일치는 2026-08-03, 빈 계좌 대조와 worker READY·재시작 fencing은 2026-08-04 통과했다. Docker DNS gateway 설정은 로컬 계약만 통과했으며 서버의 API 재생성 후 무중단 재해석, 분봉·지표·Guard 가격정책·실제 모의주문·PostgreSQL 다중 worker 경쟁은 미검증이다.
+검증된 세부 동작은 인증·Paper·Watch 외에 키움 MOCK 인증·snapshot, WebSocket worker 안전 게이트, 계좌 이벤트 수신 즉시 polling 차단과 debounce된 REST 대조, 주문 TR·limiter·FIFO polling·ACK/REJECTED/UNKNOWN과 즉시 재동기화를 포함한다. 실제 서버의 MOCK 인증·시세·계좌 일치는 2026-08-03, 빈 계좌 대조와 worker READY·재시작 fencing은 2026-08-04 통과했다. 2026-08-05 Ubuntu 재부팅에서 systemd Compose 조정 후 약 9초 안에 core 서비스 health와 worker READY가 복구됐다. API 단독 재생성 중 gateway 무중단 재해석, 장중 분봉·지표, Guard 가격정책·실제 전략 모의주문·PostgreSQL 다중 worker 경쟁은 미검증이다.
 
 ### 5.1 실행 권한 설정 추가 시험
 
 | 테스트 ID | 관련 요구사항 | 시나리오 | 기대 결과 | 상태 |
 | --- | --- | --- | --- | --- |
-| T-CFG-008 | CFG-070~074, API-043~045, DB-026~027 | 안전 기본값·초안·검증·TOTP 활성화 | 활성 버전 불변성, 활성화 전 미적용, 감사 기록 | 통과 (2026-08-04, 자동) |
+| T-CFG-008 | CFG-070~074, API-043~045, DB-090~091 | 안전 기본값·초안·검증·TOTP 활성화 | 활성 버전 불변성, 활성화 전 미적용, 감사 기록 | 통과 (2026-08-04, 자동) |
 | T-UI-012 | UI-036~038 | 8개 행동 모드 편집·검증·TOTP 활성화 | 안전 기본값 출처와 활성화 후 서버 재조회 | 통과 (2026-08-04, component) |
-| T-AI-009 | AI-070~074, API-099~101, DB-028~029 | 동일 snapshot 진단·지연 시세·실행 권한 3개 모드 | 결정론적 출력, 중복 억제, 주문 0건, 안전 분기 기록 | 통과 (2026-08-04, 자동) |
+| T-AI-009 | AI-070~074, API-099~101, DB-092~093 | 동일 snapshot 진단·지연 시세·실행 권한 3개 모드 | 결정론적 출력, 중복 억제, 주문 0건, 안전 분기 기록 | 통과 (2026-08-04, 자동) |
 | T-UI-013 | UI-039, UI-044~045 | Mock 진단 요청과 판단 목록 표시 | 모델·snapshot·행동·실행 차단 결과를 오인 없이 표시 | 통과 (2026-08-04, component) |
-| T-WATCH-009 | MKT-080~081, API-102~104, DB-030~032 | 감시 종목 등록·중복·3개 제한·해제 | 사용자별 유일성·최대 3개·CSRF를 지키고 기존 snapshot은 보존 | 통과 (2026-08-04, 자동) |
+| T-WATCH-009 | MKT-080~081, API-102~104, DB-094~096 | 감시 종목 등록·중복·3개 제한·해제 | 사용자별 유일성·최대 3개·CSRF를 지키고 기존 snapshot은 보존 | 통과 (2026-08-04, 자동) |
 | T-WATCH-010 | MKT-082~086, KIW-138~141 | 시작·목록 변경 구독과 공식 `0B`·`0D` fixture | 그룹 분리, KRX 종목 전체 동기화, 체결·호가 정규화와 snapshot 영속 | 통과 (2026-08-04, 자동 fixture); 실제 장중·재연결 대기 |
 | T-UI-014 | UI-046~048 | 빈 목록·등록·시세 대기·최신 snapshot·삭제 | 슬롯과 데이터 상태를 오인 없이 표시하고 mutation은 CSRF 사용 | component 등록 통과; 삭제 수동 대기 |
-| T-WATCH-011 | MKT-090~095, DB-033~034 | 같은 분·다음 분 체결, 호가만 변경, 거래일 변경, gap·late 입력 | 결정론적 OHLCV·turnover와 VWAP·SMA5·drawdown·spread, 비정상 입력 제외 | 통과 (2026-08-04, 자동 fixture) |
+| T-WATCH-011 | MKT-090~095, DB-097~098 | 같은 분·다음 분 체결, 호가만 변경, 거래일 변경, gap·late 입력 | 결정론적 OHLCV·turnover와 VWAP·SMA5·drawdown·spread, 비정상 입력 제외 | 통과 (2026-08-04, 자동 fixture) |
 | T-UI-015 | MKT-096, API-105, UI-049 | 지표 없음과 최신 지표가 있는 감시 카드 조회 | 계산 전 null과 지표 값을 구분해 표시 | 통과 (2026-08-04, API·component) |
+
+### 5.2 Guard·판단 실행·승인 추가 시험
+
+| 테스트 ID | 관련 요구사항 | 시나리오 | 기대 결과 | 상태 |
+| --- | --- | --- | --- | --- |
+| T-EXE-001 | EXE-001~014, AI-075~079 | 진단/거래 판단과 Core·Guard 행동 전체 조합 | 진단·비행동 주문/승인 0건, BUY 안전 차단 | 부분 통과 (2026-08-05, 자동; 매도·미지원 전체 조합 대기) |
+| T-EXE-002 | EXE-020~025, DB-100~107 | 동일 판단을 반복 라우팅 | execution·Guard 최대 1개, 기존 결과 재조회 | 부분 통과 (2026-08-05, 자동; 동시성·commit 응답 유실 대기) |
+| T-EXE-003 | EXE-030~035, CFG-080~084 | `DISABLED`, `MANUAL_APPROVAL`, `AUTOMATIC`과 3개 실행 단계 조합 | 기록만/승인/주문 분기, 상위 단계 gate 우선, 미준비 BUY 차단 | 부분 통과 (2026-08-05, SHADOW·미설정 주문금액 차단; 상위 단계 대기) |
+| T-GRD-010 | GRD-080~088, EXE-050~056 | BUY Guard 각 규칙 단독·복합 실패와 경계 금액 | 결정론적 복수 reason, 하나라도 blocking이면 주문 0건 | 계획 |
+| T-GRD-011 | GRD-016~017, EXE-013, ORD-042 | 진입금액 없음·최소 미만·한도 초과·1주 미만·정상금액 | 임의 수량 생성 금지, Decimal 기반 정상 수량만 통과 | 계획 |
+| T-GRD-012 | GRD-083~085, EXE-011~012·052~053 | 부분/전량매도·고정손절에서 예약수량·position version·데이터 단절 | 초과매도 0건, stale 승인 무효화, trigger와 EXIT_PENDING 유지 | 계획 |
+| T-APR-001 | EXE-040~045, STM-006~009, API-112~121 | 승인·거절·만료·가격/상태 변경·동시 탭·TOTP 재사용 | 한 번만 terminal 전이, 유효 승인만 CREATED 주문과 원자 commit | 계획 |
+| T-ORD-010 | EXE-060~064, ORD-039~043 | Guard 통과 후 주문 생성과 Broker polling 경쟁 | intent·CREATED·감사 원자 생성, worker만 송신, 활성/UNKNOWN 중복 차단 | 계획 |
+| T-EXE-004 | EXE-070~073, API-122~124 | SHADOW→APPROVAL_ONLY→MOCK_AUTOMATIC 확대와 축소 | 시험·TOTP 없는 확대 거부, 축소 즉시 적용, 실거래 권한 변화 없음 | 계획 |
+| T-UI-016 | UI-055~059, UI-075~076, UI-088~089 | 승인 카드·Guard reason·실행 단계 데스크톱/모바일 흐름 | 주문 상태 오인 없음, 만료/무효화 원인 표시, TOTP·접근성 준수 | 계획 |

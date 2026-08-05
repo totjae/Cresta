@@ -67,7 +67,7 @@ def configured_settings(tmp_path: Path) -> Settings:
     )
 
 
-def token_response(token: str, expires: str = "20260804120000") -> FakeResponse:
+def token_response(token: str, expires: str = "20991231235959") -> FakeResponse:
     return FakeResponse(
         200,
         {
