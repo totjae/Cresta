@@ -12,6 +12,7 @@ from app.config import Settings
 from app.ids import uuid7
 from app.llm.adapters.mock import MockProviderAdapter
 from app.llm.contracts import LlmRequest
+from app.llm.discovery import DiscoveredModel
 from app.models import (
     Approval,
     AuditLog,
@@ -397,3 +398,80 @@ def test_external_credential_is_write_only_totp_bound_and_not_stored_in_db(
     )
     assert replay.status_code == 403
     assert secret_path.read_text(encoding="utf-8").strip() == raw_secret
+
+
+def test_provider_registration_discovers_models_before_persisting(
+    client: TestClient,
+    db: Session,
+    settings: Settings,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    settings.llm_secret_directory = str(tmp_path / "registered-secrets")
+    monkeypatch.setattr(
+        "app.llm.profiles.discover_models",
+        lambda adapter_type, credential: [
+            DiscoveredModel("gpt-discovered", "GPT Discovered", 8192, 2048)
+        ],
+    )
+    challenge = client.post(
+        "/api/v1/auth/login/password",
+        json={"schema_version": "1.0", "login_id": "admin", "password": TEST_PASSWORD},
+    )
+    login = client.post(
+        "/api/v1/auth/login/totp",
+        json={
+            "schema_version": "1.0",
+            "challenge_id": challenge.json()["challenge_id"],
+            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(
+                datetime.now(UTC) - timedelta(seconds=30)
+            ),
+        },
+    )
+    headers = {
+        "Origin": "https://testserver",
+        "X-CSRF-Token": login.json()["csrf_token"],
+    }
+    preview = client.post(
+        "/api/v1/ai/provider-registrations/preview",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "name": "openai-primary",
+            "adapter_type": "OPENAI_RESPONSES",
+        },
+    )
+    proof = client.post(
+        "/api/v1/auth/reauth/totp",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(datetime.now(UTC)),
+            "target_action": preview.json()["target_action"],
+            "target_id": preview.json()["target_id"],
+        },
+    )
+    raw_secret = "registration-write-only-secret"
+    registered = client.post(
+        "/api/v1/ai/provider-registrations",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "name": "openai-primary",
+            "adapter_type": "OPENAI_RESPONSES",
+            "credential": raw_secret,
+            "reauth_proof": proof.json()["reauth_proof"],
+        },
+    )
+    assert registered.status_code == 201, registered.text
+    payload = registered.json()
+    assert payload["provider"]["state"] == "VALIDATED"
+    assert payload["provider"]["health_status"] == "READY"
+    assert payload["models"][0]["provider_model_id"] == "gpt-discovered"
+    assert payload["models"][0]["state"] == "DRAFT"
+    assert raw_secret not in registered.text
+    assert db.scalar(select(func.count()).select_from(LlmProviderProfile)) == 1
+    assert db.scalar(select(func.count()).select_from(LlmModelProfile)) == 1
+    secret_files = list((tmp_path / "registered-secrets").glob("provider-*.key"))
+    assert len(secret_files) == 1
+    assert secret_files[0].read_text(encoding="utf-8").strip() == raw_secret

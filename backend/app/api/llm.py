@@ -7,11 +7,13 @@ from app.api.dependencies import AuthContext, get_auth_context, require_csrf
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.llm.contracts import ModelCapabilities
+from app.llm.discovery import catalog_items
 from app.llm.profiles import (
     activate_assignments,
     create_model,
     create_provider,
     create_route,
+    disable_model,
     effective_generation_parameters,
     get_model,
     list_models,
@@ -19,7 +21,10 @@ from app.llm.profiles import (
     list_routes,
     preview_assignment_activation,
     preview_provider_credential,
+    preview_provider_registration,
+    register_provider_with_discovery,
     set_provider_credential,
+    sync_provider_models,
     test_provider,
     validate_model,
     validate_route,
@@ -36,8 +41,14 @@ from app.schemas import (
     LlmModelCreateRequest,
     LlmModelListResponse,
     LlmModelResponse,
+    LlmProviderCatalogItem,
+    LlmProviderCatalogResponse,
     LlmProviderCreateRequest,
     LlmProviderListResponse,
+    LlmProviderRegistrationPreviewRequest,
+    LlmProviderRegistrationPreviewResponse,
+    LlmProviderRegistrationRequest,
+    LlmProviderRegistrationResponse,
     LlmProviderResponse,
     LlmProviderTestResponse,
     LlmRoleAssignmentItem,
@@ -115,6 +126,70 @@ def _route_response(db: Session, owner_id: str, route: LlmRoleRoute) -> LlmRoute
     )
 
 
+@router.get("/provider-catalog", response_model=LlmProviderCatalogResponse)
+def get_provider_catalog(
+    request: Request,
+    _: AuthContext = Depends(get_auth_context),
+) -> LlmProviderCatalogResponse:
+    return LlmProviderCatalogResponse(
+        request_id=request.state.request_id,
+        items=[
+            LlmProviderCatalogItem(adapter_type=item.adapter_type, label=item.label)
+            for item in catalog_items()
+        ],
+    )
+
+
+@router.post(
+    "/provider-registrations/preview",
+    response_model=LlmProviderRegistrationPreviewResponse,
+)
+def post_provider_registration_preview(
+    payload: LlmProviderRegistrationPreviewRequest,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> LlmProviderRegistrationPreviewResponse:
+    target_id = preview_provider_registration(
+        db,
+        owner_id=context.user.id,
+        name=payload.name,
+        adapter_type=payload.adapter_type,
+    )
+    return LlmProviderRegistrationPreviewResponse(
+        request_id=request.state.request_id, target_id=target_id
+    )
+
+
+@router.post(
+    "/provider-registrations",
+    response_model=LlmProviderRegistrationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_provider_registration(
+    payload: LlmProviderRegistrationRequest,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> LlmProviderRegistrationResponse:
+    provider, models = register_provider_with_discovery(
+        db,
+        user=context.user,
+        name=payload.name,
+        adapter_type=payload.adapter_type,
+        credential=payload.credential,
+        reauth_proof=payload.reauth_proof,
+        correlation_id=request.state.request_id,
+        settings=settings,
+    )
+    return LlmProviderRegistrationResponse(
+        request_id=request.state.request_id,
+        provider=_provider_response(provider),
+        models=[_model_response(model) for model in models],
+    )
+
+
 @router.get("/providers", response_model=LlmProviderListResponse)
 def get_providers(
     request: Request,
@@ -168,6 +243,31 @@ def post_provider_test(
         external_network_used=health.external_network_used,
         capabilities=LlmCapabilitiesPayload.model_validate(health.capabilities.model_dump()),
         message_code=health.message_code,
+    )
+
+
+@router.post(
+    "/providers/{provider_id}/models/sync",
+    response_model=LlmProviderRegistrationResponse,
+)
+def post_provider_models_sync(
+    provider_id: str,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> LlmProviderRegistrationResponse:
+    provider, models = sync_provider_models(
+        db,
+        user=context.user,
+        provider_id=provider_id,
+        correlation_id=request.state.request_id,
+        settings=settings,
+    )
+    return LlmProviderRegistrationResponse(
+        request_id=request.state.request_id,
+        provider=_provider_response(provider),
+        models=[_model_response(model) for model in models],
     )
 
 
@@ -265,6 +365,22 @@ def post_model_validate(
     return _model_response(model)
 
 
+@router.post("/models/{model_id}/disable", response_model=LlmModelResponse)
+def post_model_disable(
+    model_id: str,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> LlmModelResponse:
+    model = disable_model(
+        db,
+        user=context.user,
+        model_id=model_id,
+        correlation_id=request.state.request_id,
+    )
+    return _model_response(model)
+
+
 @router.get("/routes", response_model=LlmRouteListResponse)
 def get_routes(
     request: Request,
@@ -311,9 +427,7 @@ def get_role_assignments(
             LlmRoleAssignmentItem(
                 role=role,
                 current=_route_response(db, context.user.id, active) if active else None,
-                candidates=[
-                    _route_response(db, context.user.id, route) for route in candidates
-                ],
+                candidates=[_route_response(db, context.user.id, route) for route in candidates],
                 history_count=len(role_routes),
                 status=status_value,
             )

@@ -403,6 +403,9 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 | UI-122 | Models 기본 화면은 Provider별 등록 모델 카탈로그를 표 형태로 표시하고 alias·provider model ID·검증 상태·capability·기본 파라미터를 편집한다. 같은 모델을 역할 수만큼 복제 생성하지 않는다. |
 | UI-123 | 역할별 배정 화면은 runtime이 모델 route를 요구하는 각 Scout·Core를 한 행씩 고정 표시하고 각 행에서 등록된 검증 모델 하나를 선택한다. 같은 모델을 여러 역할에서 선택할 수 있다. v1의 deterministic Intel·Verify 내부 stage는 별도 모델 배정 행을 표시하지 않는다. |
 | UI-124 | 역할 행의 `파라미터` 편집은 temperature·top_p·max output token·reasoning effort·seed의 모델 기본값, 역할 override와 최종값을 구분한다. 선택 모델이 지원하지 않는 필드는 비활성화하고 이유를 표시한다. |
+| UI-127 | Provider 추가 기본 화면은 서비스 제공자 선택, 연결 이름, write-only API key와 `연결 시험 및 등록` 버튼만 표시한다. endpoint는 서버 카탈로그에서 고정하며 고급 수동 등록과 분리한다. |
+| UI-128 | 연결 시험 성공 후 Provider 카드 안에 발견 모델 목록과 `사용/사용 안 함` 전환을 표시한다. 사용 모델만 역할 배정의 등록 모델 선택지에 나타나며 API key는 성공·실패 후 입력 상태에서 제거한다. |
+| UI-129 | Provider 카드는 연결 상태, 활성/전체 모델 수, 모델 접기·동기화를 한 곳에 표시하고 실패한 연결을 카탈로그에 누적하지 않는다. |
 | UI-125 | 기본 역할 화면은 현재 활성 배정만 표시하고 draft·validated·superseded version은 `이력` drawer/table에서 조회한다. 중복 후보가 있으면 첫 행을 자동 선택하지 않고 `현재 배정 미확정`으로 표시한다. |
 | UI-126 | 선행조건 미충족으로 비활성화된 버튼은 `not-allowed` cursor와 구체적인 누락 사유를 표시한다. 실제 요청 처리 중에만 spinner와 `wait` cursor를 사용한다. |
 | UI-127 | DIAGNOSTIC DAG 버튼은 run admission 완료 즉시 다시 활성화한다. `CREATED/RUNNING` run이 있으면 1~2초 간격으로 목록을 갱신하고 stage 상태·attempt를 표시하되 HTTP 요청을 DAG 완료까지 유지하지 않는다. |

@@ -240,6 +240,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid #82b4ff; outline-
 .catalog-row strong, .catalog-row small { display: block; }
 .catalog-row strong { font-size: 12px; }
 .catalog-row small { margin-top: 5px; color: var(--muted); font-size: 9px; }
+.provider-registration { grid-template-columns: 1fr 1fr 1.35fr auto; align-items: end; }
+.provider-registration .form-hint { grid-column: 1 / -1; color: var(--muted); }
+.provider-cards { display: grid; gap: 12px; margin-top: 16px; }
+.provider-card { border: 1px solid #293850; border-radius: 12px; background: rgba(8, 20, 38, .45); overflow: hidden; }
+.provider-card-head { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 16px; }
+.provider-card-head small, .provider-model-item small { display: block; margin-top: 5px; color: var(--muted); font-size: 9px; }
+.provider-model-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-height: 420px; overflow-y: auto; padding: 14px; border-top: 1px solid #293850; }
+.provider-model-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid #26364d; border-radius: 9px; }
+.model-toggle { min-width: 74px; border: 1px solid #3a485e; border-radius: 8px; background: transparent; color: var(--muted); padding: 8px 10px; cursor: pointer; }
+.model-toggle.active { border-color: #1f9d68; background: rgba(23, 125, 83, .18); color: #58e0a5; }
 .assignment-board { display: grid; gap: 12px; }
 .assignment-summary { padding: 12px 14px; border: 1px solid #2b3d59; border-radius: 8px; background: #0a1628; }
 .assignment-row { display: grid; gap: 11px; padding: 15px; border: 1px solid #2b3d59; border-radius: 8px; background: #0b1729; }
@@ -344,7 +354,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid #82b4ff; outline-
   .diagnostic-summary { grid-template-columns: repeat(2, 1fr); }
   .execution-policy-row { grid-template-columns: 1fr; gap: 9px; }
   .llm-tabs { grid-template-columns: repeat(2, 1fr); }
-  .compact-editor, .compact-editor.model-editor, .parameter-grid { grid-template-columns: 1fr; }
+  .compact-editor, .compact-editor.model-editor, .provider-registration, .parameter-grid, .provider-model-grid { grid-template-columns: 1fr; }
+  .provider-card-head { grid-template-columns: 1fr; }
   .catalog-row, .catalog-toolbar, .assignment-summary, .assignment-actions { align-items: stretch; grid-template-columns: 1fr; flex-direction: column; }
   .assignment-actions .primary-button { width: 100%; }
   .decision-grid { grid-template-columns: 1fr; }

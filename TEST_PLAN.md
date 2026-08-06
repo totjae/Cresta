@@ -328,7 +328,7 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 145개 통과 | 기존 범위, 역할 배정, 비동기 Agent claim·lease·fencing·응답 불명 격리·scheduler admission과 주문 0건 포함 |
+| Python 단위·API 시험 | `python -m pytest` | 160개 통과 | 기존 범위, 역할 배정, Provider 모델 발견·원자 등록, 비동기 Agent claim·lease·fencing·응답 불명 격리·scheduler admission과 주문 0건 포함 |
 | Console component 시험 | `npm test` | 11개 통과 | Provider/Models/역할 배정/이력 분리, ACTIVE route 비동기 DIAGNOSTIC 등록·상태 갱신 포함 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
@@ -383,3 +383,4 @@
 | T-LLM-021 | LLM-087~089 | 외부 Provider 생성, preview, TOTP credential 저장·proof 재사용 | DB·응답·감사에 원문 0건, 서버 생성 ref, Linux 0400, proof 재사용 거부 | 통과 (2026-08-06, API·파일) |
 | T-LLM-022 | LLM-090 | timeout·429·401·5xx·잘못된 JSON | 정규 상태, 호출 1회, retry 0, secret 비노출 | 통과 (2026-08-06, MockTransport) |
 | T-LLM-023 | LLM-092~093 | 외부 Provider·Model metadata 검증 후 route 검증 | 과금 호출 0건, external route는 runtime 구현 전 차단, 주문 0건 | 통과 (2026-08-06, API) |
+| T-LLM-024 | LLM-094~099, API-130~142, UI-127~129 | 공식 Provider 키로 등록 preview·TOTP·모델 발견, 실패·과대 응답·redirect, 모델 사용 전환·재동기화 | 성공 시에만 Provider·secret·모델 저장, 원문 키 0건, 활성 모델만 역할 선택, 기존 route 자동 변경 0건 | 통과 (2026-08-06, MockTransport·API·component) |

@@ -33,7 +33,7 @@
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 감시 종목·키움 `0B`·`0D`, 1분봉과 v2 VWAP·SMA5·상대 거래량·실현 변동성·고점 하락률·spread 영속화 로컬 검증 완료; 체결강도와 v2 실제 장중 수신 미검증 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 구현 중 | 불변 `scout-input-v1`과 `deterministic-mock-v2`, KST 정기 TRADING scheduler·SHADOW 인계 구현; 실제 AI provider와 보유 포지션 판단 미구현 |
 | 다중 에이전트 오케스트레이션 | `docs/MULTI_AGENT_ORCHESTRATION_SPEC.md` | 구현 중 | 비동기 DIAGNOSTIC admission, Intel·Verify·4개 Scout·Core stage queue, claim·lease·fencing·만료 복구, scheduler admission, Core WAIT·주문 0건 로컬 검증 완료; 외부 수집·실제 Adapter 미구현 |
-| LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | Provider/Model 카탈로그와 역할별 배정에 더해 OpenAI Responses·Anthropic Messages·Gemini Generate Content 정규화, TOTP write-only 파일 credential과 오류·usage 계약 구현; 외부 Agent runtime, Vercel·Gateway·Ollama 미구현 |
+| LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | OpenAI·Anthropic·Gemini 서비스 선택→연결 이름→write-only API key→실제 모델 발견 원자 등록, 모델 동기화·사용 전환·역할 선택과 Native Adapter 계약 구현; 외부 Agent runtime, Vercel·Gateway·Ollama 미구현 |
 | DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·Scout 입력, LLM Foundation·Agent Runtime, 역할 배정과 Agent lease `20260806_0016` 로컬 적용·순환 통과; 실서버 PostgreSQL 0016·장중 입력 축적 미검증 |
 | 판단 실행·승인 | `docs/DECISION_EXECUTION_SPEC.md` | 구현 중 | DIAGNOSTIC/TRADING 경계, scheduler 인계, 멱등 SHADOW execution, 불변 Guard 평가와 안전 차단 구현; 승인·주문 생성은 미구현 |
 | 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 부팅 Compose 조정 unit 구현; 2026-08-05 Ubuntu 재부팅 후 9초 내 전체 health·worker READY 복구 통과, 백업·경보·복구훈련 미완료 |

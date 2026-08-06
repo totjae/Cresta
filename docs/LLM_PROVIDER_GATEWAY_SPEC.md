@@ -377,6 +377,17 @@ Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 �
 | LLM-092 | Provider 연결 계약 검증은 secret 가독성·endpoint·Adapter capability만 확인하며 과금되는 외부 호출을 하지 않는다. 실제 model 호출은 별도 Agent runtime 단계 전까지 비활성이다. |
 | LLM-093 | 외부 Provider·Model metadata와 credential은 UI에서 등록할 수 있지만 외부 Model route 검증은 `EXTERNAL_RUNTIME_NOT_IMPLEMENTED`로 fail-closed한다. Mock ACTIVE route와 주문 0건 경계는 유지한다. |
 
+### 13.3 간편 Provider 등록과 모델 발견
+
+| ID | 요구사항 |
+| --- | --- |
+| LLM-094 | 기본 등록 화면은 서비스 제공자, 사용자가 정한 연결 이름, write-only API key만 입력받는다. 공식 Provider endpoint와 data policy는 서버 카탈로그가 결정하며 사용자가 URL을 입력하지 않는다. |
+| LLM-095 | 등록은 대상에 결합된 TOTP 재인증 후 실제 Provider 모델 목록 API를 호출한다. 인증과 응답 계약 검증이 성공한 경우에만 Provider, secret ref와 발견 모델을 한 묶음으로 저장하며 실패한 Provider 초안을 남기지 않는다. |
+| LLM-096 | 모델 발견 요청은 15초 timeout, redirect 금지, 최대 5 MiB 응답, 최대 10,000개 모델 제한을 적용하고 credential·Authorization header·Provider 원문 오류를 응답이나 로그에 노출하지 않는다. |
+| LLM-097 | 발견 모델은 기본적으로 `DRAFT`이며 사용자가 `사용`으로 전환한 모델만 `VALIDATED`가 되어 역할 배정 선택지에 나타난다. 같은 모델은 여러 역할에 재사용할 수 있다. |
+| LLM-098 | 등록된 Provider의 모델 동기화는 저장된 write-only credential로 모델 목록을 다시 조회하여 새 모델을 추가한다. 기존 활성 모델과 역할 이력은 자동 삭제하거나 재배정하지 않는다. |
+| LLM-099 | 외부 모델은 등록·활성화·역할 변경 후보 선택까지 가능하지만 Agent 외부 호출 runtime이 검증되기 전 route 활성화와 주문 영향은 `EXTERNAL_RUNTIME_NOT_IMPLEMENTED`로 차단한다. |
+
 ## 14. 검증·인수 조건
 
 - 같은 canonical request fixture가 모든 Adapter에서 동일한 내부 schema로 정규화된다.

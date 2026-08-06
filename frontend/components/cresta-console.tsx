@@ -40,6 +40,7 @@ import {
   llmApi,
   LlmCapabilities,
   LlmModelProfile,
+  LlmProviderCatalogItem,
   LlmProviderProfile,
   LlmRoleAssignment,
   LlmRoleRoute,
@@ -491,14 +492,7 @@ const emptyRoleDraft: RoleParameterDraft = {
   seed: "",
 };
 
-const providerDefinitions = {
-  MOCK: { endpoint: "", dataPolicy: "NONE", label: "Cresta Mock" },
-  OPENAI_RESPONSES: { endpoint: "https://api.openai.com/v1", dataPolicy: "EXTERNAL_CLOUD", label: "OpenAI Responses" },
-  ANTHROPIC_MESSAGES: { endpoint: "https://api.anthropic.com/v1", dataPolicy: "EXTERNAL_CLOUD", label: "Anthropic Messages" },
-  GEMINI_GENERATE_CONTENT: { endpoint: "https://generativelanguage.googleapis.com/v1beta", dataPolicy: "EXTERNAL_CLOUD", label: "Gemini Generate Content" },
-} as const;
-
-type SupportedProviderAdapter = keyof typeof providerDefinitions;
+type SupportedProviderAdapter = "OPENAI_RESPONSES" | "ANTHROPIC_MESSAGES" | "GEMINI_GENERATE_CONTENT";
 
 function capabilitiesFor(adapter: string): LlmCapabilities {
   return {
@@ -521,17 +515,18 @@ function LlmFoundationPanel({
   onSessionExpired: () => void;
 }) {
   const [providers, setProviders] = useState<LlmProviderProfile[]>([]);
+  const [providerCatalog, setProviderCatalog] = useState<LlmProviderCatalogItem[]>([]);
   const [models, setModels] = useState<LlmModelProfile[]>([]);
   const [routes, setRoutes] = useState<LlmRoleRoute[]>([]);
   const [assignments, setAssignments] = useState<LlmRoleAssignment[]>([]);
   const [tab, setTab] = useState<LlmTab>("assignments");
   const [showProviderForm, setShowProviderForm] = useState(false);
   const [showModelForm, setShowModelForm] = useState(false);
-  const [providerName, setProviderName] = useState("cresta-mock");
-  const [providerAdapter, setProviderAdapter] = useState<SupportedProviderAdapter>("MOCK");
-  const [providerEndpoint, setProviderEndpoint] = useState("");
+  const [providerName, setProviderName] = useState("");
+  const [providerAdapter, setProviderAdapter] = useState<SupportedProviderAdapter>("OPENAI_RESPONSES");
   const [providerCredential, setProviderCredential] = useState("");
-  const [credentialTarget, setCredentialTarget] = useState<{ providerId: string; targetId: string; credential: string } | null>(null);
+  const [credentialTarget, setCredentialTarget] = useState<{ name: string; adapterType: SupportedProviderAdapter; targetId: string; credential: string } | null>(null);
+  const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
   const [modelProviderId, setModelProviderId] = useState("");
   const [modelAlias, setModelAlias] = useState("deterministic-shadow-v1");
   const [providerModelId, setProviderModelId] = useState("deterministic-mock-v2");
@@ -547,12 +542,14 @@ function LlmFoundationPanel({
 
   const load = useCallback(async (signal?: AbortSignal, resetSelection = false) => {
     try {
-      const [providerResult, modelResult, routeResult, assignmentResult] = await Promise.all([
+      const [catalogResult, providerResult, modelResult, routeResult, assignmentResult] = await Promise.all([
+        llmApi.providerCatalog(signal),
         llmApi.providers(signal),
         llmApi.models(signal),
         llmApi.routes(signal),
         llmApi.assignments(signal),
       ]);
+      setProviderCatalog(catalogResult.items);
       setProviders(providerResult.items);
       setModels(modelResult.items);
       setRoutes(routeResult.items);
@@ -599,24 +596,12 @@ function LlmFoundationPanel({
   async function createProviderProfile(event: FormEvent) {
     event.preventDefault(); setBusy(true); setMessage("");
     try {
-      const definition = providerDefinitions[providerAdapter];
-      const provider = await llmApi.createProvider(session.csrf_token, {
-        name: providerName,
-        adapterType: providerAdapter,
-        endpoint: providerAdapter === "MOCK" ? null : providerEndpoint,
-        dataPolicy: definition.dataPolicy,
-      });
-      if (providerAdapter !== "MOCK") {
-        const preview = await llmApi.previewCredential(session.csrf_token, provider.id);
-        setCredentialTarget({ providerId: provider.id, targetId: preview.target_id, credential: providerCredential });
-        setMessage("Provider 초안을 만들었습니다. TOTP 확인 후 API 키를 write-only 저장합니다.");
-      } else {
-        await load(undefined, true);
-        setMessage("Mock Provider 초안이 생성되었습니다.");
-      }
+      const preview = await llmApi.previewRegistration(session.csrf_token, providerName, providerAdapter);
+      setCredentialTarget({ name: providerName, adapterType: providerAdapter, targetId: preview.target_id, credential: providerCredential });
+      setMessage("TOTP 확인 후 실제 API 키와 모델 목록을 검증합니다. 성공한 연결만 저장됩니다.");
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
-      else setMessage("Provider 초안을 만들지 못했습니다. 이름과 endpoint를 확인해 주세요.");
+      else setMessage("등록 준비를 완료하지 못했습니다. 연결 이름이 중복되지 않았는지 확인해 주세요.");
     } finally { setBusy(false); }
   }
 
@@ -625,14 +610,17 @@ function LlmFoundationPanel({
     if (!credentialTarget) return;
     setBusy(true); setMessage("");
     try {
-      const proof = await authApi.reauthTotp(session.csrf_token, totp, "LLM_PROVIDER_CREDENTIAL_SET", credentialTarget.targetId);
-      await llmApi.setCredential(session.csrf_token, credentialTarget.providerId, credentialTarget.credential, proof.reauth_proof);
+      const proof = await authApi.reauthTotp(session.csrf_token, totp, "LLM_PROVIDER_REGISTER", credentialTarget.targetId);
+      const result = await llmApi.registerProvider(session.csrf_token, credentialTarget.name, credentialTarget.adapterType, credentialTarget.credential, proof.reauth_proof);
       setCredentialTarget(null); setProviderCredential(""); setTotp("");
+      setProviderName("");
+      setExpandedProviders((current) => ({ ...current, [result.provider.id]: true }));
       await load(undefined, true);
-      setMessage("API 키를 파일 secret으로 저장했습니다. 키 값은 다시 표시되지 않습니다.");
+      setMessage(`${result.models.length}개 모델을 확인하고 Provider를 등록했습니다. 사용할 모델을 활성화해 주세요.`);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
-      else setMessage("API 키를 저장하지 못했습니다. TOTP를 확인해 주세요.");
+      else setMessage("연결 시험 또는 모델 조회에 실패했습니다. Provider와 API 키를 확인해 주세요. 실패한 연결은 저장되지 않았습니다.");
+      setProviderCredential("");
       setTotp("");
     } finally { setBusy(false); }
   }
@@ -716,7 +704,20 @@ function LlmFoundationPanel({
 
     <div className="llm-tabs" role="tablist">{(["providers", "models", "assignments", "history"] as const).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)} role="tab" aria-selected={tab === item}>{item === "providers" ? "Provider" : item === "models" ? "Models" : item === "assignments" ? "역할별 배정" : "이력"}</button>)}</div>
 
-    {tab === "providers" && <div className="llm-catalog"><div className="catalog-toolbar"><div><strong>Provider 카탈로그</strong><small>연결 정보는 Provider당 한 번만 등록합니다. API 키는 저장 후 다시 표시하지 않습니다.</small></div><button className="secondary-button" onClick={() => setShowProviderForm((value) => !value)}>{showProviderForm ? "닫기" : "Provider 추가"}</button></div>{showProviderForm && <form className="compact-editor model-editor" onSubmit={createProviderProfile}><label>Provider 종류<select value={providerAdapter} onChange={(event) => { const adapter = event.target.value as SupportedProviderAdapter; setProviderAdapter(adapter); setProviderEndpoint(providerDefinitions[adapter].endpoint); }}>{Object.entries(providerDefinitions).map(([value, item]) => <option key={value} value={value}>{item.label}</option>)}</select></label><label>Provider 이름<input value={providerName} onChange={(event) => setProviderName(event.target.value.replace(/[^A-Za-z0-9_-]/g, ""))} required /></label>{providerAdapter !== "MOCK" && <><label>API endpoint<input type="url" value={providerEndpoint} onChange={(event) => setProviderEndpoint(event.target.value)} required /></label><label>API key (write-only)<input type="password" value={providerCredential} onChange={(event) => setProviderCredential(event.target.value)} autoComplete="new-password" required /></label></>}<button className="secondary-button" disabled={busy || !providerName || (providerAdapter !== "MOCK" && (!providerEndpoint || !providerCredential))}>Provider 생성</button></form>}<div className="catalog-list">{providers.map((provider) => <article className="catalog-row" key={provider.id}><div><strong>{provider.name}</strong><small>{provider.adapter_type} · {provider.data_policy} · credential {provider.credential_configured ? "설정됨" : "없음"}</small></div><div><span className={`status-pill ${provider.health_status === "READY" ? "ok" : "neutral"}`}>{provider.state} · {provider.health_status}</span><button className="secondary-button" disabled={busy || (provider.adapter_type !== "MOCK" && !provider.credential_configured)} onClick={() => void perform(() => llmApi.testProvider(session.csrf_token, provider.id), "Provider 어댑터 계약을 검증했습니다.")}>연결 계약 검증</button></div></article>)}</div></div>}
+    {tab === "providers" && <div className="llm-catalog">
+      <div className="catalog-toolbar"><div><strong>Provider 관리</strong><small>서비스 제공자와 API 키를 확인한 뒤 모델 목록까지 한 번에 등록합니다.</small></div><button className="secondary-button" onClick={() => setShowProviderForm((value) => !value)}>{showProviderForm ? "닫기" : "Provider 추가"}</button></div>
+      {showProviderForm && <form className="compact-editor provider-registration" onSubmit={createProviderProfile}>
+        <label>서비스 제공자<select value={providerAdapter} onChange={(event) => setProviderAdapter(event.target.value as SupportedProviderAdapter)}>{providerCatalog.map((item) => <option key={item.adapter_type} value={item.adapter_type}>{item.label}</option>)}</select></label>
+        <label>연결 이름<input value={providerName} onChange={(event) => setProviderName(event.target.value.replace(/[^A-Za-z0-9_-]/g, ""))} placeholder="예: openai-primary" required /></label>
+        <label>API 키<input type="password" value={providerCredential} onChange={(event) => setProviderCredential(event.target.value)} autoComplete="new-password" placeholder="저장 후 다시 표시되지 않음" required /></label>
+        <button className="primary-button" disabled={busy || !providerName || !providerCredential}>{busy ? "확인 중…" : "연결 시험 및 등록"}</button>
+        <small className="form-hint">공식 endpoint는 서버가 고정합니다. 실제 모델 목록 조회가 실패하면 연결과 API 키를 저장하지 않습니다.</small>
+      </form>}
+      <div className="provider-cards">{providers.map((provider) => { const providerModels = models.filter((model) => model.provider_profile_id === provider.id); const activeCount = providerModels.filter((model) => model.state === "VALIDATED").length; const expanded = expandedProviders[provider.id] ?? false; return <article className="provider-card" key={provider.id}>
+        <div className="provider-card-head"><div><strong>{provider.name}</strong><small>{providerCatalog.find((item) => item.adapter_type === provider.adapter_type)?.label ?? provider.adapter_type} · 모델 {activeCount}/{providerModels.length}개 사용</small></div><span className={`status-pill ${provider.health_status === "READY" ? "ok" : "neutral"}`}>{provider.state} · {provider.health_status}</span><button className="secondary-button" onClick={() => setExpandedProviders((current) => ({ ...current, [provider.id]: !expanded }))}>{expanded ? "모델 접기" : "모델 보기"}</button><button className="secondary-button" disabled={busy || !provider.credential_configured || provider.adapter_type === "MOCK"} onClick={() => void perform(() => llmApi.syncProviderModels(session.csrf_token, provider.id), "모델 목록을 동기화했습니다.")}>동기화</button></div>
+        {expanded && <div className="provider-model-grid">{providerModels.length === 0 ? <small>등록된 모델이 없습니다.</small> : providerModels.map((model) => <div className="provider-model-item" key={model.id}><div><strong>{model.alias}</strong><small>{model.provider_model_id}</small></div><button className={model.state === "VALIDATED" ? "model-toggle active" : "model-toggle"} disabled={busy} onClick={() => void perform(() => model.state === "VALIDATED" ? llmApi.disableModel(session.csrf_token, model.id) : llmApi.validateModel(session.csrf_token, model.id), model.state === "VALIDATED" ? "모델을 사용 안 함으로 전환했습니다." : "모델을 역할 배정에서 사용할 수 있습니다.")}>{model.state === "VALIDATED" ? "사용 중" : "사용 안 함"}</button></div>)}</div>}
+      </article>; })}</div>
+    </div>}
 
     {tab === "models" && <div className="llm-catalog"><div className="catalog-toolbar"><div><strong>Model 카탈로그</strong><small>등록 모델은 여러 역할에서 재사용할 수 있습니다.</small></div><button className="secondary-button" onClick={() => setShowModelForm((value) => !value)}>{showModelForm ? "닫기" : "Model 추가"}</button></div>{showModelForm && <form className="compact-editor model-editor" onSubmit={(event) => { event.preventDefault(); const provider = providers.find((item) => item.id === modelProviderId); if (!provider) return; void perform(() => llmApi.createModel(session.csrf_token, modelProviderId, modelAlias, providerModelId, capabilitiesFor(provider.adapter_type), { temperature: modelTemperature, topP: modelTopP || null, maxOutputTokens: Number(modelMaxTokens), seed: provider.adapter_type === "MOCK" || provider.adapter_type === "GEMINI_GENERATE_CONTENT" ? 0 : null }), "Model Profile 초안이 생성되었습니다."); }}><label>Provider<select value={modelProviderId} onChange={(event) => setModelProviderId(event.target.value)} required><option value="">선택</option>{providers.filter((item) => item.state === "VALIDATED").map((item) => <option key={item.id} value={item.id}>{item.name} · {item.adapter_type}</option>)}</select></label><label>Model 별칭<input value={modelAlias} onChange={(event) => setModelAlias(event.target.value.replace(/[^A-Za-z0-9_.-]/g, ""))} required /></label><label>Provider model ID<input value={providerModelId} onChange={(event) => setProviderModelId(event.target.value)} required /></label><label>기본 temperature<input type="number" min="0" max="2" step="0.1" value={modelTemperature} onChange={(event) => setModelTemperature(event.target.value)} /></label><label>기본 top_p<input type="number" min="0" max="1" step="0.1" value={modelTopP} onChange={(event) => setModelTopP(event.target.value)} placeholder="Adapter 기본" /></label><label>기본 max output<input type="number" min="1" max="32768" value={modelMaxTokens} onChange={(event) => setModelMaxTokens(event.target.value)} /></label><button className="secondary-button" disabled={busy || !modelProviderId}>Model 생성</button></form>}<div className="catalog-list">{models.map((model) => <article className="catalog-row" key={model.id}><div><strong>{model.alias}</strong><small>{providers.find((item) => item.id === model.provider_profile_id)?.name ?? "-"} · {model.provider_model_id}</small><small>temperature {model.temperature} · top_p {model.top_p ?? "AUTO"} · max {model.max_output_tokens}</small></div><div><span className={`status-pill ${model.state === "VALIDATED" ? "ok" : "neutral"}`}>{model.state}</span><button className="secondary-button" disabled={busy || model.state !== "DRAFT"} onClick={() => void perform(() => llmApi.validateModel(session.csrf_token, model.id), "Model capability를 검증했습니다.")}>모델 검증</button></div></article>)}</div></div>}
 
@@ -725,7 +726,7 @@ function LlmFoundationPanel({
     {tab === "history" && <div className="catalog-list history-list">{routes.map((route) => <article className="catalog-row" key={route.id}><div><strong>{route.role} · {route.primary_model_alias}</strong><small>{formatDateTime(route.created_at)} · temperature {route.effective_parameters.temperature} · max {route.effective_parameters.max_output_tokens}</small></div><span className={`status-pill ${route.state === "ACTIVE" ? "ok" : "neutral"}`}>{route.state}</span></article>)}</div>}
 
     {activationTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="assignment-confirm-title"><span className="section-kicker">TOTP REAUTHENTICATION</span><h2 id="assignment-confirm-title">역할별 모델 배정 적용</h2><p>선택한 5개 역할 배정을 한 번에 적용합니다. 기존 활성 배정은 이력으로 보존되며 SHADOW 진단만 변경됩니다.</p><form onSubmit={activateAll}><label>현재 TOTP 코드<input className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setActivationTarget(null); setTotp(""); }} disabled={busy}>취소</button><button className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "적용 중…" : "5개 역할 적용"}</button></div></form></section></div>}
-    {credentialTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="credential-confirm-title"><span className="section-kicker">WRITE-ONLY CREDENTIAL</span><h2 id="credential-confirm-title">Provider API 키 저장</h2><p>키는 서버의 전용 파일에 저장되고 DB·API 응답·감사 로그에는 기록되지 않습니다. 저장 후 값은 다시 표시되지 않습니다.</p><form onSubmit={saveProviderCredential}><label>현재 TOTP 코드<input className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setCredentialTarget(null); setProviderCredential(""); setTotp(""); }} disabled={busy}>취소</button><button className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "저장 중…" : "API 키 저장"}</button></div></form></section></div>}
+    {credentialTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="credential-confirm-title"><span className="section-kicker">CONNECTION VERIFICATION</span><h2 id="credential-confirm-title">Provider 연결 시험 및 등록</h2><p>실제 API 키로 모델 목록을 조회합니다. 성공하면 키는 서버 전용 파일에 저장되고 발견 모델은 사용 안 함 상태로 등록됩니다.</p><form onSubmit={saveProviderCredential}><label>현재 TOTP 코드<input className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setCredentialTarget(null); setProviderCredential(""); setTotp(""); }} disabled={busy}>취소</button><button className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "연결 확인 중…" : "연결 시험 및 등록"}</button></div></form></section></div>}
   </section>;
 }
 

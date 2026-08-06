@@ -296,6 +296,11 @@ export type LlmProviderProfile = {
   created_at: string;
 };
 
+export type LlmProviderCatalogItem = {
+  adapter_type: "OPENAI_RESPONSES" | "ANTHROPIC_MESSAGES" | "GEMINI_GENERATE_CONTENT";
+  label: string;
+};
+
 export type LlmModelProfile = {
   id: string;
   provider_profile_id: string;
@@ -483,6 +488,44 @@ export const settingsApi = {
 };
 
 export const llmApi = {
+  providerCatalog(signal?: AbortSignal) {
+    return request<{ schema_version: "1.0"; request_id: string; items: LlmProviderCatalogItem[] }>(
+      "/api/v1/ai/provider-catalog",
+      { signal },
+    );
+  },
+  previewRegistration(csrfToken: string, name: string, adapterType: string) {
+    return request<{ target_action: "LLM_PROVIDER_REGISTER"; target_id: string }>(
+      "/api/v1/ai/provider-registrations/preview",
+      {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({ schema_version: "1.0", name, adapter_type: adapterType }),
+      },
+    );
+  },
+  registerProvider(
+    csrfToken: string,
+    name: string,
+    adapterType: string,
+    credential: string,
+    reauthProof: string,
+  ) {
+    return request<{ provider: LlmProviderProfile; models: LlmModelProfile[] }>(
+      "/api/v1/ai/provider-registrations",
+      {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({
+          schema_version: "1.0",
+          name,
+          adapter_type: adapterType,
+          credential,
+          reauth_proof: reauthProof,
+        }),
+      },
+    );
+  },
   providers(signal?: AbortSignal) {
     return request<{ schema_version: "1.0"; request_id: string; items: LlmProviderProfile[] }>(
       "/api/v1/ai/providers",
@@ -528,6 +571,12 @@ export const llmApi = {
       { method: "POST", headers: { "X-CSRF-Token": csrfToken } },
     );
   },
+  syncProviderModels(csrfToken: string, providerId: string) {
+    return request<{ provider: LlmProviderProfile; models: LlmModelProfile[] }>(
+      `/api/v1/ai/providers/${encodeURIComponent(providerId)}/models/sync`,
+      { method: "POST", headers: { "X-CSRF-Token": csrfToken } },
+    );
+  },
   models(signal?: AbortSignal) {
     return request<{ schema_version: "1.0"; request_id: string; items: LlmModelProfile[] }>(
       "/api/v1/ai/models",
@@ -567,6 +616,12 @@ export const llmApi = {
   },
   validateModel(csrfToken: string, modelId: string) {
     return request<LlmModelProfile>(`/api/v1/ai/models/${encodeURIComponent(modelId)}/validate`, {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+    });
+  },
+  disableModel(csrfToken: string, modelId: string) {
+    return request<LlmModelProfile>(`/api/v1/ai/models/${encodeURIComponent(modelId)}/disable`, {
       method: "POST",
       headers: { "X-CSRF-Token": csrfToken },
     });

@@ -502,6 +502,35 @@ class LlmProviderListResponse(StrictModel):
     items: list[LlmProviderResponse]
 
 
+class LlmProviderCatalogItem(StrictModel):
+    adapter_type: Literal["OPENAI_RESPONSES", "ANTHROPIC_MESSAGES", "GEMINI_GENERATE_CONTENT"]
+    label: str
+
+
+class LlmProviderCatalogResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[LlmProviderCatalogItem]
+
+
+class LlmProviderRegistrationPreviewRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+    adapter_type: Literal["OPENAI_RESPONSES", "ANTHROPIC_MESSAGES", "GEMINI_GENERATE_CONTENT"]
+
+
+class LlmProviderRegistrationPreviewResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    target_action: Literal["LLM_PROVIDER_REGISTER"] = "LLM_PROVIDER_REGISTER"
+    target_id: str
+
+
+class LlmProviderRegistrationRequest(LlmProviderRegistrationPreviewRequest):
+    credential: str = Field(min_length=1, max_length=8192, repr=False)
+    reauth_proof: str = Field(min_length=32, max_length=256)
+
+
 class LlmProviderTestResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str
@@ -561,6 +590,13 @@ class LlmModelListResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str
     items: list[LlmModelResponse]
+
+
+class LlmProviderRegistrationResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    provider: LlmProviderResponse
+    models: list[LlmModelResponse]
 
 
 class LlmRouteCreateRequest(StrictModel):

@@ -8,13 +8,19 @@ from ipaddress import ip_address
 from urllib.parse import urlparse
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth.service import consume_reauth_proof
 from app.config import Settings
 from app.llm.adapters.mock import MOCK_CAPABILITIES
 from app.llm.contracts import ModelCapabilities, ProviderHealth
+from app.llm.discovery import (
+    CATALOG,
+    DiscoveredModel,
+    ModelDiscoveryError,
+    discover_models,
+)
 from app.llm.registry import AdapterNotImplementedError, provider_registry
 from app.llm.router import RouteBoundaryError, validate_foundation_route
 from app.llm.secrets import LlmSecretError, LlmSecretStore
@@ -54,6 +60,7 @@ ASSIGNMENT_ROLES = (
 )
 ASSIGNMENT_REAUTH_ACTION = "LLM_ROLE_ASSIGNMENT_ACTIVATE"
 CREDENTIAL_REAUTH_ACTION = "LLM_PROVIDER_CREDENTIAL_SET"
+REGISTRATION_REAUTH_ACTION = "LLM_PROVIDER_REGISTER"
 
 
 class LlmProfileError(Exception):
@@ -148,6 +155,204 @@ def list_providers(db: Session, owner_id: str) -> list[LlmProviderProfile]:
             .order_by(LlmProviderProfile.created_at)
         )
     )
+
+
+def registration_target_id(*, owner_id: str, name: str, adapter_type: str) -> str:
+    value = f"{owner_id}:{name.strip()}:{adapter_type}"
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def preview_provider_registration(
+    db: Session, *, owner_id: str, name: str, adapter_type: str
+) -> str:
+    if adapter_type not in CATALOG:
+        raise LlmProfileError("PROVIDER_DISCOVERY_UNSUPPORTED")
+    normalized_name = name.strip()
+    existing = db.scalar(
+        select(LlmProviderProfile.id).where(
+            LlmProviderProfile.owner_id == owner_id,
+            LlmProviderProfile.name == normalized_name,
+        )
+    )
+    if existing:
+        raise LlmProfileError("PROVIDER_NAME_CONFLICT", 409)
+    return registration_target_id(
+        owner_id=owner_id, name=normalized_name, adapter_type=adapter_type
+    )
+
+
+def _discovered_alias(model_id: str, used: set[str]) -> str:
+    base = "".join(char if char.isalnum() or char in "_.-" else "-" for char in model_id)
+    base = base.strip(".-_")[:64] or "model"
+    alias = base
+    suffix = 2
+    while alias in used:
+        tail = f"-{suffix}"
+        alias = f"{base[: 64 - len(tail)]}{tail}"
+        suffix += 1
+    used.add(alias)
+    return alias
+
+
+def _discovered_capabilities(adapter_type: str) -> ModelCapabilities:
+    return ModelCapabilities(
+        structured_output=True,
+        reasoning=adapter_type in {"OPENAI_RESPONSES", "GEMINI_GENERATE_CONTENT"},
+        seed=adapter_type == "GEMINI_GENERATE_CONTENT",
+        usage_reporting=True,
+    )
+
+
+def _add_discovered_models(
+    db: Session,
+    *,
+    provider: LlmProviderProfile,
+    discovered: list[DiscoveredModel],
+) -> list[LlmModelProfile]:
+    existing = list(
+        db.scalars(
+            select(LlmModelProfile).where(LlmModelProfile.provider_profile_id == provider.id)
+        )
+    )
+    by_provider_id = {item.provider_model_id: item for item in existing}
+    used_aliases = {item.alias for item in existing}
+    created: list[LlmModelProfile] = []
+    capabilities = _discovered_capabilities(provider.adapter_type)
+    for item in discovered:
+        if item.provider_model_id in by_provider_id:
+            continue
+        model = LlmModelProfile(
+            provider_profile_id=provider.id,
+            alias=_discovered_alias(item.provider_model_id, used_aliases),
+            provider_model_id=item.provider_model_id,
+            capabilities_json=capabilities.model_dump_json(),
+            max_context_tokens=item.max_context_tokens,
+            max_output_tokens=min(item.max_output_tokens or 1024, 32768),
+            temperature=Decimal(0),
+            top_p=None,
+            reasoning_effort=None,
+            seed=None,
+            state="DRAFT",
+        )
+        db.add(model)
+        created.append(model)
+    return created
+
+
+def register_provider_with_discovery(
+    db: Session,
+    *,
+    user: User,
+    name: str,
+    adapter_type: str,
+    credential: str,
+    reauth_proof: str,
+    correlation_id: str,
+    settings: Settings,
+) -> tuple[LlmProviderProfile, list[LlmModelProfile]]:
+    normalized_name = name.strip()
+    target_id = preview_provider_registration(
+        db, owner_id=user.id, name=normalized_name, adapter_type=adapter_type
+    )
+    consume_reauth_proof(
+        db,
+        user=user,
+        raw_proof=reauth_proof,
+        target_action=REGISTRATION_REAUTH_ACTION,
+        target_id=target_id,
+    )
+    db.commit()
+    try:
+        discovered = discover_models(adapter_type, credential)
+    except ModelDiscoveryError as exc:
+        raise LlmProfileError(exc.code, exc.status_code) from exc
+
+    catalog = CATALOG[adapter_type]
+    provider = LlmProviderProfile(
+        owner_id=user.id,
+        name=normalized_name,
+        adapter_type=adapter_type,
+        endpoint=catalog.endpoint,
+        credential_secret_ref=None,
+        data_policy=catalog.data_policy,
+        state="VALIDATED",
+        health_status="READY",
+        last_tested_at=datetime.now(UTC),
+    )
+    db.add(provider)
+    secret_ref: str | None = None
+    try:
+        db.flush()
+        secret_ref = LlmSecretStore(settings.llm_secret_directory).write_provider_credential(
+            provider.id, credential
+        )
+        provider.credential_secret_ref = secret_ref
+        models = _add_discovered_models(db, provider=provider, discovered=discovered)
+        _audit(
+            db,
+            user=user,
+            action="LLM_PROVIDER_REGISTERED",
+            target=provider.id,
+            correlation_id=correlation_id,
+            metadata={"adapter_type": adapter_type, "discovered_model_count": len(models)},
+        )
+        db.commit()
+    except (SQLAlchemyError, LlmSecretError) as exc:
+        db.rollback()
+        if secret_ref:
+            try:
+                LlmSecretStore(settings.llm_secret_directory).delete(secret_ref)
+            except LlmSecretError:
+                pass
+        if isinstance(exc, IntegrityError):
+            raise LlmProfileError("PROVIDER_NAME_CONFLICT", 409) from exc
+        if isinstance(exc, LlmSecretError):
+            raise LlmProfileError(exc.args[0]) from exc
+        raise LlmProfileError("PROVIDER_PERSISTENCE_FAILED", 500) from exc
+    db.refresh(provider)
+    for model in models:
+        db.refresh(model)
+    return provider, models
+
+
+def sync_provider_models(
+    db: Session,
+    *,
+    user: User,
+    provider_id: str,
+    correlation_id: str,
+    settings: Settings,
+) -> tuple[LlmProviderProfile, list[LlmModelProfile]]:
+    provider = get_provider(db, user.id, provider_id)
+    if provider.adapter_type not in CATALOG or not provider.credential_secret_ref:
+        raise LlmProfileError("PROVIDER_CREDENTIAL_REQUIRED")
+    try:
+        credential = LlmSecretStore(settings.llm_secret_directory).read(
+            provider.credential_secret_ref
+        )
+        discovered = discover_models(provider.adapter_type, credential)
+    except LlmSecretError as exc:
+        raise LlmProfileError(exc.args[0]) from exc
+    except ModelDiscoveryError as exc:
+        raise LlmProfileError(exc.code, exc.status_code) from exc
+    created = _add_discovered_models(db, provider=provider, discovered=discovered)
+    provider.health_status = "READY"
+    provider.state = "VALIDATED"
+    provider.last_tested_at = datetime.now(UTC)
+    provider.version += 1
+    _audit(
+        db,
+        user=user,
+        action="LLM_PROVIDER_MODELS_SYNCED",
+        target=provider.id,
+        correlation_id=correlation_id,
+        metadata={"discovered_model_count": len(discovered), "new_model_count": len(created)},
+    )
+    db.commit()
+    db.refresh(provider)
+    for model in created:
+        db.refresh(model)
+    return provider, created
 
 
 def create_provider(
@@ -400,11 +605,15 @@ def validate_model(
         available = MOCK_CAPABILITIES
     else:
         try:
-            available = provider_registry.resolve(
-                provider.adapter_type,
-                endpoint=provider.endpoint,
-                credential="capability-check-only",
-            ).healthcheck().capabilities
+            available = (
+                provider_registry.resolve(
+                    provider.adapter_type,
+                    endpoint=provider.endpoint,
+                    credential="capability-check-only",
+                )
+                .healthcheck()
+                .capabilities
+            )
         except AdapterNotImplementedError as exc:
             raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED") from exc
     unsupported = [
@@ -424,6 +633,37 @@ def validate_model(
         target=model.id,
         correlation_id=correlation_id,
         metadata={"provider_id": provider.id},
+    )
+    db.commit()
+    db.refresh(model)
+    return model
+
+
+def disable_model(
+    db: Session,
+    *,
+    user: User,
+    model_id: str,
+    correlation_id: str,
+) -> LlmModelProfile:
+    model = get_model(db, user.id, model_id)
+    active_route = db.scalar(
+        select(LlmRoleRoute.id).where(
+            LlmRoleRoute.primary_model_profile_id == model.id,
+            LlmRoleRoute.state == "ACTIVE",
+        )
+    )
+    if active_route:
+        raise LlmProfileError("MODEL_IN_ACTIVE_ROUTE", 409)
+    model.state = "DISABLED"
+    model.version += 1
+    _audit(
+        db,
+        user=user,
+        action="LLM_MODEL_DISABLED",
+        target=model.id,
+        correlation_id=correlation_id,
+        metadata={"provider_id": model.provider_profile_id},
     )
     db.commit()
     db.refresh(model)
@@ -564,9 +804,7 @@ def effective_generation_parameters(
         else model.reasoning_effort,
         "reasoning_effort_source": "ROLE_OVERRIDE"
         if route.reasoning_effort_override is not None
-        else (
-            "MODEL_DEFAULT" if model.reasoning_effort is not None else "ADAPTER_DEFAULT"
-        ),
+        else ("MODEL_DEFAULT" if model.reasoning_effort is not None else "ADAPTER_DEFAULT"),
         "seed": route.seed_override if route.seed_override is not None else model.seed,
         "seed_source": "ROLE_OVERRIDE"
         if route.seed_override is not None

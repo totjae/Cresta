@@ -263,7 +263,7 @@ describe("execution policy settings", () => {
     }));
   });
 
-  it("creates only a credential-free Mock provider from the SHADOW foundation panel", async () => {
+  it("registers a provider only after TOTP and successful model discovery", async () => {
     const safePolicy = {
       buy: "MANUAL_APPROVAL", partial_sell: "MANUAL_APPROVAL", full_sell: "MANUAL_APPROVAL",
       take_profit: "MANUAL_APPROVAL", fixed_stop_loss: "AUTOMATIC", trailing_stop: "AUTOMATIC",
@@ -274,7 +274,10 @@ describe("execution policy settings", () => {
       if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-llm", login_id: "admin", expires_at: "2026-08-05T09:00:00Z", csrf_token: "csrf-llm" });
       if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
       if (path === "/api/v1/settings/execution-policy") return jsonResponse({ active_version_id: null, source: "SAFE_DEFAULT", policy: safePolicy });
-      if (path === "/api/v1/ai/providers" && init?.method === "POST") return jsonResponse({ id: "provider-1" }, 201);
+      if (path === "/api/v1/ai/provider-catalog") return jsonResponse({ items: [{ adapter_type: "OPENAI_RESPONSES", label: "OpenAI" }] });
+      if (path.endsWith("/provider-registrations/preview")) return jsonResponse({ target_action: "LLM_PROVIDER_REGISTER", target_id: "registration-target" });
+      if (path === "/api/v1/auth/reauth/totp") return jsonResponse({ reauth_proof: "registration-proof-value-1234567890", expires_at: "2026-08-06T01:05:00Z" });
+      if (path.endsWith("/provider-registrations") && init?.method === "POST") return jsonResponse({ provider: { id: "provider-1" }, models: [{ id: "model-1" }] }, 201);
       if (path === "/api/v1/ai/providers") return jsonResponse({ schema_version: "1.0", request_id: "providers-1", items: [] });
       if (path === "/api/v1/ai/models") return jsonResponse({ schema_version: "1.0", request_id: "models-1", items: [] });
       if (path === "/api/v1/ai/routes") return jsonResponse({ schema_version: "1.0", request_id: "routes-1", items: [] });
@@ -287,26 +290,24 @@ describe("execution policy settings", () => {
 
     await user.click(await screen.findByRole("button", { name: /전략·설정/ }));
     expect(await screen.findByText("SHADOW ONLY")).toBeInTheDocument();
-    expect(screen.queryByLabelText(/credential/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Provider" }));
     await user.click(screen.getByRole("button", { name: "Provider 추가" }));
-    await user.clear(screen.getByLabelText("Provider 이름"));
-    await user.type(screen.getByLabelText("Provider 이름"), "foundation-mock");
-    await user.click(screen.getByRole("button", { name: "Provider 생성" }));
-    expect(await screen.findByText("Mock Provider 초안이 생성되었습니다.")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("연결 이름"), "openai-primary");
+    await user.type(screen.getByLabelText("API 키"), "secret-provider-key");
+    await user.click(screen.getAllByRole("button", { name: "연결 시험 및 등록" }).at(-1)!);
+    expect(await screen.findByRole("dialog", { name: "Provider 연결 시험 및 등록" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("현재 TOTP 코드"), "123456");
+    await user.click(screen.getAllByRole("button", { name: "연결 시험 및 등록" }).at(-1)!);
+    expect(await screen.findByText(/1개 모델을 확인/)).toBeInTheDocument();
 
-    const createCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/ai/providers" && init?.method === "POST");
+    const createCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/ai/provider-registrations" && init?.method === "POST");
     expect(createCall?.[1]).toEqual(expect.objectContaining({
       headers: expect.objectContaining({ "X-CSRF-Token": "csrf-llm" }),
     }));
-    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
-      schema_version: "1.0",
-      name: "foundation-mock",
-      adapter_type: "MOCK",
-      endpoint: null,
-      credential_secret_ref: null,
-      data_policy: "NONE",
-    });
+    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual(expect.objectContaining({
+      name: "openai-primary", adapter_type: "OPENAI_RESPONSES", credential: "secret-provider-key",
+      reauth_proof: "registration-proof-value-1234567890",
+    }));
   });
 
   it("selects one reusable model per role and activates the set with one TOTP", async () => {
@@ -333,6 +334,7 @@ describe("execution policy settings", () => {
       if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-assign", login_id: "admin", expires_at: "2026-08-06T09:00:00Z", csrf_token: "csrf-assign" });
       if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
       if (path === "/api/v1/settings/execution-policy") return jsonResponse({ active_version_id: null, source: "SAFE_DEFAULT", policy: { buy: "MANUAL_APPROVAL", partial_sell: "MANUAL_APPROVAL", full_sell: "MANUAL_APPROVAL", take_profit: "MANUAL_APPROVAL", fixed_stop_loss: "AUTOMATIC", trailing_stop: "AUTOMATIC", end_of_day_liquidation: "AUTOMATIC", emergency_exit: "AUTOMATIC" } });
+      if (path === "/api/v1/ai/provider-catalog") return jsonResponse({ items: [] });
       if (path === "/api/v1/ai/providers") return jsonResponse({ items: [] });
       if (path === "/api/v1/ai/models") return jsonResponse({ items: [] });
       if (path === "/api/v1/ai/routes") return jsonResponse({ items: active ? routes.map((item) => ({ ...item, state: "ACTIVE" })) : routes });

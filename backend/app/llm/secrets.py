@@ -56,3 +56,9 @@ class LlmSecretStore:
         if not value:
             raise LlmSecretError("LLM_CREDENTIAL_UNREADABLE")
         return value
+
+    def delete(self, secret_ref: str) -> None:
+        try:
+            self._path(secret_ref).unlink(missing_ok=True)
+        except OSError as exc:
+            raise LlmSecretError("LLM_CREDENTIAL_DELETE_FAILED") from exc

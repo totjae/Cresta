@@ -329,7 +329,9 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-143 | `POST /api/v1/ai/agent-runs/diagnostic`은 비동기 admission API다. 신규 run은 `CREATED`와 7개 `PENDING` stage를 반환하며 동일 멱등 입력은 기존 run을 반환한다. |
 | API-144 | Agent run 조회 응답은 stage별 `attempt_count`, `max_attempts`, `fencing_token`, `lease_expires_at`, `timeout_at`을 포함하되 worker owner 식별자는 노출하지 않는다. |
 
-Foundation v1에서는 `POST /ai/providers/{id}/test`, `POST /ai/models/{id}/validate`, `POST /ai/routes/{id}/validate`를 구현했다. 역할 배정 관리 단계에서 `GET /ai/role-assignments`, activation preview와 5개 역할 일괄 activate를 추가했으며 일반 단일 route `/activate`, credential mutation과 model discovery는 아직 제공하지 않는다.
+Foundation v1의 기존 수동 profile API와 역할 배정 API는 호환을 위해 유지한다. 간편 등록 단계에서는 공식 OpenAI·Anthropic·Gemini 카탈로그, TOTP 결합 등록, 실제 모델 발견·재동기화와 모델 사용/사용 안 함 API를 추가했다. 일반 단일 route `/activate`와 외부 Agent runtime 활성화는 아직 제공하지 않는다.
+
+간편 Provider 등록 API는 `GET /ai/provider-catalog`, `POST /ai/provider-registrations/preview`, `POST /ai/provider-registrations`, `POST /ai/providers/{id}/models/sync`, `POST /ai/models/{id}/disable`을 제공한다. 등록 응답에는 credential 원문이 없고 실제 모델 목록 조회가 성공한 경우에만 Provider와 발견 모델을 반환한다.
 
 Agent Runtime v1에서는 `GET /ai/agent-runs`, `GET /ai/agent-runs/{id}`, `POST /ai/agent-runs/diagnostic`을 추가한다. 생성 요청은 market·symbol과 5개 필수 role의 검증된 SHADOW route ID를 전달하며 응답은 `created`로 멱등 신규·기존 반환을 구분한다. 이 endpoint는 decision·execution·approval·order를 생성하지 않는다.
 ## 외부 LLM credential (Native Adapter Foundation v2)

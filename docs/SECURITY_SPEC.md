@@ -127,6 +127,8 @@ Argon2id 초기 최소값은 memory 64 MiB, iterations 3, parallelism 1로 한�
 | SEC-083 | 사용자 지정 Provider endpoint는 SSRF allowlist, TLS 검증, 리디렉션·응답 크기 제한을 적용하며 Ollama profile 외 loopback/private endpoint를 기본 거부한다. |
 | SEC-084 | 웹·공시·뉴스 원문은 비신뢰 입력으로 표시하고 모델이 포함된 지시나 내부 URL·비밀 요청을 실행할 수 없게 도구 권한을 분리한다. |
 | SEC-085 | Provider·Gateway별 데이터 보존·학습·지역 정책 확인 상태를 저장하고 미확인 외부 전송 profile은 활성 route에 사용할 수 없다. |
+| SEC-086 | 간편 Provider 등록 TOTP proof는 사용자·연결 이름·Adapter에 결합하고 실제 모델 목록 조회 전에 한 번 소비한다. 인증·조회 실패 시 Provider DB 행과 secret 파일을 만들지 않는다. |
+| SEC-087 | 공식 Provider 모델 조회는 서버 고정 HTTPS endpoint, redirect 금지, 15초 timeout, 5 MiB 응답 제한을 적용하며 원문 upstream 오류를 UI·API·로그에 전달하지 않는다. |
 
 ## 4. 오류·예외 또는 경계 조건
 
