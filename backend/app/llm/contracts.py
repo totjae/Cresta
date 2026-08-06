@@ -54,6 +54,8 @@ class LlmResult(ContractModel):
     ]
     actual_provider: str | None = None
     actual_model: str | None = None
+    provider_request_id: str | None = None
+    gateway_request_id: str | None = None
     output_json: dict[str, Any] | None = None
     raw_response_hash: str | None = None
     latency_ms: int = Field(ge=0)

@@ -292,7 +292,7 @@ describe("execution policy settings", () => {
     await user.click(screen.getByRole("button", { name: "Provider 추가" }));
     await user.clear(screen.getByLabelText("Provider 이름"));
     await user.type(screen.getByLabelText("Provider 이름"), "foundation-mock");
-    await user.click(screen.getByRole("button", { name: "Mock Provider 생성" }));
+    await user.click(screen.getByRole("button", { name: "Provider 생성" }));
     expect(await screen.findByText("Mock Provider 초안이 생성되었습니다.")).toBeInTheDocument();
 
     const createCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/ai/providers" && init?.method === "POST");
@@ -407,10 +407,10 @@ describe("Mock AI decisions", () => {
   });
 });
 
-describe("Agent Runtime v1", () => {
+describe("Agent Worker v2", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("runs only when five validated SHADOW routes are ready and shows no-order boundary", async () => {
+  it("admits only when five ACTIVE SHADOW routes are ready and shows no-order boundary", async () => {
     const roles = ["TECHNICAL_SCOUT", "NEWS_DISCLOSURE_SCOUT", "MARKET_SECTOR_SCOUT", "POSITION_RISK_SCOUT", "CORE"];
     const routes = roles.map((role, index) => ({
       id: `route-${index}`, role, primary_model_profile_id: "model-1", primary_model_alias: "agent-runtime-v1",
@@ -428,6 +428,7 @@ describe("Agent Runtime v1", () => {
         stage_run_id: `stage-${index}`, role, sequence: index + 1, dependencies: [], route_id: `route-${index}`,
         state: role === "NEWS_DISCLOSURE_SCOUT" ? "INSUFFICIENT_DATA" : "SUCCEEDED",
         input_hash: "b".repeat(64), output: {}, output_hash: "c".repeat(64), error_code: null,
+        attempt_count: 1, max_attempts: 1, fencing_token: 1, lease_expires_at: null, timeout_at: "2026-08-06T01:00:10Z",
         invocation: { invocation_id: `inv-${index}`, state: "SUCCEEDED", actual_provider: "CRESTA_MOCK", actual_model: "deterministic-mock-v2", latency_ms: 0, validation_status: "PASSED", error_code: null },
         started_at: "2026-08-06T01:00:00Z", completed_at: "2026-08-06T01:00:00Z",
       })),
@@ -449,10 +450,10 @@ describe("Agent Runtime v1", () => {
     render(<CrestaConsole />);
 
     await user.click(await screen.findByRole("button", { name: /AI 판단/ }));
-    expect(await screen.findByText("DIAGNOSTIC · SHADOW · 주문 없음")).toBeInTheDocument();
+    expect(await screen.findByText("비동기 · SHADOW · 주문 없음")).toBeInTheDocument();
     expect(await screen.findByText(/Route 준비: 5\/5/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "DIAGNOSTIC DAG 실행" }));
-    expect(await screen.findByText(/주문은 생성되지 않았습니다/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "DIAGNOSTIC DAG 등록" }));
+    expect(await screen.findByText(/Worker가 비동기로 실행/)).toBeInTheDocument();
     expect(await screen.findByText("WAIT")).toBeInTheDocument();
 
     const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/ai/agent-runs/diagnostic");

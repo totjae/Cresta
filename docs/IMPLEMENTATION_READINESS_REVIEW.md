@@ -102,9 +102,13 @@ Foundation의 Mock route만 사용하는 DIAGNOSTIC 다중 에이전트 runtime�
 
 Provider·Model 카탈로그와 역할별 현재 배정·이력을 분리하고 같은 검증 모델을 여러 역할에서 재사용하도록 구현했다. generation parameter 상속·override, 중복 `VALIDATED` 후보 명시 선택, 5개 역할의 TOTP 1회 원자 활성화와 ACTIVE route 기반 DIAGNOSTIC 준비도를 로컬 검증했다. 외부 credential과 실제 Adapter는 연결하지 않았다.
 
-### 4.4 다음 구현 slice: Agent Worker v2
+### 4.4 완료된 구현 slice: Agent Worker v2
 
-실서버 PostgreSQL에서 `0015`, 역할 배정 일괄 활성화와 수동 DIAGNOSTIC run을 확인한 뒤 stage claim·lease·fencing·timeout과 scheduler admission을 설계한다. 이 단계도 deterministic Mock만 사용하며 외부 source·provider 연결은 별도 게이트로 유지한다.
+비동기 DIAGNOSTIC admission, 별도 Agent worker, stage claim·lease·fencing·timeout·만료 복구와 scheduler ACTIVE route admission을 구현했다. migration `20260806_0016`, 늦은 worker 완료 거부, invocation 결과 불명 자동 재전송 금지와 주문 0건을 로컬 검증했다. 실서버 PostgreSQL 적용은 아직 미검증이다.
+
+### 4.5 다음 구현 slice: 외부 LLM Adapter 안전 경계
+
+Provider credential secret reference, 공식 API·Gateway·Ollama별 요청 정규화와 timeout·429·5xx·응답유실·usage 처리를 구현한다. 외부 모델은 SHADOW 전용이며 실제 계정·과금·네트워크 검증 전에는 활성 거래 판단이나 주문 경로로 승격하지 않는다.
 
 ## 5. 검증·인수 조건
 

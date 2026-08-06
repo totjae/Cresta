@@ -511,6 +511,20 @@ class LlmProviderTestResponse(StrictModel):
     message_code: str
 
 
+class LlmCredentialPreviewResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    target_action: Literal["LLM_PROVIDER_CREDENTIAL_SET"] = "LLM_PROVIDER_CREDENTIAL_SET"
+    target_id: str
+    provider_id: str
+
+
+class LlmCredentialSetRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    credential: str = Field(min_length=1, max_length=8192, repr=False)
+    reauth_proof: str = Field(min_length=32, max_length=256)
+
+
 class LlmModelCreateRequest(StrictModel):
     schema_version: str = Field(pattern=r"^1\.0$")
     provider_profile_id: str = Field(min_length=36, max_length=36)
@@ -685,6 +699,11 @@ class AgentStageRunResponse(StrictModel):
     output: dict[str, object] | None
     output_hash: str | None
     error_code: str | None
+    attempt_count: int
+    max_attempts: int
+    fencing_token: int
+    lease_expires_at: datetime | None
+    timeout_at: datetime | None
     invocation: AgentInvocationResponse | None
     started_at: datetime | None
     completed_at: datetime | None

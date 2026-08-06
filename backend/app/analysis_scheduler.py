@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.agents.runtime import ROUTE_ROLES, create_diagnostic_run
 from app.analysis_scheduler_state import (
     SCHEDULER_NAME,
     SchedulerIdentity,
@@ -23,7 +24,13 @@ from app.db import SessionLocal
 from app.decision_execution import route_trading_decision
 from app.ids import uuid7
 from app.mock_ai import MODEL_ID, PROMPT_VERSION, create_mock_trading_decision
-from app.models import AnalysisSchedulerState, MarketStreamState, User, WatchlistItem
+from app.models import (
+    AnalysisSchedulerState,
+    LlmRoleRoute,
+    MarketStreamState,
+    User,
+    WatchlistItem,
+)
 
 logger = logging.getLogger("cresta.analysis_scheduler")
 KST = ZoneInfo("Asia/Seoul")
@@ -79,6 +86,21 @@ def evaluation_request_id(user_id: str, market: str, symbol: str, slot_key: str)
     return "sched-" + hashlib.sha256(raw.encode()).hexdigest()[:58]
 
 
+def _active_agent_routes(db: Session, user_id: str) -> dict[str, str] | None:
+    routes = list(
+        db.scalars(
+            select(LlmRoleRoute).where(
+                LlmRoleRoute.owner_id == user_id,
+                LlmRoleRoute.role.in_(ROUTE_ROLES),
+                LlmRoleRoute.state == "ACTIVE",
+                LlmRoleRoute.execution_stage == "SHADOW",
+            )
+        )
+    )
+    route_ids = {route.role: route.id for route in routes}
+    return route_ids if set(route_ids) == set(ROUTE_ROLES) else None
+
+
 def run_analysis_tick(
     db: Session, *, slot: AnalysisSlot, settings: Settings, now: datetime
 ) -> TickResult:
@@ -125,6 +147,16 @@ def run_analysis_tick(
                 settings=settings,
                 now=now,
             )
+            route_ids = _active_agent_routes(db, user.id)
+            if route_ids is not None:
+                create_diagnostic_run(
+                    db,
+                    user=user,
+                    market=market,
+                    symbol=symbol,
+                    route_ids=route_ids,
+                    now=now,
+                )
             decisions += int(created)
         except Exception:
             db.rollback()
@@ -142,6 +174,15 @@ class AnalysisSchedulerWorker:
 
     def stop(self) -> None:
         self.stop_event.set()
+
+    def _run_tick(self, slot: AnalysisSlot, observed_at: datetime) -> TickResult:
+        with SessionLocal() as db:
+            return run_analysis_tick(
+                db,
+                slot=slot,
+                settings=self.settings,
+                now=observed_at,
+            )
 
     async def run(self) -> int:
         while not self.stop_event.is_set() and self.identity is None:
@@ -186,14 +227,7 @@ class AnalysisSchedulerWorker:
                             next_due_at=slot.next_due_at,
                         )
                     try:
-                        with SessionLocal() as db:
-                            result = await asyncio.to_thread(
-                                run_analysis_tick,
-                                db,
-                                slot=slot,
-                                settings=self.settings,
-                                now=observed_at,
-                            )
+                        result = await asyncio.to_thread(self._run_tick, slot, observed_at)
                         with SessionLocal() as db:
                             update_scheduler_state(
                                 db,

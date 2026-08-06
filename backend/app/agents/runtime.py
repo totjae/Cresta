@@ -9,13 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.agents.contracts import AgentAssessment, AgentCoreOutput
+from app.agents.contracts import AgentAssessment
 from app.llm.contracts import LlmRequest
 from app.llm.registry import AdapterNotImplementedError, provider_registry
 from app.models import (
     AgentRun,
     AgentStageRun,
-    EvidenceBundle,
     IndicatorSnapshot,
     LlmInvocation,
     LlmModelProfile,
@@ -138,6 +137,8 @@ def _stage(
     dependencies: tuple[str, ...],
     route_id: str | None,
     input_hash: str,
+    max_attempts: int = 1,
+    available_at: datetime,
 ) -> AgentStageRun:
     stage = AgentStageRun(
         run_id=run.id,
@@ -146,6 +147,8 @@ def _stage(
         dependency_roles_json=_canonical(list(dependencies)),
         route_id=route_id,
         input_hash=input_hash,
+        max_attempts=max_attempts,
+        available_at=available_at,
     )
     db.add(stage)
     db.flush()
@@ -336,6 +339,27 @@ def create_diagnostic_run(
             "route_version": binding.route.version,
             "model_id": binding.model.id,
             "model_version": binding.model.version,
+            "generation_parameters": {
+                "temperature": str(
+                    binding.route.temperature_override
+                    if binding.route.temperature_override is not None
+                    else binding.model.temperature
+                ),
+                "top_p": str(
+                    binding.route.top_p_override
+                    if binding.route.top_p_override is not None
+                    else binding.model.top_p
+                )
+                if (binding.route.top_p_override is not None or binding.model.top_p is not None)
+                else None,
+                "max_output_tokens": binding.route.max_output_tokens_override
+                or binding.model.max_output_tokens,
+                "reasoning_effort": binding.route.reasoning_effort_override
+                or binding.model.reasoning_effort,
+                "seed": binding.route.seed_override
+                if binding.route.seed_override is not None
+                else binding.model.seed,
+            },
         }
         for role, binding in sorted(bindings.items())
     }
@@ -366,9 +390,8 @@ def create_diagnostic_run(
         dag_version=DAG_VERSION,
         route_versions_json=_canonical(route_versions),
         idempotency_key=idempotency_key,
-        state="RUNNING",
+        state="CREATED",
         valid_until=observed + timedelta(minutes=1),
-        started_at=observed,
     )
     db.add(run)
     try:
@@ -380,8 +403,8 @@ def create_diagnostic_run(
             raise AgentRuntimeError("AGENT_IDEMPOTENCY_CONFLICT", 409)
         return existing, False
 
-    stages = {
-        role: _stage(
+    for role, sequence, dependencies in STAGES:
+        _stage(
             db,
             run=run,
             role=role,
@@ -389,131 +412,9 @@ def create_diagnostic_run(
             dependencies=dependencies,
             route_id=bindings[role].route.id if role in bindings else None,
             input_hash=_hash({"run_input_hash": input_hash, "role": role}),
+            max_attempts=bindings[role].route.max_attempts if role in bindings else 2,
+            available_at=observed,
         )
-        for role, sequence, dependencies in STAGES
-    }
-
-    intel_output = {
-        "schema_version": "intel-fixture-v1",
-        "status": "SUCCEEDED",
-        "source_mode": "FIXTURE_NONE",
-        "evidence_count": 0,
-    }
-    _complete_stage(stages["INTEL_COLLECTOR"], state="SUCCEEDED", output=intel_output, now=observed)
-
-    bundle_record = {
-        "schema_version": "evidence-bundle-v1",
-        "market": market,
-        "symbol": symbol,
-        "market_snapshot_id": snapshot.id,
-        "policy_version": EVIDENCE_POLICY_VERSION,
-        "state": "PARTIAL",
-        "evidence_ids": [],
-        "reason_codes": ["NO_EXTERNAL_EVIDENCE_FIXTURE"],
-    }
-    bundle = EvidenceBundle(
-        owner_id=user.id,
-        run_id=run.id,
-        market=market,
-        symbol=symbol,
-        as_of=observed,
-        policy_version=EVIDENCE_POLICY_VERSION,
-        state="PARTIAL",
-        evidence_ids_json="[]",
-        contradiction_groups_json="[]",
-        stale_evidence_ids_json="[]",
-        reason_codes_json=_canonical(["NO_EXTERNAL_EVIDENCE_FIXTURE"]),
-        bundle_hash=_hash(bundle_record),
-    )
-    db.add(bundle)
-    db.flush()
-    _complete_stage(
-        stages["EVIDENCE_VERIFIER"],
-        state="SUCCEEDED",
-        output={**bundle_record, "bundle_id": bundle.id, "bundle_hash": bundle.bundle_hash},
-        now=observed,
-    )
-
-    indicator = db.scalar(
-        select(IndicatorSnapshot).where(IndicatorSnapshot.market_snapshot_id == snapshot.id)
-    )
-    position = db.scalar(
-        select(Position).where(
-            Position.symbol == symbol, Position.state == "OPEN", Position.quantity > 0
-        )
-    )
-    assessments: dict[str, AgentAssessment] = {}
-    for role in ROUTE_ROLES[:-1]:
-        stage = stages[role]
-        _invoke_mock(
-            db,
-            stage=stage,
-            binding=bindings[role],
-            role_input={
-                "market_snapshot_id": snapshot.id,
-                "evidence_bundle_id": bundle.id,
-                "indicator_snapshot_id": indicator.id if indicator else None,
-                "position_id": position.id if position else None,
-            },
-            now=observed,
-        )
-        assessment = _assessment(
-            role,
-            stage_run_id=stage.id,
-            symbol=symbol,
-            input_refs=[
-                snapshot.id,
-                bundle.id,
-                *([indicator.id] if indicator else []),
-                *([position.id] if position else []),
-            ],
-            indicator=indicator,
-            snapshot=snapshot,
-            position=position,
-            observed_at=observed,
-            valid_until=run.valid_until,
-        )
-        assessments[role] = assessment
-        _complete_stage(
-            stage,
-            state=assessment.status,
-            output=assessment.model_dump(mode="json"),
-            now=observed,
-        )
-
-    core_stage = stages["CORE"]
-    _invoke_mock(
-        db,
-        stage=core_stage,
-        binding=bindings["CORE"],
-        role_input={
-            "market_snapshot_id": snapshot.id,
-            "evidence_bundle_id": bundle.id,
-            "assessment_hashes": {role: stages[role].output_hash for role in assessments},
-        },
-        now=observed,
-    )
-    incomplete = sorted(
-        role for role, assessment in assessments.items() if assessment.status != "SUCCEEDED"
-    )
-    core = AgentCoreOutput(
-        confidence=0 if incomplete else 0.5,
-        risk_level="HIGH" if incomplete else "MEDIUM",
-        reason_codes=[
-            "AGENT_RUNTIME_SHADOW_ONLY",
-            "REQUIRED_SCOUT_INCOMPLETE" if incomplete else "DIAGNOSTIC_WAIT_ONLY",
-        ],
-        incomplete_roles=incomplete,
-    )
-    _complete_stage(
-        core_stage,
-        state="SUCCEEDED",
-        output=core.model_dump(mode="json"),
-        now=observed,
-    )
-    run.core_action = "WAIT"
-    run.state = "PARTIAL" if incomplete else "SUCCEEDED"
-    run.completed_at = observed
     db.commit()
     db.refresh(run)
     return run, True

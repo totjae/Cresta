@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     execution_stage: str = "SHADOW"
     analysis_scheduler_poll_seconds: int = Field(default=5, ge=1, le=30)
     analysis_scheduler_lease_seconds: int = Field(default=30, ge=15, le=120)
+    agent_worker_poll_seconds: int = Field(default=1, ge=1, le=10)
+    agent_worker_lease_seconds: int = Field(default=30, ge=10, le=120)
+    llm_secret_directory: str = "./secrets/llm"
     database_url: str = "sqlite:///./cresta.db"
     database_password_file: str | None = None
     redis_url: str = "redis://localhost:6379/0"
@@ -84,6 +87,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Only the SHADOW decision execution stage is currently implemented")
         if self.analysis_scheduler_poll_seconds * 2 >= self.analysis_scheduler_lease_seconds:
             raise RuntimeError("Analysis scheduler poll must be less than half the lease duration")
+        if self.agent_worker_poll_seconds * 2 >= self.agent_worker_lease_seconds:
+            raise RuntimeError("Agent worker poll must be less than half the lease duration")
         if self.kiwoom_rest_base_url.rstrip("/") != "https://mockapi.kiwoom.com":
             raise RuntimeError("Only the Kiwoom MOCK REST endpoint is allowed in the first release")
         if self.kiwoom_ws_base_url.rstrip("/") != "wss://mockapi.kiwoom.com:10000":

@@ -260,6 +260,9 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-125 | `agent_stage_runs`는 run+role unique, dependency·route·invocation 참조, 불변 input/output JSON·hash, 상태·오류·시각을 저장하며 완료 stage를 API로 수정하지 않는다. |
 | DB-126 | `evidence_items`는 출처·시각·facts·content hash를 저장하고 `evidence_bundles`는 owner·run·상태·evidence ID·canonical hash를 저장한다. v1은 외부 수집 없이 `PARTIAL` 빈 bundle 하나만 생성한다. |
 | DB-127 | `agent_stage_runs.invocation_id`는 `llm_invocations`를 unique FK로 참조해 stage당 invocation을 최대 하나로 제한하고 invocation의 `stage_run_id`와 같은 식별자를 기록한다. |
+| DB-132 | `agent_stage_runs`는 `lease_owner_id`, `lease_expires_at`, `fencing_token`, `attempt_count`, `max_attempts`, `timeout_at`, `heartbeat_at`을 저장한다. fencing과 attempt는 음수가 아니며 max attempt는 1 이상이어야 한다. |
+| DB-133 | worker claim 조회는 `state, available_at, lease_expires_at, created_at, sequence` 인덱스를 사용하고 PostgreSQL에서는 잠금된 행을 건너뛰어 복수 worker가 같은 stage를 claim하지 않게 한다. |
+| DB-134 | 완료 stage의 output JSON·hash와 invocation 참조는 수정하지 않는다. 만료 복구도 완료 상태를 `PENDING` 또는 `RUNNING`으로 되돌리지 않는다. |
 | DB-128 | `llm_model_profiles`는 Provider에 속한 재사용 가능한 모델 카탈로그이며 model 기본 생성 파라미터와 capability 검증 결과를 저장한다. 역할 이름을 model alias나 provider model ID로 강제하지 않는다. |
 | DB-129 | `llm_role_routes`는 역할 배정 version으로 사용하고 generation override와 계산 가능한 상속 출처를 저장한다. 같은 owner·scope·role의 `ACTIVE`는 부분 unique 하나만 허용한다. |
 | DB-130 | 역할 배정 활성화 transaction은 새 route를 `ACTIVE`, 기존 활성 route를 `SUPERSEDED`로 원자 전환한다. 여러 `VALIDATED` 행은 후보 이력일 뿐 runtime 기본값이 아니다. |

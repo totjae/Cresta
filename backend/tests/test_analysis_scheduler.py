@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+import pyotp
+from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -17,6 +19,8 @@ from app.analysis_scheduler_state import (
 )
 from app.config import Settings
 from app.models import (
+    AgentRun,
+    AgentStageRun,
     Approval,
     Decision,
     DecisionExecution,
@@ -29,6 +33,9 @@ from app.models import (
     User,
     WatchlistItem,
 )
+from tests.conftest import TEST_TOTP_SECRET
+from tests.test_agent_runtime import _routes
+from tests.test_llm_role_assignments import _login
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -129,6 +136,49 @@ def test_tick_skips_watch_item_without_snapshot(
     assert result.processed_count == 1
     assert result.skipped_count == 1
     assert db.scalar(select(func.count()).select_from(Decision)) == 0
+
+
+def test_tick_admits_shadow_agent_run_when_all_active_routes_exist(
+    client: TestClient, db: Session, admin: User, settings: Settings
+) -> None:
+    now = _at_kst(2026, 8, 5, 10, 5)
+    _watch_with_snapshot(db, admin, now)
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    route_ids = _routes(client, headers)
+    preview = client.post(
+        "/api/v1/ai/role-assignments/activation-preview",
+        headers=headers,
+        json={"schema_version": "1.0", "route_ids": route_ids},
+    )
+    assert preview.status_code == 200
+    proof = client.post(
+        "/api/v1/auth/reauth/totp",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "target_action": preview.json()["target_action"],
+            "target_id": preview.json()["target_id"],
+            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).now(),
+        },
+    )
+    assert proof.status_code == 200, proof.text
+    activated = client.post(
+        "/api/v1/ai/role-assignments/activate",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "route_ids": route_ids,
+            "reauth_proof": proof.json()["reauth_proof"],
+        },
+    )
+    assert activated.status_code == 200, activated.text
+    slot, _ = analysis_slot(now)
+    assert slot is not None
+    run_analysis_tick(db, slot=slot, settings=settings, now=now)
+    run = db.scalar(select(AgentRun))
+    assert run is not None and run.state == "CREATED"
+    assert db.scalar(select(func.count()).select_from(AgentStageRun)) == 7
 
 
 def test_scheduler_lease_fences_duplicate_owner_and_reports_stale(db: Session) -> None:

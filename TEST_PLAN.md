@@ -217,6 +217,7 @@
 | T-MAO-008 | MAO-070~074 | 웹 원문에 주문·비밀·내부 URL 접근 지시 삽입 | 명령 무시, SSRF·도구·Broker 접근 차단, 안전 escape | 계획 |
 | T-MAO-009 | MAO-080~083 | 신규 model·prompt·DAG를 SHADOW로 실행·활성화 시도 | 회귀시험·TOTP 전 활성화 불가, SHADOW 승인·주문 0건 | 계획 |
 | T-MAO-010 | MAO-090~098, DB-124~127, API-135, UI-118~119 | 5개 Mock route로 DIAGNOSTIC DAG 실행·중복 요청·route 변조 | run 1개, stage 7개·invocation 5개 provenance, Core WAIT, decision·approval·order 0건 | 통과 (2026-08-06, API·component fixture) |
+| T-MAO-011 | MAO-100~107, DB-132~134, API-143~144, UI-127 | 비동기 admission, stage claim·lease 만료·재claim과 이전 fencing 완료 시도, scheduler ACTIVE route admission | stage 단일 소유·fencing 증가·늦은 완료 거부, UI 비동기 상태 갱신, 최종 PARTIAL/WAIT, decision·approval·order 0건 | 통과 (2026-08-06, 자동 DB·API·component fixture) |
 
 ### 3.12.2 LLM Provider 및 Gateway
 
@@ -327,8 +328,8 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 142개 통과 | 기존 범위와 역할별 모델 재사용·파라미터 상속·capability 거부·중복 후보·TOTP 원자 활성화·주문 0건 포함 |
-| Console component 시험 | `npm test` | 11개 통과 | Provider/Models/역할 배정/이력 분리, 5개 후보 일괄 적용과 ACTIVE route DIAGNOSTIC 포함 |
+| Python 단위·API 시험 | `python -m pytest` | 145개 통과 | 기존 범위, 역할 배정, 비동기 Agent claim·lease·fencing·응답 불명 격리·scheduler admission과 주문 0건 포함 |
+| Console component 시험 | `npm test` | 11개 통과 | Provider/Models/역할 배정/이력 분리, ACTIVE route 비동기 DIAGNOSTIC 등록·상태 갱신 포함 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
 | Console HTTP smoke | standalone server에 HTTP 요청 | 통과 | `/` 응답 200과 Cresta metadata 확인 |
@@ -374,3 +375,11 @@
 | T-OPS-014 | OPS-017~018, API-125, UI-106 | scheduler Compose 계약, lease·heartbeat·IDLE·STALE 상태와 대시보드 조회 | scheduler 장애가 API·Broker를 중단하지 않고 상태에 비밀·owner/token을 노출하지 않음 | 통과 (2026-08-05, 자동 계약·API·component fixture) |
 | T-AI-011 | MKT-097~099, AI-086~090, DB-111~114, API-126, UI-107 | 충분·부족 분봉, 지표 없음·버전 불일치, 동일 입력 재평가와 판단 조회 | v2 지표 결정론, 결측 null, 입력 hash 재현, 미준비 RISK_BLOCK, 모델 입력 비밀 0건, UI 입력 provenance 표시 | 부분 통과 (2026-08-05, 자동; 실서버 PostgreSQL·장중 연속 입력 대기) |
 | T-UI-016 | UI-055~059, UI-075~076, UI-088~089 | 승인 카드·Guard reason·실행 단계 데스크톱/모바일 흐름 | 주문 상태 오인 없음, 만료/무효화 원인 표시, TOTP·접근성 준수 | 계획 |
+### 외부 LLM Native Adapter Foundation 시험
+
+| 테스트 ID | 관련 요구사항 | 시나리오 | 기대 결과 | 상태 |
+| --- | --- | --- | --- | --- |
+| T-LLM-020 | LLM-086, LLM-090~091 | OpenAI·Anthropic·Gemini 공식 request/response fixture | 구조화 출력, 실제 model·request ID·usage·latency 정규화 | 통과 (2026-08-06, MockTransport) |
+| T-LLM-021 | LLM-087~089 | 외부 Provider 생성, preview, TOTP credential 저장·proof 재사용 | DB·응답·감사에 원문 0건, 서버 생성 ref, Linux 0400, proof 재사용 거부 | 통과 (2026-08-06, API·파일) |
+| T-LLM-022 | LLM-090 | timeout·429·401·5xx·잘못된 JSON | 정규 상태, 호출 1회, retry 0, secret 비노출 | 통과 (2026-08-06, MockTransport) |
+| T-LLM-023 | LLM-092~093 | 외부 Provider·Model metadata 검증 후 route 검증 | 과금 호출 0건, external route는 runtime 구현 전 차단, 주문 0건 | 통과 (2026-08-06, API) |

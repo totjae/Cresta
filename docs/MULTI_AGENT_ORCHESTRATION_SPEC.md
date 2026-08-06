@@ -246,6 +246,19 @@ app/llm/*                     Provider/Gateway 호출 계층
 | MAO-097 | 멱등 key는 사용자·purpose·market·symbol·market snapshot·DAG version·정렬된 route version map의 canonical SHA-256이다. 같은 key의 재요청은 기존 run을 반환하고 stage·invocation을 추가하지 않는다. |
 | MAO-098 | API는 run·stage·evidence bundle·invocation provenance를 반환하되 raw prompt·원문 provider 응답·credential은 반환하지 않는다. Console은 `DIAGNOSTIC · SHADOW · 주문 없음`을 고정 표시한다. |
 
+### 12.2 Agent Worker v2 비동기 실행 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-100 | `POST /ai/agent-runs/diagnostic`은 run과 고정 DAG의 7개 `PENDING` stage를 하나의 트랜잭션으로 등록하고 즉시 반환한다. HTTP 요청 프로세스는 stage 또는 LLM 호출을 직접 실행하지 않는다. |
+| MAO-101 | 별도 `agent` worker는 의존 stage가 허용된 종료 상태에 도달한 `PENDING` stage만 claim하며, claim 시 `lease_owner_id`, `lease_expires_at`, 증가하는 `fencing_token`, `attempt_count`, `timeout_at`을 원자적으로 기록한다. |
+| MAO-102 | stage 완료 쓰기는 현재 `lease_owner_id`와 `fencing_token`이 모두 일치할 때만 허용한다. lease를 잃은 worker의 늦은 결과는 저장하지 않는다. |
+| MAO-103 | worker 재시작 또는 lease 만료 시 외부 호출이 시작되지 않은 내부 fixture stage만 다시 `PENDING`으로 돌릴 수 있다. invocation이 생성된 stage는 자동 재전송하지 않고 `TIMED_OUT` 또는 `FAILED`로 격리한다. |
+| MAO-104 | 입력 `valid_until` 또는 stage `timeout_at`을 넘긴 작업은 provider를 호출하지 않고 `TIMED_OUT`으로 종료한다. 실패한 의존성을 가진 하위 stage는 `FAILED/AGENT_DEPENDENCY_FAILED`로 종료한다. |
+| MAO-105 | route·model version과 유효 generation parameter는 admission 시 `route_versions_json`에 고정한다. 실행 중 현재 ACTIVE route가 변경되어도 이미 등록된 run의 snapshot은 바뀌지 않는다. |
+| MAO-106 | Agent Worker v2는 Mock Adapter만 허용하고 DIAGNOSTIC·SHADOW 경계를 유지한다. worker가 완료한 run에서도 `Decision`, `Approval`, `TradingOrder`는 생성하지 않는다. |
+| MAO-107 | Console은 `CREATED/RUNNING` run이 존재하는 동안 목록을 주기적으로 갱신하고 현재 stage 상태를 표시한다. 버튼은 admission 응답 후 해제하며 전체 DAG 완료까지 HTTP 요청을 붙잡지 않는다. |
+
 ## 13. 검증·인수 조건
 
 - 동일 입력·DAG·route version의 run이 중복 생성되지 않는다.

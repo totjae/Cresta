@@ -12,10 +12,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.service import consume_reauth_proof
+from app.config import Settings
 from app.llm.adapters.mock import MOCK_CAPABILITIES
 from app.llm.contracts import ModelCapabilities, ProviderHealth
 from app.llm.registry import AdapterNotImplementedError, provider_registry
 from app.llm.router import RouteBoundaryError, validate_foundation_route
+from app.llm.secrets import LlmSecretError, LlmSecretStore
 from app.models import (
     AuditLog,
     LlmModelProfile,
@@ -51,6 +53,7 @@ ASSIGNMENT_ROLES = (
     "CORE",
 )
 ASSIGNMENT_REAUTH_ACTION = "LLM_ROLE_ASSIGNMENT_ACTIVATE"
+CREDENTIAL_REAUTH_ACTION = "LLM_PROVIDER_CREDENTIAL_SET"
 
 
 class LlmProfileError(Exception):
@@ -205,10 +208,24 @@ def test_provider(
     user: User,
     provider_id: str,
     correlation_id: str,
+    settings: Settings | None = None,
 ) -> tuple[LlmProviderProfile, ProviderHealth]:
     profile = get_provider(db, user.id, provider_id)
     try:
-        adapter = provider_registry.resolve(profile.adapter_type)
+        credential = None
+        if profile.adapter_type != "MOCK":
+            if profile.credential_secret_ref is None or settings is None:
+                raise LlmProfileError("PROVIDER_CREDENTIAL_REQUIRED")
+            credential = LlmSecretStore(settings.llm_secret_directory).read(
+                profile.credential_secret_ref
+            )
+        adapter = provider_registry.resolve(
+            profile.adapter_type,
+            endpoint=profile.endpoint,
+            credential=credential,
+        )
+    except LlmSecretError as exc:
+        raise LlmProfileError(exc.args[0]) from exc
     except AdapterNotImplementedError as exc:
         raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED", 422) from exc
     health = adapter.healthcheck()
@@ -227,6 +244,71 @@ def test_provider(
     db.commit()
     db.refresh(profile)
     return profile, health
+
+
+def credential_target_id(profile: LlmProviderProfile) -> str:
+    value = f"{profile.id}:{profile.version}:{profile.adapter_type}"
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def preview_provider_credential(
+    db: Session, *, owner_id: str, provider_id: str
+) -> tuple[LlmProviderProfile, str]:
+    profile = get_provider(db, owner_id, provider_id)
+    if profile.adapter_type == "MOCK":
+        raise LlmProfileError("MOCK_CREDENTIAL_FORBIDDEN")
+    if profile.adapter_type not in {
+        "OPENAI_RESPONSES",
+        "ANTHROPIC_MESSAGES",
+        "GEMINI_GENERATE_CONTENT",
+    }:
+        raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED")
+    return profile, credential_target_id(profile)
+
+
+def set_provider_credential(
+    db: Session,
+    *,
+    user: User,
+    provider_id: str,
+    credential: str,
+    reauth_proof: str,
+    correlation_id: str,
+    settings: Settings,
+) -> LlmProviderProfile:
+    profile = get_provider(db, user.id, provider_id)
+    preview_provider_credential(db, owner_id=user.id, provider_id=provider_id)
+    target_id = credential_target_id(profile)
+    consume_reauth_proof(
+        db,
+        user=user,
+        raw_proof=reauth_proof,
+        target_action=CREDENTIAL_REAUTH_ACTION,
+        target_id=target_id,
+    )
+    try:
+        secret_ref = LlmSecretStore(settings.llm_secret_directory).write_provider_credential(
+            profile.id, credential
+        )
+    except LlmSecretError as exc:
+        db.rollback()
+        raise LlmProfileError(exc.args[0]) from exc
+    profile.credential_secret_ref = secret_ref
+    profile.state = "DRAFT"
+    profile.health_status = "UNKNOWN"
+    profile.last_tested_at = None
+    profile.version += 1
+    _audit(
+        db,
+        user=user,
+        action="LLM_PROVIDER_CREDENTIAL_SET",
+        target=profile.id,
+        correlation_id=correlation_id,
+        metadata={"adapter_type": profile.adapter_type, "credential_configured": True},
+    )
+    db.commit()
+    db.refresh(profile)
+    return profile
 
 
 def list_models(db: Session, owner_id: str) -> list[LlmModelProfile]:
@@ -307,17 +389,28 @@ def validate_model(
 ) -> LlmModelProfile:
     model = get_model(db, user.id, model_id)
     provider = get_provider(db, user.id, model.provider_profile_id)
-    if provider.adapter_type != "MOCK" or provider.state != "VALIDATED":
-        raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED")
+    if provider.state != "VALIDATED":
+        raise LlmProfileError("PROVIDER_NOT_VALIDATED")
     declared = ModelCapabilities.model_validate_json(model.capabilities_json)
     if model.reasoning_effort is not None and not declared.reasoning:
         raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_REASONING")
     if model.seed is not None and not declared.seed:
         raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_SEED")
+    if provider.adapter_type == "MOCK":
+        available = MOCK_CAPABILITIES
+    else:
+        try:
+            available = provider_registry.resolve(
+                provider.adapter_type,
+                endpoint=provider.endpoint,
+                credential="capability-check-only",
+            ).healthcheck().capabilities
+        except AdapterNotImplementedError as exc:
+            raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED") from exc
     unsupported = [
         key
         for key, enabled in declared.model_dump().items()
-        if enabled and not getattr(MOCK_CAPABILITIES, key)
+        if enabled and not getattr(available, key)
     ]
     if unsupported:
         raise LlmProfileError("MODEL_CAPABILITY_UNVERIFIED")
@@ -418,6 +511,9 @@ def validate_route(
     if route.state != "DRAFT":
         raise LlmProfileError("ROUTE_STATE_CONFLICT", 409)
     model = get_model(db, user.id, route.primary_model_profile_id)
+    provider = get_provider(db, user.id, model.provider_profile_id)
+    if provider.adapter_type != "MOCK":
+        raise LlmProfileError("EXTERNAL_RUNTIME_NOT_IMPLEMENTED")
     capabilities = ModelCapabilities.model_validate_json(model.capabilities_json)
     if route.reasoning_effort_override is not None and not capabilities.reasoning:
         raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_REASONING")

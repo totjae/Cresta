@@ -78,6 +78,11 @@ export type AgentStageData = {
   output: Record<string, unknown> | null;
   output_hash: string | null;
   error_code: string | null;
+  attempt_count: number;
+  max_attempts: number;
+  fencing_token: number;
+  lease_expires_at: string | null;
+  timeout_at: string | null;
   invocation: null | {
     invocation_id: string;
     state: string;
@@ -484,19 +489,38 @@ export const llmApi = {
       { signal },
     );
   },
-  createMockProvider(csrfToken: string, name: string) {
+  createProvider(
+    csrfToken: string,
+    payload: { name: string; adapterType: string; endpoint: string | null; dataPolicy: string },
+  ) {
     return request<LlmProviderProfile>("/api/v1/ai/providers", {
       method: "POST",
       headers: { "X-CSRF-Token": csrfToken },
       body: JSON.stringify({
         schema_version: "1.0",
-        name,
-        adapter_type: "MOCK",
-        endpoint: null,
+        name: payload.name,
+        adapter_type: payload.adapterType,
+        endpoint: payload.endpoint,
         credential_secret_ref: null,
-        data_policy: "NONE",
+        data_policy: payload.dataPolicy,
       }),
     });
+  },
+  previewCredential(csrfToken: string, providerId: string) {
+    return request<{ target_action: "LLM_PROVIDER_CREDENTIAL_SET"; target_id: string; provider_id: string }>(
+      `/api/v1/ai/providers/${encodeURIComponent(providerId)}/credential-preview`,
+      { method: "POST", headers: { "X-CSRF-Token": csrfToken } },
+    );
+  },
+  setCredential(csrfToken: string, providerId: string, credential: string, reauthProof: string) {
+    return request<LlmProviderProfile>(
+      `/api/v1/ai/providers/${encodeURIComponent(providerId)}/credential`,
+      {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({ schema_version: "1.0", credential, reauth_proof: reauthProof }),
+      },
+    );
   },
   testProvider(csrfToken: string, providerId: string) {
     return request<{ provider: LlmProviderProfile; external_network_used: boolean }>(
@@ -510,11 +534,12 @@ export const llmApi = {
       { signal },
     );
   },
-  createMockModel(
+  createModel(
     csrfToken: string,
     providerProfileId: string,
     alias: string,
     providerModelId: string,
+    capabilities: LlmCapabilities,
     defaults: {
       temperature?: string;
       topP?: string | null;
@@ -530,22 +555,13 @@ export const llmApi = {
         provider_profile_id: providerProfileId,
         alias,
         provider_model_id: providerModelId,
-        capabilities: {
-          structured_output: true,
-          tool_calling: false,
-          web_search: false,
-          streaming: false,
-          reasoning: false,
-          seed: true,
-          usage_reporting: true,
-          local_execution: true,
-        },
+        capabilities,
         max_context_tokens: 4096,
         max_output_tokens: defaults.maxOutputTokens ?? 1024,
         temperature: defaults.temperature ?? "0",
         top_p: defaults.topP ?? null,
         reasoning_effort: null,
-        seed: defaults.seed ?? 0,
+        seed: defaults.seed === undefined ? 0 : defaults.seed,
       }),
     });
   },

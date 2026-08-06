@@ -405,3 +405,4 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 | UI-124 | 역할 행의 `파라미터` 편집은 temperature·top_p·max output token·reasoning effort·seed의 모델 기본값, 역할 override와 최종값을 구분한다. 선택 모델이 지원하지 않는 필드는 비활성화하고 이유를 표시한다. |
 | UI-125 | 기본 역할 화면은 현재 활성 배정만 표시하고 draft·validated·superseded version은 `이력` drawer/table에서 조회한다. 중복 후보가 있으면 첫 행을 자동 선택하지 않고 `현재 배정 미확정`으로 표시한다. |
 | UI-126 | 선행조건 미충족으로 비활성화된 버튼은 `not-allowed` cursor와 구체적인 누락 사유를 표시한다. 실제 요청 처리 중에만 spinner와 `wait` cursor를 사용한다. |
+| UI-127 | DIAGNOSTIC DAG 버튼은 run admission 완료 즉시 다시 활성화한다. `CREATED/RUNNING` run이 있으면 1~2초 간격으로 목록을 갱신하고 stage 상태·attempt를 표시하되 HTTP 요청을 DAG 완료까지 유지하지 않는다. |

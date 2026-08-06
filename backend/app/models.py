@@ -1129,7 +1129,18 @@ class AgentStageRun(Base):
             "'TIMED_OUT','FAILED','INVALID_OUTPUT')",
             name="ck_agent_stage_runs_state",
         ),
+        CheckConstraint("fencing_token >= 0", name="ck_agent_stage_runs_fencing_token"),
+        CheckConstraint("attempt_count >= 0", name="ck_agent_stage_runs_attempt_count"),
+        CheckConstraint("max_attempts >= 1", name="ck_agent_stage_runs_max_attempts"),
         Index("ix_agent_stage_runs_run_sequence", "run_id", "sequence"),
+        Index(
+            "ix_agent_stage_runs_claim",
+            "state",
+            "available_at",
+            "lease_expires_at",
+            "created_at",
+            "sequence",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
@@ -1148,6 +1159,14 @@ class AgentStageRun(Base):
     output_json: Mapped[str | None] = mapped_column(Text)
     output_hash: Mapped[str | None] = mapped_column(String(64))
     error_code: Mapped[str | None] = mapped_column(String(64))
+    lease_owner_id: Mapped[str | None] = mapped_column(String(36))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    timeout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

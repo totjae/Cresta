@@ -22,7 +22,7 @@
 | 주문 가격과 미체결 처리 | `docs/ORDER_EXECUTION_SPEC.md` | 구현 중 | Paper와 키움 CREATED polling·ACK/REJECTED/UNKNOWN 구현; Guard 평가·수량·원자 주문 생성 계약 완료, 실제 전략 주문 미구현 |
 | 주문 상태 머신과 키움 매핑 | `docs/ORDER_STATE_MACHINE_SPEC.md` | 구현 중 | Paper·키움 송신 전이 구현; execution·승인과 주문 상태 분리·원자 전이 명세 완료, 승인 구현 미착수 |
 | 계좌·주문 재동기화 | `docs/RECONCILIATION_SPEC.md` | 구현 중 | snapshot 대조와 상시 worker READY·재시작 fencing은 실서버 통과; `00`·`04` 이벤트 즉시 gate 차단·debounce·BROKER_EVENT 대조 로컬 통과, 실제 체결·장애주입 미검증 |
-| 시스템 아키텍처 | `docs/SYSTEM_DESIGN.md` | 구현 중 | Backend·Console·동적 DNS gateway·키움 worker·별도 AI scheduler·Watch 실시간 수집과 SHADOW 판단 실행 구현; 주문 생성 Guard 미구현 |
+| 시스템 아키텍처 | `docs/SYSTEM_DESIGN.md` | 구현 중 | Backend·Console·gateway·키움 worker·AI scheduler·별도 Agent worker·Watch와 SHADOW 실행 구현; 주문 생성 Guard 미구현 |
 | HTTP/WebSocket API | `docs/API_SPEC.md` | 구현 중 | 인증·상태·주문/체결·포지션·quote 조회 구현; Guard·승인·실행 단계 REST/event 계약 완료, 거래 명령·stream 미구현 |
 | UI 콘셉트 참고자료 | `stitch_cresta_ai_intraday_trading_system/` | 참고자료 | 실제 Console 구현물이 아님 |
 | 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | 인증·snapshot·worker는 실서버 통과; 주문 Adapter·FIFO polling·UNKNOWN 대조·계좌 event gate·Web MOCK 1주 진단 API 자동시험 통과, 실제 모의주문 미검증 |
@@ -32,9 +32,9 @@
 | 인증·세션·TOTP | `docs/SECURITY_SPEC.md` | 구현 중 | 로그인·세션·CSRF·실패제한·재인증 기반 17개 로컬 시험 통과, 복구·운영 검증 미완료 |
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 감시 종목·키움 `0B`·`0D`, 1분봉과 v2 VWAP·SMA5·상대 거래량·실현 변동성·고점 하락률·spread 영속화 로컬 검증 완료; 체결강도와 v2 실제 장중 수신 미검증 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 구현 중 | 불변 `scout-input-v1`과 `deterministic-mock-v2`, KST 정기 TRADING scheduler·SHADOW 인계 구현; 실제 AI provider와 보유 포지션 판단 미구현 |
-| 다중 에이전트 오케스트레이션 | `docs/MULTI_AGENT_ORCHESTRATION_SPEC.md` | 구현 중 | 동기식 DIAGNOSTIC Intel·Verify·4개 Scout·Core DAG, 빈 evidence fixture, stage·invocation provenance, 멱등성·Core WAIT·주문 0건 구현·로컬 검증 완료; 비동기 worker·외부 수집 미구현 |
-| LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | Provider/Model 카탈로그, 재사용 모델의 역할별 후보·파라미터 override, 중복 후보 명시 선택과 TOTP 1회 원자 활성화, Agent Runtime ACTIVE route 연결 로컬 검증 완료; 외부 credential·실제 Adapter 미구현 |
-| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·Scout 입력, LLM Foundation·Agent Runtime과 역할 배정 `20260806_0015` 로컬 적용·순환 통과; 실서버 PostgreSQL 0015·장중 입력 축적 미검증 |
+| 다중 에이전트 오케스트레이션 | `docs/MULTI_AGENT_ORCHESTRATION_SPEC.md` | 구현 중 | 비동기 DIAGNOSTIC admission, Intel·Verify·4개 Scout·Core stage queue, claim·lease·fencing·만료 복구, scheduler admission, Core WAIT·주문 0건 로컬 검증 완료; 외부 수집·실제 Adapter 미구현 |
+| LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | Provider/Model 카탈로그와 역할별 배정에 더해 OpenAI Responses·Anthropic Messages·Gemini Generate Content 정규화, TOTP write-only 파일 credential과 오류·usage 계약 구현; 외부 Agent runtime, Vercel·Gateway·Ollama 미구현 |
+| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·Scout 입력, LLM Foundation·Agent Runtime, 역할 배정과 Agent lease `20260806_0016` 로컬 적용·순환 통과; 실서버 PostgreSQL 0016·장중 입력 축적 미검증 |
 | 판단 실행·승인 | `docs/DECISION_EXECUTION_SPEC.md` | 구현 중 | DIAGNOSTIC/TRADING 경계, scheduler 인계, 멱등 SHADOW execution, 불변 Guard 평가와 안전 차단 구현; 승인·주문 생성은 미구현 |
 | 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 부팅 Compose 조정 unit 구현; 2026-08-05 Ubuntu 재부팅 후 9초 내 전체 health·worker READY 복구 통과, 백업·경보·복구훈련 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 명세 완료 | 키움 출구 IP·MOCK 인증·시세 실서버 확인 반영, 계좌·주문 외부 통합 게이트 유지 |
@@ -55,13 +55,13 @@
 
 - 키움 모의투자 계정·API 사용신청·고정 출구 IP와 REST 인증·시세·10자리 계좌 일치는 실제 서버 확인 완료
 - NXT/SOR 실거래 검증 환경
-- 첫 외부 LLM provider·과금 계정과 뉴스·공시 수집 source Adapter는 미선정이며 외부 credential 등록과 네트워크 호출은 계속 차단한다.
+- 첫 외부 LLM provider·과금 계정과 뉴스·공시 수집 source Adapter는 미선정이다. credential 등록은 가능하지만 외부 Agent 네트워크 호출과 route 활성화는 계속 차단한다.
 
 ## 6. 다음 구현 작업
 
-다음 작업은 `Agent Worker v2`의 비동기 stage 실행 기반이다.
+다음 작업은 외부 LLM Adapter의 Agent SHADOW runtime 연결이다.
 
-- stage claim·lease·fencing과 timeout·재시작 복구
-- scheduler의 SHADOW Agent run admission과 종목별 실패 격리
-- 역할별 ACTIVE route와 generation parameter snapshot 고정
-- 외부 웹·LLM 호출은 제외하고 deterministic Mock 회귀부터 검증
+- 역할별 실제 output JSON schema와 provider prompt renderer
+- Agent invocation의 schema 검증·provider request ID·usage 영속화
+- timeout·ambiguous 시 stage fail-closed와 외부 route SHADOW 활성화
+- 이후 Vercel AI Gateway·LLM Gateway·Ollama Adapter 확장

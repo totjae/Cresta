@@ -362,6 +362,21 @@ Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 �
 | LLM-084 | Foundation v1 route는 `SHADOW` execution stage와 `fallback_policy=NONE`만 허용하고 `CORE`를 포함한 어떤 role에서도 판단·승인·주문을 생성하지 않는다. |
 | LLM-085 | 첫 UI는 profile·model·route metadata와 검증 상태를 관리하며 API key·token·secret 입력 필드를 제공하지 않는다. |
 
+### 13.2 Native Adapter Foundation v2
+
+이 절은 외부 credential을 계속 금지하던 LLM-081·082·085의 Foundation v1 제한을 다음 단계에서 대체한다. 역할 route 실행과 주문 연결은 대체하지 않는다.
+
+| ID | 요구사항 |
+| --- | --- |
+| LLM-086 | v2는 `OPENAI_RESPONSES`, `ANTHROPIC_MESSAGES`, `GEMINI_GENERATE_CONTENT` native Adapter의 구조화 출력 request·response 정규화만 지원한다. Vercel·범용 Gateway·Ollama는 계속 `ADAPTER_NOT_IMPLEMENTED`다. |
+| LLM-087 | credential은 Provider UUID에서 서버가 생성한 파일명으로만 저장하며 임의 path를 받지 않는다. 디렉터리는 `0700`, 파일은 Linux에서 `0400`이고 DB에는 secret ref만 저장한다. |
+| LLM-088 | credential 등록은 CSRF와 Provider version에 결합된 1회용 TOTP proof를 요구한다. API·UI·감사 로그는 credential 원문을 반환하거나 기록하지 않는다. |
+| LLM-089 | API container만 secret directory를 write할 수 있고 Agent container는 read-only로 mount한다. 다른 서비스에는 mount하지 않는다. |
+| LLM-090 | Adapter는 요청마다 최대 1회만 전송한다. timeout은 `TIMED_OUT`, 429는 `RATE_LIMITED`, 5xx·명시 오류는 `PROVIDER_ERROR`, 전송 결과를 확정할 수 없는 transport 오류는 `AMBIGUOUS`, JSON 계약 오류는 `INVALID_OUTPUT`으로 정규화한다. 자동 재전송과 fallback은 금지한다. |
+| LLM-091 | 정규화 결과는 실제 provider/model, provider·gateway request ID, input/output token, latency와 원문 hash만 저장할 수 있다. Authorization·API key·raw response 본문은 저장하지 않는다. |
+| LLM-092 | Provider 연결 계약 검증은 secret 가독성·endpoint·Adapter capability만 확인하며 과금되는 외부 호출을 하지 않는다. 실제 model 호출은 별도 Agent runtime 단계 전까지 비활성이다. |
+| LLM-093 | 외부 Provider·Model metadata와 credential은 UI에서 등록할 수 있지만 외부 Model route 검증은 `EXTERNAL_RUNTIME_NOT_IMPLEMENTED`로 fail-closed한다. Mock ACTIVE route와 주문 0건 경계는 유지한다. |
+
 ## 14. 검증·인수 조건
 
 - 같은 canonical request fixture가 모든 Adapter에서 동일한 내부 schema로 정규화된다.

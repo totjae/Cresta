@@ -11,6 +11,13 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+llm_secret_directory="$PROJECT_ROOT/secrets/llm"
+mkdir -p "$llm_secret_directory"
+chown "$APP_UID:$APP_GID" "$llm_secret_directory"
+chmod 0700 "$llm_secret_directory"
+find "$llm_secret_directory" -maxdepth 1 -type f -name 'provider-*.key' -exec \
+  chown "$APP_UID:$APP_GID" {} \; -exec chmod 0400 {} \;
+
 for secret_name in postgres_password totp_encryption_key; do
   secret_path="$PROJECT_ROOT/secrets/$secret_name"
   if [ ! -s "$secret_path" ]; then

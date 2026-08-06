@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from app.llm.adapters.anthropic import AnthropicMessagesAdapter
+from app.llm.adapters.gemini import GeminiGenerateContentAdapter
 from app.llm.adapters.mock import MockProviderAdapter
+from app.llm.adapters.openai import OpenAIResponsesAdapter
 from app.llm.contracts import LlmProviderAdapter
 
 
@@ -12,9 +15,26 @@ class ProviderRegistry:
     def __init__(self) -> None:
         self._mock = MockProviderAdapter()
 
-    def resolve(self, adapter_type: str) -> LlmProviderAdapter:
+    def resolve(
+        self,
+        adapter_type: str,
+        *,
+        endpoint: str | None = None,
+        credential: str | None = None,
+        client=None,
+    ) -> LlmProviderAdapter:
         if adapter_type == "MOCK":
             return self._mock
+        adapters = {
+            "OPENAI_RESPONSES": OpenAIResponsesAdapter,
+            "ANTHROPIC_MESSAGES": AnthropicMessagesAdapter,
+            "GEMINI_GENERATE_CONTENT": GeminiGenerateContentAdapter,
+        }
+        adapter = adapters.get(adapter_type)
+        if adapter is not None:
+            if not endpoint or not credential:
+                raise AdapterNotImplementedError(f"{adapter_type}:CREDENTIAL_REQUIRED")
+            return adapter(endpoint=endpoint, api_key=credential, client=client)
         raise AdapterNotImplementedError(adapter_type)
 
 

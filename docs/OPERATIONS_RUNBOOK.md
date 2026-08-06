@@ -94,6 +94,7 @@ PostgreSQL healthy
 | OPS-016 | 부팅 완료 판정은 컨테이너의 단순 `running`이 아니라 PostgreSQL·Redis·API·Console·gateway health 통과를 요구한다. Broker worker는 프로세스 기동 후 자체 재연결·재동기화로 `READY`를 회복하며, 외부 키움 장애 때문에 Web Console까지 중단시키지 않는다. |
 | OPS-017 | AI scheduler는 별도 `scheduler` 컨테이너로 실행하고 `unless-stopped`, DB 의존성, 256MiB·0.25 CPU 상한을 적용한다. scheduler 장애는 Broker worker와 Console을 중단시키지 않으며 신규 AI 판단만 중단한다. |
 | OPS-018 | scheduler 정상 상태는 유효 lease와 최근 heartbeat로 판정한다. 장외 `IDLE`은 정상이며 장중 heartbeat가 lease 기준을 넘으면 `STALE`로 경보한다. |
+| OPS-019 | Agent DAG는 별도 `agent` 컨테이너에서 실행하고 `unless-stopped`, DB 의존성, 256MiB·0.25 CPU 상한을 적용한다. agent 장애는 Broker·API를 중단하지 않으며 PENDING/RUNNING stage는 lease 만료 후 fencing 규칙으로 복구한다. |
 
 재부팅 복구 구성은 두 층으로 나눈다. Docker의 `unless-stopped` 정책은 개별 컨테이너의 종료와 Docker daemon 재시작을 복구하고, systemd oneshot은 부팅 때 누락·수동 정지된 컨테이너까지 Compose 정의와 일치시키며 준비 상태를 기다린다. systemd는 컨테이너 프로세스를 상시 감시하거나 개별 재시작하지 않으므로 Docker 재시작 정책과 역할이 중복되지 않는다.
 
@@ -292,7 +293,7 @@ sudo docker compose \
 sudo docker compose \
   -f deploy/compose.yaml \
   -f deploy/compose.kiwoom.yaml \
-  up -d --build api worker scheduler
+  up -d --build api worker scheduler agent
 
 sudo docker compose \
   -f deploy/compose.yaml \

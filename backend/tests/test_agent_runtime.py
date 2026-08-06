@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.agents.worker import process_agent_work_once
 from app.models import (
     AgentRun,
     AgentStageRun,
@@ -200,19 +201,38 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     assert body["created"] is True
     assert body["purpose"] == "DIAGNOSTIC"
     assert body["execution_stage"] == "SHADOW"
-    assert body["state"] == "PARTIAL"
-    assert body["core_action"] == "WAIT"
-    assert body["evidence_bundle"]["state"] == "PARTIAL"
+    assert body["state"] == "CREATED"
+    assert body["core_action"] is None
+    assert body["evidence_bundle"] is None
     assert len(body["stages"]) == 7
-    assert sum(stage["invocation"] is not None for stage in body["stages"]) == 5
-    news = next(stage for stage in body["stages"] if stage["role"] == "NEWS_DISCLOSURE_SCOUT")
-    assert news["state"] == "INSUFFICIENT_DATA"
-    assert news["invocation"]["actual_provider"] == "CRESTA_MOCK"
+    assert all(stage["state"] == "PENDING" for stage in body["stages"])
+    assert all(stage["attempt_count"] == 0 for stage in body["stages"])
 
     second = client.post("/api/v1/ai/agent-runs/diagnostic", headers=headers, json=request)
     assert second.status_code == 201
     assert second.json()["created"] is False
     assert second.json()["run_id"] == body["run_id"]
+    for _ in range(7):
+        assert process_agent_work_once(
+            db,
+            worker_id="agent-test-worker",
+            lease_seconds=30,
+        )
+
+    completed = client.get(f"/api/v1/ai/agent-runs/{body['run_id']}")
+    assert completed.status_code == 200
+    completed_body = completed.json()
+    assert completed_body["state"] == "PARTIAL"
+    assert completed_body["core_action"] == "WAIT"
+    assert completed_body["evidence_bundle"]["state"] == "PARTIAL"
+    assert sum(stage["invocation"] is not None for stage in completed_body["stages"]) == 5
+    news = next(
+        stage
+        for stage in completed_body["stages"]
+        if stage["role"] == "NEWS_DISCLOSURE_SCOUT"
+    )
+    assert news["state"] == "INSUFFICIENT_DATA"
+    assert news["invocation"]["actual_provider"] == "CRESTA_MOCK"
     assert db.scalar(select(func.count()).select_from(AgentRun)) == 1
     assert db.scalar(select(func.count()).select_from(AgentStageRun)) == 7
     assert db.scalar(select(func.count()).select_from(EvidenceBundle)) == 1

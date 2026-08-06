@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import AuthContext, get_auth_context, require_csrf
+from app.config import Settings, get_settings
 from app.db import get_db
 from app.llm.contracts import ModelCapabilities
 from app.llm.profiles import (
@@ -17,6 +18,8 @@ from app.llm.profiles import (
     list_providers,
     list_routes,
     preview_assignment_activation,
+    preview_provider_credential,
+    set_provider_credential,
     test_provider,
     validate_model,
     validate_route,
@@ -28,6 +31,8 @@ from app.schemas import (
     LlmAssignmentActivationResponse,
     LlmAssignmentPreviewResponse,
     LlmCapabilitiesPayload,
+    LlmCredentialPreviewResponse,
+    LlmCredentialSetRequest,
     LlmModelCreateRequest,
     LlmModelListResponse,
     LlmModelResponse,
@@ -148,12 +153,14 @@ def post_provider_test(
     request: Request,
     context: AuthContext = Depends(require_csrf),
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> LlmProviderTestResponse:
     profile, health = test_provider(
         db,
         user=context.user,
         provider_id=provider_id,
         correlation_id=request.state.request_id,
+        settings=settings,
     )
     return LlmProviderTestResponse(
         request_id=request.state.request_id,
@@ -162,6 +169,47 @@ def post_provider_test(
         capabilities=LlmCapabilitiesPayload.model_validate(health.capabilities.model_dump()),
         message_code=health.message_code,
     )
+
+
+@router.post(
+    "/providers/{provider_id}/credential-preview",
+    response_model=LlmCredentialPreviewResponse,
+)
+def post_provider_credential_preview(
+    provider_id: str,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> LlmCredentialPreviewResponse:
+    profile, target_id = preview_provider_credential(
+        db, owner_id=context.user.id, provider_id=provider_id
+    )
+    return LlmCredentialPreviewResponse(
+        request_id=request.state.request_id,
+        target_id=target_id,
+        provider_id=profile.id,
+    )
+
+
+@router.post("/providers/{provider_id}/credential", response_model=LlmProviderResponse)
+def post_provider_credential(
+    provider_id: str,
+    payload: LlmCredentialSetRequest,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> LlmProviderResponse:
+    profile = set_provider_credential(
+        db,
+        user=context.user,
+        provider_id=provider_id,
+        credential=payload.credential,
+        reauth_proof=payload.reauth_proof,
+        correlation_id=request.state.request_id,
+        settings=settings,
+    )
+    return _provider_response(profile)
 
 
 @router.get("/models", response_model=LlmModelListResponse)

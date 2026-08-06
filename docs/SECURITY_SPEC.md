@@ -157,3 +157,9 @@ Argon2id 초기 최소값은 memory 64 MiB, iterations 3, parallelism 1로 한�
 - 인증 감사 로그는 거래 감사와 함께 기본 5년 보존한다.
 - RFC 6238 호환 TOTP 앱을 지원하며 QR issuer는 `Cresta`, 계정 표시는 login ID를 사용한다.
 - 관리자 복구는 서버 로컬 OS 계정 접근과 미사용 복구 코드를 모두 요구한다. 복구 코드도 없으면 자동 우회하지 않고 별도 운영 복구 절차가 마련될 때까지 계정을 잠금 상태로 유지한다.
+## 외부 LLM credential 경계
+
+- Provider API key는 DB, API 응답, 감사 metadata와 애플리케이션 로그에 저장하지 않는다.
+- secret ref는 서버가 Provider UUID로 생성하며 사용자 입력 path와 `..`, 절대경로를 허용하지 않는다.
+- API는 `/run/cresta-llm-secrets`를 write 가능하게, Agent는 동일 경로를 read-only로 mount한다.
+- credential 교체는 Provider version에 묶인 TOTP 재인증 proof를 한 번 소비하고 Provider를 다시 `DRAFT`로 전환한다.
