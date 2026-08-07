@@ -165,3 +165,9 @@ Argon2id 초기 최소값은 memory 64 MiB, iterations 3, parallelism 1로 한�
 - secret ref는 서버가 Provider UUID로 생성하며 사용자 입력 path와 `..`, 절대경로를 허용하지 않는다.
 - API는 `/run/cresta-llm-secrets`를 write 가능하게, Agent는 동일 경로를 read-only로 mount한다.
 - credential 교체는 Provider version에 묶인 TOTP 재인증 proof를 한 번 소비하고 Provider를 다시 `DRAFT`로 전환한다.
+# Provider deletion and template boundary (2026-08-07)
+
+- Provider endpoints are resolved only from server templates; template fields accept only bounded alphanumeric, underscore, and hyphen values.
+- Provider deletion is a TOTP-bound destructive action and is rejected while an ACTIVE route references the Provider.
+- Credential files are deleted before the Provider tombstone is committed; deletion failure closes the operation.
+- Prompt validation rejects credential/TOTP/header extraction, arbitrary shell/tool execution, direct Broker calls, and direct order execution instructions. Runtime structured data is never interpolated into the system prompt.

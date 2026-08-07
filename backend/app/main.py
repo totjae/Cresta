@@ -24,6 +24,7 @@ from app.errors import ResourceNotFoundError
 from app.execution_policy import ExecutionPolicyError
 from app.ids import uuid7
 from app.llm.profiles import LlmProfileError
+from app.llm.prompts import LlmPromptError
 from app.mock_ai import MockDecisionError
 from app.watchlist import WatchlistError
 
@@ -139,6 +140,20 @@ def create_app() -> FastAPI:
                 "error": {
                     "code": exc.code,
                     "message": "LLM Provider 설정을 처리할 수 없습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": False,
+                }
+            },
+        )
+
+    @application.exception_handler(LlmPromptError)
+    async def llm_prompt_error(request: Request, exc: LlmPromptError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": "LLM 프롬프트 설정을 처리할 수 없습니다.",
                     "correlation_id": request.state.request_id,
                     "retryable": False,
                 }

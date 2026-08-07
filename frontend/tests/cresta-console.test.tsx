@@ -274,12 +274,13 @@ describe("execution policy settings", () => {
       if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-llm", login_id: "admin", expires_at: "2026-08-05T09:00:00Z", csrf_token: "csrf-llm" });
       if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
       if (path === "/api/v1/settings/execution-policy") return jsonResponse({ active_version_id: null, source: "SAFE_DEFAULT", policy: safePolicy });
-      if (path === "/api/v1/ai/provider-catalog") return jsonResponse({ items: [{ adapter_type: "OPENAI_RESPONSES", label: "OpenAI" }] });
+      if (path === "/api/v1/ai/provider-catalog") return jsonResponse({ items: [{ template_id: "openai", adapter_type: "OPENAI_RESPONSES", label: "OpenAI", can_register: true, support_level: "compatible", configuration_fields: [] }] });
       if (path.endsWith("/provider-registrations/preview")) return jsonResponse({ target_action: "LLM_PROVIDER_REGISTER", target_id: "registration-target" });
       if (path === "/api/v1/auth/reauth/totp") return jsonResponse({ reauth_proof: "registration-proof-value-1234567890", expires_at: "2026-08-06T01:05:00Z" });
       if (path.endsWith("/provider-registrations") && init?.method === "POST") return jsonResponse({ provider: { id: "provider-1" }, models: [{ id: "model-1" }] }, 201);
       if (path === "/api/v1/ai/providers") return jsonResponse({ schema_version: "1.0", request_id: "providers-1", items: [] });
       if (path === "/api/v1/ai/models") return jsonResponse({ schema_version: "1.0", request_id: "models-1", items: [] });
+      if (path === "/api/v1/ai/prompts") return jsonResponse({ schema_version: "1.0", request_id: "prompts-1", items: [] });
       if (path === "/api/v1/ai/routes") return jsonResponse({ schema_version: "1.0", request_id: "routes-1", items: [] });
       if (path === "/api/v1/ai/role-assignments") return jsonResponse({ schema_version: "1.0", request_id: "assignments-1", items: [] });
       return jsonResponse({}, 404);
@@ -290,6 +291,7 @@ describe("execution policy settings", () => {
 
     await user.click(await screen.findByRole("button", { name: /전략·설정/ }));
     expect(await screen.findByText("SHADOW ONLY")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Models" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Provider" }));
     await user.click(screen.getByRole("button", { name: "Provider 추가" }));
     await user.type(screen.getByLabelText("연결 이름"), "openai-primary");
@@ -305,7 +307,7 @@ describe("execution policy settings", () => {
       headers: expect.objectContaining({ "X-CSRF-Token": "csrf-llm" }),
     }));
     expect(JSON.parse(String(createCall?.[1]?.body))).toEqual(expect.objectContaining({
-      name: "openai-primary", adapter_type: "OPENAI_RESPONSES", credential: "secret-provider-key",
+      name: "openai-primary", template_id: "openai", configuration: {}, credential: "secret-provider-key",
       reauth_proof: "registration-proof-value-1234567890",
     }));
   });
@@ -337,6 +339,7 @@ describe("execution policy settings", () => {
       if (path === "/api/v1/ai/provider-catalog") return jsonResponse({ items: [] });
       if (path === "/api/v1/ai/providers") return jsonResponse({ items: [] });
       if (path === "/api/v1/ai/models") return jsonResponse({ items: [] });
+      if (path === "/api/v1/ai/prompts") return jsonResponse({ items: [] });
       if (path === "/api/v1/ai/routes") return jsonResponse({ items: active ? routes.map((item) => ({ ...item, state: "ACTIVE" })) : routes });
       if (path === "/api/v1/ai/role-assignments" && !init?.method) return jsonResponse({ items: roles.map((role, index) => ({ role, current: active ? { ...routes[index], state: "ACTIVE" } : null, candidates: active ? [] : [routes[index]], history_count: 1, status: active ? "ACTIVE" : "CANDIDATE" })) });
       if (path.endsWith("/activation-preview")) return jsonResponse({ target_action: "LLM_ROLE_ASSIGNMENT_ACTIVATE", target_id: "assignment-target", routes });

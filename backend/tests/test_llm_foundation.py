@@ -43,6 +43,54 @@ def _login(client: TestClient) -> str:
     return response.json()["csrf_token"]
 
 
+def test_provider_delete_is_totp_bound_and_hidden(client: TestClient, db: Session) -> None:
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    created = client.post(
+        "/api/v1/ai/providers",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "name": "delete-me",
+            "adapter_type": "MOCK",
+            "endpoint": None,
+            "credential_secret_ref": None,
+            "data_policy": "NONE",
+        },
+    )
+    assert created.status_code == 201, created.text
+    provider_id = created.json()["id"]
+    preview = client.post(
+        f"/api/v1/ai/providers/{provider_id}/delete-preview", headers=headers
+    )
+    assert preview.status_code == 200, preview.text
+    proof = client.post(
+        "/api/v1/auth/reauth/totp",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(
+                datetime.now(UTC) + timedelta(seconds=30)
+            ),
+            "target_action": "LLM_PROVIDER_DELETE",
+            "target_id": preview.json()["target_id"],
+        },
+    )
+    assert proof.status_code == 200, proof.text
+    deleted = client.request(
+        "DELETE",
+        f"/api/v1/ai/providers/{provider_id}",
+        headers=headers,
+        json={"schema_version": "1.0", "reauth_proof": proof.json()["reauth_proof"]},
+    )
+    assert deleted.status_code == 204, deleted.text
+    assert client.get("/api/v1/ai/providers", headers=headers).json()["items"] == []
+    tombstone = db.get(LlmProviderProfile, provider_id)
+    assert tombstone is not None
+    assert tombstone.deleted_at is not None
+    assert tombstone.state == "DISABLED"
+
+
 def test_mock_provider_model_and_shadow_route_lifecycle(client: TestClient, db: Session) -> None:
     csrf = _login(client)
     headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
@@ -379,11 +427,12 @@ def test_external_credential_is_write_only_totp_bound_and_not_stored_in_db(
             "reason": "runtime activation must remain blocked",
         },
     ).json()
-    blocked_route = client.post(
+    validated_route = client.post(
         f"/api/v1/ai/routes/{route['id']}/validate", headers=headers
     )
-    assert blocked_route.status_code == 422
-    assert blocked_route.json()["error"]["code"] == "EXTERNAL_RUNTIME_NOT_IMPLEMENTED"
+    assert validated_route.status_code == 200, validated_route.text
+    assert validated_route.json()["state"] == "VALIDATED"
+    assert validated_route.json()["execution_stage"] == "SHADOW"
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
 

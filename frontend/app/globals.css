@@ -158,6 +158,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid #82b4ff; outline-
 .secondary-button, .icon-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid #3a4b68; border-radius: 6px; background: #142139; cursor: pointer; }
 .secondary-button { min-height: 36px; padding: 0 12px; font-size: 11px; }
 .secondary-button:disabled { opacity: .55; cursor: not-allowed; }
+.danger-button { border-color: #7f3540; color: #ff9aa7; background: #271722; }
+.danger-button:hover:not(:disabled) { border-color: #c55160; background: #361b27; }
 .panel[aria-busy="true"] button:disabled { cursor: wait; }
 .icon-button { width: 36px; height: 36px; }
 .data-table-wrap { overflow-x: auto; }
@@ -234,6 +236,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid #82b4ff; outline-
 .compact-editor.model-editor { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .compact-editor label, .parameter-grid label, .assignment-row > label { display: grid; gap: 7px; color: #9eabc0; font-size: 9px; font-weight: 700; }
 .compact-editor input, .compact-editor select, .parameter-grid input, .parameter-grid select, .assignment-row > label select { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid #31425e; border-radius: 6px; background: #081225; color: var(--text); }
+.parameter-grid textarea { width: 100%; min-height: 130px; padding: 10px; resize: vertical; border: 1px solid #31425e; border-radius: 6px; background: #081225; color: var(--text); font: inherit; line-height: 1.5; }
+.parameter-grid .prompt-editor-field { grid-column: 1 / -1; }
 .catalog-list { border-top: 1px solid #293850; }
 .catalog-row { display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; padding: 14px 5px; border-bottom: 1px solid #293850; }
 .catalog-row > div:last-child { display: flex; align-items: center; gap: 9px; }

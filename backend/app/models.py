@@ -861,7 +861,14 @@ class IndicatorSnapshot(Base):
 class LlmProviderProfile(Base):
     __tablename__ = "llm_provider_profiles"
     __table_args__ = (
-        UniqueConstraint("owner_id", "name", name="uq_llm_provider_profiles_owner_name"),
+        Index(
+            "uq_llm_provider_profiles_owner_name_active",
+            "owner_id",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
         CheckConstraint(
             "adapter_type IN ('MOCK','OPENAI_RESPONSES','ANTHROPIC_MESSAGES',"
             "'GEMINI_GENERATE_CONTENT','VERCEL_AI_GATEWAY','OPENAI_COMPATIBLE',"
@@ -881,6 +888,7 @@ class LlmProviderProfile(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_template_id: Mapped[str | None] = mapped_column(String(64), index=True)
     adapter_type: Mapped[str] = mapped_column(String(40), nullable=False)
     endpoint: Mapped[str | None] = mapped_column(String(500))
     credential_secret_ref: Mapped[str | None] = mapped_column(String(128))
@@ -893,6 +901,7 @@ class LlmProviderProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
     __mapper_args__: ClassVar[dict[str, object]] = {
         "version_id_col": version,
@@ -939,6 +948,48 @@ class LlmModelProfile(Base):
     reasoning_effort: Mapped[str | None] = mapped_column(String(12))
     seed: Mapped[int | None] = mapped_column(Integer)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="DRAFT")
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    __mapper_args__: ClassVar[dict[str, object]] = {
+        "version_id_col": version,
+        "version_id_generator": False,
+    }
+
+
+class LlmPromptProfile(Base):
+    __tablename__ = "llm_prompt_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id", "role", "version_number", name="uq_llm_prompt_role_number"
+        ),
+        UniqueConstraint(
+            "owner_id", "role", "version_label", name="uq_llm_prompt_role_label"
+        ),
+        CheckConstraint(
+            "role IN ('TECHNICAL_SCOUT','NEWS_DISCLOSURE_SCOUT','MARKET_SECTOR_SCOUT',"
+            "'POSITION_RISK_SCOUT','CORE')",
+            name="ck_llm_prompt_profiles_role",
+        ),
+        CheckConstraint(
+            "state IN ('DRAFT','VALIDATED','DISABLED')",
+            name="ck_llm_prompt_profiles_state",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    version_label: Mapped[str] = mapped_column(String(64), nullable=False)
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="DRAFT")
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -1018,6 +1069,9 @@ class LlmRoleRoute(Base):
         Numeric(18, 2), nullable=False, default=0
     )
     prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt_profile_id: Mapped[str | None] = mapped_column(
+        ForeignKey("llm_prompt_profiles.id"), index=True
+    )
     output_schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
     temperature_override: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
     top_p_override: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))

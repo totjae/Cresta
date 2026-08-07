@@ -270,3 +270,14 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-129 | `llm_role_routes`는 역할 배정 version으로 사용하고 generation override와 계산 가능한 상속 출처를 저장한다. 같은 owner·scope·role의 `ACTIVE`는 부분 unique 하나만 허용한다. |
 | DB-130 | 역할 배정 활성화 transaction은 새 route를 `ACTIVE`, 기존 활성 route를 `SUPERSEDED`로 원자 전환한다. 여러 `VALIDATED` 행은 후보 이력일 뿐 runtime 기본값이 아니다. |
 | DB-131 | 기존 중복 `VALIDATED` route migration은 행을 삭제하거나 임의 활성화하지 않는다. 이력으로 보존하고 사용자가 명시적으로 현재 배정을 선택하도록 한다. |
+# Provider template migration (2026-08-07)
+
+- Migration `20260807_0017` adds `provider_template_id` and `deleted_at` to `llm_provider_profiles`.
+- Provider names are unique per owner only while `deleted_at IS NULL`, so a safely deleted connection name can be reused.
+- Provider deletion is a tombstone operation; model, route, invocation, decision, and audit history is not cascaded away.
+
+## Prompt profile migration (2026-08-08)
+
+- Migration `20260808_0018` creates `llm_prompt_profiles` and adds nullable `prompt_profile_id` to `llm_role_routes` for legacy compatibility.
+- Prompt rows are immutable after creation except for the `DRAFT → VALIDATED → DISABLED` lifecycle. `(owner_id, role, version_number)` and `(owner_id, role, version_label)` are unique.
+- Routes reference a concrete prompt row; superseding a role route never rewrites or deletes its prompt.

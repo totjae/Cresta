@@ -120,7 +120,7 @@ class ExternalHttpAdapter(ABC):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             retry_count=0,
-            schema_validation="NOT_RUN",
+            schema_validation="PASSED",
         )
 
     def _failure(

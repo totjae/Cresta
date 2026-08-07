@@ -22,7 +22,6 @@ class OpenAIResponsesAdapter(ExternalHttpAdapter):
             "model": safe_model_id(model_id),
             "input": request.messages,
             "max_output_tokens": request.max_output_tokens,
-            "temperature": request.temperature,
             "text": {
                 "format": {
                     "type": "json_schema",
@@ -33,7 +32,9 @@ class OpenAIResponsesAdapter(ExternalHttpAdapter):
             },
             "store": False,
         }
-        if request.top_p is not None:
+        if request.reasoning_effort is None:
+            body["temperature"] = request.temperature
+        if request.top_p is not None and request.reasoning_effort is None:
             body["top_p"] = request.top_p
         if request.reasoning_effort is not None:
             body["reasoning"] = {"effort": request.reasoning_effort.lower()}

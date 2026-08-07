@@ -328,8 +328,8 @@
 
 | 대상 | 실행 | 결과 | 범위·제약 |
 | --- | --- | --- | --- |
-| Python 단위·API 시험 | `python -m pytest` | 160개 통과 | 기존 범위, 역할 배정, Provider 모델 발견·원자 등록, 비동기 Agent claim·lease·fencing·응답 불명 격리·scheduler admission과 주문 0건 포함 |
-| Console component 시험 | `npm test` | 11개 통과 | Provider/Models/역할 배정/이력 분리, ACTIVE route 비동기 DIAGNOSTIC 등록·상태 갱신 포함 |
+| Python 단위·API 시험 | `python -m pytest` | 164개 통과 | 기존 범위, 역할 배정, Provider 모델 발견·원자 등록, 역할별 Prompt Profile, 비동기 Agent claim·lease·fencing·응답 불명 격리·scheduler admission과 주문 0건 포함 |
+| Console component 시험 | `npm test` | 11개 통과 | Provider 내부 모델 관리, 역할 배정/이력 분리, ACTIVE route 비동기 DIAGNOSTIC 등록·상태 갱신 포함 |
 | Console 타입 검사 | `npm run typecheck` | 통과 | TypeScript strict mode |
 | Console production build | `npm run build` | 통과 | Next.js standalone 정적 route 생성 |
 | Console HTTP smoke | standalone server에 HTTP 요청 | 통과 | `/` 응답 200과 Cresta metadata 확인 |
@@ -384,3 +384,23 @@
 | T-LLM-022 | LLM-090 | timeout·429·401·5xx·잘못된 JSON | 정규 상태, 호출 1회, retry 0, secret 비노출 | 통과 (2026-08-06, MockTransport) |
 | T-LLM-023 | LLM-092~093 | 외부 Provider·Model metadata 검증 후 route 검증 | 과금 호출 0건, external route는 runtime 구현 전 차단, 주문 0건 | 통과 (2026-08-06, API) |
 | T-LLM-024 | LLM-094~099, API-130~142, UI-127~129 | 공식 Provider 키로 등록 preview·TOTP·모델 발견, 실패·과대 응답·redirect, 모델 사용 전환·재동기화 | 성공 시에만 Provider·secret·모델 저장, 원문 키 0건, 활성 모델만 역할 선택, 기존 route 자동 변경 0건 | 통과 (2026-08-06, MockTransport·API·component) |
+# Provider catalog revision tests (2026-08-07)
+
+- Verify exactly 40 catalog entries, OpenAI/Anthropic/Google first, and all remaining entries alphabetically.
+- Verify 35 registrable and 5 visible non-registrable templates.
+- Verify template endpoint/configuration validation, native and OpenAI-compatible discovery parsing, static model merge, and secret non-disclosure.
+- Verify external validated models can create validated SHADOW role candidates while unsupported parameters fail with a precise code.
+- Verify deletion requires TOTP, blocks ACTIVE routes, removes the secret, hides the Provider, disables its models, and preserves history.
+- Verify the Console has no Models tab and Provider cards retain model controls.
+
+Local evidence: the complete backend suite, Ruff, frontend TypeScript, 11 component tests, Next production build, and SQLite `0017` upgrade→downgrade→upgrade passed. PostgreSQL migration and real external-provider SHADOW calls remain server verification items.
+
+# Prompt profile tests (2026-08-08)
+
+- Verify server-side monotonic role versions, owner isolation, immutable content, and DRAFT→VALIDATED lifecycle.
+- Verify unsafe credential, tool, and order instructions are rejected with stable codes.
+- Verify route role/state matching and legacy nullable `prompt_profile_id` migration behavior.
+- Verify Agent LLM requests prepend the selected system prompt while keeping structured runtime input in a separate user message.
+- Verify the role assignment UI creates/selects Prompt Profiles and never displays raw prompt content in run history.
+
+Local evidence: the complete 164-test backend suite, Ruff, frontend TypeScript, 11 component tests, Next production build, and SQLite `0018` upgrade→downgrade-to-`0017`→upgrade passed. PostgreSQL migration and a real external-provider request remain server verification items.

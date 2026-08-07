@@ -16,11 +16,13 @@ from app.config import Settings
 from app.llm.adapters.mock import MOCK_CAPABILITIES
 from app.llm.contracts import ModelCapabilities, ProviderHealth
 from app.llm.discovery import (
-    CATALOG,
     DiscoveredModel,
     ModelDiscoveryError,
     discover_models,
+    get_template,
+    resolve_endpoint,
 )
+from app.llm.prompts import LlmPromptError, get_prompt
 from app.llm.registry import AdapterNotImplementedError, provider_registry
 from app.llm.router import RouteBoundaryError, validate_foundation_route
 from app.llm.secrets import LlmSecretError, LlmSecretStore
@@ -61,6 +63,7 @@ ASSIGNMENT_ROLES = (
 ASSIGNMENT_REAUTH_ACTION = "LLM_ROLE_ASSIGNMENT_ACTIVATE"
 CREDENTIAL_REAUTH_ACTION = "LLM_PROVIDER_CREDENTIAL_SET"
 REGISTRATION_REAUTH_ACTION = "LLM_PROVIDER_REGISTER"
+DELETION_REAUTH_ACTION = "LLM_PROVIDER_DELETE"
 
 
 class LlmProfileError(Exception):
@@ -151,33 +154,41 @@ def list_providers(db: Session, owner_id: str) -> list[LlmProviderProfile]:
     return list(
         db.scalars(
             select(LlmProviderProfile)
-            .where(LlmProviderProfile.owner_id == owner_id)
+            .where(
+                LlmProviderProfile.owner_id == owner_id,
+                LlmProviderProfile.deleted_at.is_(None),
+            )
             .order_by(LlmProviderProfile.created_at)
         )
     )
 
 
-def registration_target_id(*, owner_id: str, name: str, adapter_type: str) -> str:
-    value = f"{owner_id}:{name.strip()}:{adapter_type}"
+def registration_target_id(*, owner_id: str, name: str, template_id: str) -> str:
+    value = f"{owner_id}:{name.strip()}:{template_id}"
     return hashlib.sha256(value.encode()).hexdigest()
 
 
 def preview_provider_registration(
-    db: Session, *, owner_id: str, name: str, adapter_type: str
+    db: Session, *, owner_id: str, name: str, template_id: str
 ) -> str:
-    if adapter_type not in CATALOG:
-        raise LlmProfileError("PROVIDER_DISCOVERY_UNSUPPORTED")
+    try:
+        template = get_template(template_id)
+    except ModelDiscoveryError as exc:
+        raise LlmProfileError(exc.code, exc.status_code) from exc
+    if not template.can_register:
+        raise LlmProfileError("PROVIDER_REGISTRATION_UNAVAILABLE")
     normalized_name = name.strip()
     existing = db.scalar(
         select(LlmProviderProfile.id).where(
             LlmProviderProfile.owner_id == owner_id,
             LlmProviderProfile.name == normalized_name,
+            LlmProviderProfile.deleted_at.is_(None),
         )
     )
     if existing:
         raise LlmProfileError("PROVIDER_NAME_CONFLICT", 409)
     return registration_target_id(
-        owner_id=owner_id, name=normalized_name, adapter_type=adapter_type
+        owner_id=owner_id, name=normalized_name, template_id=template.template_id
     )
 
 
@@ -244,7 +255,8 @@ def register_provider_with_discovery(
     *,
     user: User,
     name: str,
-    adapter_type: str,
+    template_id: str,
+    configuration: dict[str, str] | None,
     credential: str,
     reauth_proof: str,
     correlation_id: str,
@@ -252,7 +264,7 @@ def register_provider_with_discovery(
 ) -> tuple[LlmProviderProfile, list[LlmModelProfile]]:
     normalized_name = name.strip()
     target_id = preview_provider_registration(
-        db, owner_id=user.id, name=normalized_name, adapter_type=adapter_type
+        db, owner_id=user.id, name=normalized_name, template_id=template_id
     )
     consume_reauth_proof(
         db,
@@ -263,18 +275,26 @@ def register_provider_with_discovery(
     )
     db.commit()
     try:
-        discovered = discover_models(adapter_type, credential)
+        template = get_template(template_id)
+        endpoint = resolve_endpoint(template, configuration)
+        discovered = (
+            discover_models(
+                template.template_id, credential, configuration=configuration
+            )
+            if configuration
+            else discover_models(template.template_id, credential)
+        )
     except ModelDiscoveryError as exc:
         raise LlmProfileError(exc.code, exc.status_code) from exc
 
-    catalog = CATALOG[adapter_type]
     provider = LlmProviderProfile(
         owner_id=user.id,
         name=normalized_name,
-        adapter_type=adapter_type,
-        endpoint=catalog.endpoint,
+        provider_template_id=template.template_id,
+        adapter_type=template.adapter_type,
+        endpoint=endpoint,
         credential_secret_ref=None,
-        data_policy=catalog.data_policy,
+        data_policy=template.data_policy,
         state="VALIDATED",
         health_status="READY",
         last_tested_at=datetime.now(UTC),
@@ -294,7 +314,11 @@ def register_provider_with_discovery(
             action="LLM_PROVIDER_REGISTERED",
             target=provider.id,
             correlation_id=correlation_id,
-            metadata={"adapter_type": adapter_type, "discovered_model_count": len(models)},
+            metadata={
+                "template_id": template.template_id,
+                "adapter_type": template.adapter_type,
+                "discovered_model_count": len(models),
+            },
         )
         db.commit()
     except (SQLAlchemyError, LlmSecretError) as exc:
@@ -324,13 +348,17 @@ def sync_provider_models(
     settings: Settings,
 ) -> tuple[LlmProviderProfile, list[LlmModelProfile]]:
     provider = get_provider(db, user.id, provider_id)
-    if provider.adapter_type not in CATALOG or not provider.credential_secret_ref:
+    if not provider.provider_template_id or not provider.credential_secret_ref:
         raise LlmProfileError("PROVIDER_CREDENTIAL_REQUIRED")
     try:
         credential = LlmSecretStore(settings.llm_secret_directory).read(
             provider.credential_secret_ref
         )
-        discovered = discover_models(provider.adapter_type, credential)
+        discovered = discover_models(
+            provider.provider_template_id,
+            credential,
+            endpoint_override=provider.endpoint,
+        )
     except LlmSecretError as exc:
         raise LlmProfileError(exc.args[0]) from exc
     except ModelDiscoveryError as exc:
@@ -402,9 +430,84 @@ def create_provider(
 
 def get_provider(db: Session, owner_id: str, provider_id: str) -> LlmProviderProfile:
     profile = db.get(LlmProviderProfile, provider_id)
-    if profile is None or profile.owner_id != owner_id:
+    if profile is None or profile.owner_id != owner_id or profile.deleted_at is not None:
         raise LlmProfileError("PROVIDER_NOT_FOUND", 404)
     return profile
+
+
+def provider_deletion_target(provider: LlmProviderProfile) -> str:
+    return hashlib.sha256(f"{provider.id}:{provider.version}".encode()).hexdigest()
+
+
+def preview_provider_deletion(
+    db: Session, *, owner_id: str, provider_id: str
+) -> tuple[LlmProviderProfile, str]:
+    provider = get_provider(db, owner_id, provider_id)
+    active_route = db.scalar(
+        select(LlmRoleRoute.id)
+        .join(
+            LlmModelProfile,
+            LlmRoleRoute.primary_model_profile_id == LlmModelProfile.id,
+        )
+        .where(
+            LlmModelProfile.provider_profile_id == provider.id,
+            LlmRoleRoute.state == "ACTIVE",
+        )
+    )
+    if active_route:
+        raise LlmProfileError("PROVIDER_IN_ACTIVE_ROUTE", 409)
+    return provider, provider_deletion_target(provider)
+
+
+def delete_provider(
+    db: Session,
+    *,
+    user: User,
+    provider_id: str,
+    reauth_proof: str,
+    correlation_id: str,
+    settings: Settings,
+) -> None:
+    provider, target_id = preview_provider_deletion(
+        db, owner_id=user.id, provider_id=provider_id
+    )
+    consume_reauth_proof(
+        db,
+        user=user,
+        raw_proof=reauth_proof,
+        target_action=DELETION_REAUTH_ACTION,
+        target_id=target_id,
+    )
+    models = list(
+        db.scalars(
+            select(LlmModelProfile).where(
+                LlmModelProfile.provider_profile_id == provider.id
+            )
+        )
+    )
+    secret_ref = provider.credential_secret_ref
+    if secret_ref:
+        try:
+            LlmSecretStore(settings.llm_secret_directory).delete(secret_ref)
+        except LlmSecretError as exc:
+            raise LlmProfileError(exc.args[0], 500) from exc
+    provider.credential_secret_ref = None
+    provider.state = "DISABLED"
+    provider.health_status = "DISABLED"
+    provider.deleted_at = datetime.now(UTC)
+    provider.version += 1
+    for model in models:
+        model.state = "DISABLED"
+        model.version += 1
+    _audit(
+        db,
+        user=user,
+        action="LLM_PROVIDER_DELETED",
+        target=provider.id,
+        correlation_id=correlation_id,
+        metadata={"template_id": provider.provider_template_id},
+    )
+    db.commit()
 
 
 def test_provider(
@@ -466,6 +569,7 @@ def preview_provider_credential(
         "OPENAI_RESPONSES",
         "ANTHROPIC_MESSAGES",
         "GEMINI_GENERATE_CONTENT",
+        "OPENAI_COMPATIBLE",
     }:
         raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED")
     return profile, credential_target_id(profile)
@@ -521,7 +625,10 @@ def list_models(db: Session, owner_id: str) -> list[LlmModelProfile]:
         db.scalars(
             select(LlmModelProfile)
             .join(LlmProviderProfile)
-            .where(LlmProviderProfile.owner_id == owner_id)
+            .where(
+                LlmProviderProfile.owner_id == owner_id,
+                LlmProviderProfile.deleted_at.is_(None),
+            )
             .order_by(LlmModelProfile.created_at)
         )
     )
@@ -689,7 +796,8 @@ def create_route(
     timeout_ms: int,
     daily_call_limit: int,
     daily_cost_limit_krw: Decimal,
-    prompt_version: str,
+    prompt_version: str | None,
+    prompt_profile_id: str | None,
     output_schema_version: str,
     temperature_override: Decimal | None,
     top_p_override: Decimal | None,
@@ -702,6 +810,19 @@ def create_route(
     if role not in ROLES:
         raise LlmProfileError("ROLE_UNSUPPORTED")
     get_model(db, user.id, primary_model_profile_id)
+    resolved_prompt_version = prompt_version.strip() if prompt_version else None
+    if prompt_profile_id:
+        try:
+            prompt = get_prompt(db, owner_id=user.id, prompt_id=prompt_profile_id)
+        except LlmPromptError as exc:
+            raise LlmProfileError(exc.code, exc.status_code) from exc
+        if prompt.role != role:
+            raise LlmProfileError("PROMPT_ROLE_MISMATCH")
+        if prompt.state != "VALIDATED":
+            raise LlmProfileError("PROMPT_NOT_VALIDATED")
+        resolved_prompt_version = prompt.version_label
+    if not resolved_prompt_version:
+        raise LlmProfileError("PROMPT_REQUIRED")
     route = LlmRoleRoute(
         owner_id=user.id,
         role=role,
@@ -709,7 +830,8 @@ def create_route(
         timeout_ms=timeout_ms,
         daily_call_limit=daily_call_limit,
         daily_cost_limit_krw=daily_cost_limit_krw,
-        prompt_version=prompt_version.strip(),
+        prompt_version=resolved_prompt_version,
+        prompt_profile_id=prompt_profile_id,
         output_schema_version=output_schema_version.strip(),
         temperature_override=temperature_override,
         top_p_override=top_p_override,
@@ -752,8 +874,25 @@ def validate_route(
         raise LlmProfileError("ROUTE_STATE_CONFLICT", 409)
     model = get_model(db, user.id, route.primary_model_profile_id)
     provider = get_provider(db, user.id, model.provider_profile_id)
-    if provider.adapter_type != "MOCK":
-        raise LlmProfileError("EXTERNAL_RUNTIME_NOT_IMPLEMENTED")
+    if route.prompt_profile_id:
+        try:
+            prompt = get_prompt(db, owner_id=user.id, prompt_id=route.prompt_profile_id)
+        except LlmPromptError as exc:
+            raise LlmProfileError(exc.code, exc.status_code) from exc
+        if prompt.role != route.role or prompt.state != "VALIDATED":
+            raise LlmProfileError("PROMPT_ROUTE_NOT_READY")
+    if provider.state != "VALIDATED" or model.state != "VALIDATED":
+        raise LlmProfileError("ROUTE_DEPENDENCY_NOT_VALIDATED")
+    if provider.adapter_type != "MOCK" and not provider.credential_secret_ref:
+        raise LlmProfileError("PROVIDER_CREDENTIAL_REQUIRED")
+    try:
+        provider_registry.resolve(
+            provider.adapter_type,
+            endpoint=provider.endpoint,
+            credential=("route-validation" if provider.adapter_type != "MOCK" else None),
+        )
+    except AdapterNotImplementedError as exc:
+        raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED") from exc
     capabilities = ModelCapabilities.model_validate_json(model.capabilities_json)
     if route.reasoning_effort_override is not None and not capabilities.reasoning:
         raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_REASONING")

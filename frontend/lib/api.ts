@@ -285,6 +285,7 @@ export type LlmCapabilities = {
 export type LlmProviderProfile = {
   id: string;
   name: string;
+  provider_template_id: string | null;
   adapter_type: string;
   endpoint: string | null;
   credential_configured: boolean;
@@ -297,8 +298,17 @@ export type LlmProviderProfile = {
 };
 
 export type LlmProviderCatalogItem = {
-  adapter_type: "OPENAI_RESPONSES" | "ANTHROPIC_MESSAGES" | "GEMINI_GENERATE_CONTENT";
+  template_id: string;
+  adapter_type: string;
   label: string;
+  can_register: boolean;
+  support_level: string;
+  configuration_fields: Array<{
+    key: string;
+    label: string;
+    minimum_length: number;
+    maximum_length: number;
+  }>;
 };
 
 export type LlmModelProfile = {
@@ -331,6 +341,8 @@ export type LlmRoleRoute = {
   daily_call_limit: number;
   daily_cost_limit_krw: string;
   prompt_version: string;
+  prompt_profile_id: string | null;
+  prompt_content_hash: string | null;
   output_schema_version: string;
   temperature_override: string | null;
   top_p_override: string | null;
@@ -350,6 +362,20 @@ export type LlmRoleRoute = {
     seed_source: string;
   };
   state: string;
+  reason: string;
+  validated_at: string | null;
+  version: number;
+  created_at: string;
+};
+
+export type LlmPromptProfile = {
+  id: string;
+  role: string;
+  version_number: number;
+  version_label: string;
+  system_prompt: string;
+  content_hash: string;
+  state: "DRAFT" | "VALIDATED" | "DISABLED";
   reason: string;
   validated_at: string | null;
   version: number;
@@ -390,8 +416,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!response.ok) {
-    throw new ApiError(response.status);
+    let code: string | null = null;
+    try {
+      const payload = await response.json() as { error?: { code?: string }; detail?: string };
+      code = payload.error?.code ?? payload.detail ?? null;
+    } catch {}
+    throw new ApiError(response.status, code ?? undefined);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -494,20 +526,21 @@ export const llmApi = {
       { signal },
     );
   },
-  previewRegistration(csrfToken: string, name: string, adapterType: string) {
+  previewRegistration(csrfToken: string, name: string, templateId: string, configuration: Record<string, string>) {
     return request<{ target_action: "LLM_PROVIDER_REGISTER"; target_id: string }>(
       "/api/v1/ai/provider-registrations/preview",
       {
         method: "POST",
         headers: { "X-CSRF-Token": csrfToken },
-        body: JSON.stringify({ schema_version: "1.0", name, adapter_type: adapterType }),
+        body: JSON.stringify({ schema_version: "1.0", name, template_id: templateId, configuration }),
       },
     );
   },
   registerProvider(
     csrfToken: string,
     name: string,
-    adapterType: string,
+    templateId: string,
+    configuration: Record<string, string>,
     credential: string,
     reauthProof: string,
   ) {
@@ -519,7 +552,8 @@ export const llmApi = {
         body: JSON.stringify({
           schema_version: "1.0",
           name,
-          adapter_type: adapterType,
+          template_id: templateId,
+          configuration,
           credential,
           reauth_proof: reauthProof,
         }),
@@ -577,6 +611,19 @@ export const llmApi = {
       { method: "POST", headers: { "X-CSRF-Token": csrfToken } },
     );
   },
+  previewDelete(csrfToken: string, providerId: string) {
+    return request<{ target_action: "LLM_PROVIDER_DELETE"; target_id: string; provider_id: string }>(
+      `/api/v1/ai/providers/${encodeURIComponent(providerId)}/delete-preview`,
+      { method: "POST", headers: { "X-CSRF-Token": csrfToken } },
+    );
+  },
+  deleteProvider(csrfToken: string, providerId: string, reauthProof: string) {
+    return request<void>(`/api/v1/ai/providers/${encodeURIComponent(providerId)}`, {
+      method: "DELETE",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({ schema_version: "1.0", reauth_proof: reauthProof }),
+    });
+  },
   models(signal?: AbortSignal) {
     return request<{ schema_version: "1.0"; request_id: string; items: LlmModelProfile[] }>(
       "/api/v1/ai/models",
@@ -632,10 +679,35 @@ export const llmApi = {
       { signal },
     );
   },
+  prompts(signal?: AbortSignal) {
+    return request<{ schema_version: "1.0"; request_id: string; items: LlmPromptProfile[] }>(
+      "/api/v1/ai/prompts",
+      { signal },
+    );
+  },
+  createPrompt(csrfToken: string, role: string, systemPrompt: string, reason: string) {
+    return request<LlmPromptProfile>("/api/v1/ai/prompts", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        schema_version: "1.0",
+        role,
+        system_prompt: systemPrompt,
+        reason,
+      }),
+    });
+  },
+  validatePrompt(csrfToken: string, promptId: string) {
+    return request<LlmPromptProfile>(`/api/v1/ai/prompts/${encodeURIComponent(promptId)}/validate`, {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+    });
+  },
   createShadowRoute(
     csrfToken: string,
     role: string,
     modelProfileId: string,
+    promptProfileId: string,
     reason: string,
     parameters: {
       temperature?: string | null;
@@ -655,7 +727,8 @@ export const llmApi = {
         timeout_ms: 10000,
         daily_call_limit: 100,
         daily_cost_limit_krw: "0",
-        prompt_version: `${role.toLowerCase()}-shadow-v1`,
+        prompt_profile_id: promptProfileId,
+        prompt_version: null,
         output_schema_version: role === "CORE" ? "agent-core-v1" : "agent-assessment-v1",
         temperature_override: parameters.temperature ?? null,
         top_p_override: parameters.topP ?? null,

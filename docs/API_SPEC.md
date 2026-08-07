@@ -345,3 +345,16 @@ POST /api/v1/ai/providers/{provider_id}/credential
 - credential 등록은 CSRF·세션·1회용 TOTP proof를 요구한다.
 - 응답은 `credential_configured`만 반환하며 credential 원문과 secret ref를 반환하지 않는다.
 - Provider test는 외부 생성 호출 없이 Adapter 계약과 secret 가독성만 검증한다.
+# LLM Provider catalog additions (2026-08-07)
+
+- `GET /api/v1/ai/provider-catalog` returns `template_id`, canonical `adapter_type`, registration availability, support level, and non-secret configuration fields.
+- Registration preview and registration accept `template_id` and `configuration`; legacy native `adapter_type` remains accepted during migration.
+- `POST /api/v1/ai/providers/{provider_id}/delete-preview` returns a TOTP-bound `LLM_PROVIDER_DELETE` target.
+- `DELETE /api/v1/ai/providers/{provider_id}` consumes the reauthentication proof and returns `204`.
+
+## Prompt management API (2026-08-08)
+
+- `GET /api/v1/ai/prompts?role=...` lists the authenticated owner's prompt versions.
+- `POST /api/v1/ai/prompts` creates an immutable DRAFT for one Agent role and assigns its next server-side version number.
+- `POST /api/v1/ai/prompts/{prompt_id}/validate` validates safety and moves a DRAFT to VALIDATED.
+- Route creation accepts `prompt_profile_id`; the server derives `prompt_version` from the referenced profile and rejects role/state mismatches.

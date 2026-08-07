@@ -10,14 +10,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.agents.contracts import AgentAssessment
+from app.config import get_settings
 from app.llm.contracts import LlmRequest
+from app.llm.discovery import get_template
 from app.llm.registry import AdapterNotImplementedError, provider_registry
+from app.llm.secrets import LlmSecretError, LlmSecretStore
 from app.models import (
     AgentRun,
     AgentStageRun,
     IndicatorSnapshot,
     LlmInvocation,
     LlmModelProfile,
+    LlmPromptProfile,
     LlmProviderProfile,
     LlmRoleRoute,
     MarketSnapshot,
@@ -99,17 +103,36 @@ def _load_routes(
             raise AgentRuntimeError("AGENT_ROUTE_NOT_READY")
         model = db.get(LlmModelProfile, route.primary_model_profile_id)
         provider = db.get(LlmProviderProfile, model.provider_profile_id) if model else None
+        prompt = (
+            db.get(LlmPromptProfile, route.prompt_profile_id)
+            if route.prompt_profile_id
+            else None
+        )
         if (
             model is None
             or model.state != "VALIDATED"
             or provider is None
             or provider.owner_id != owner_id
-            or provider.adapter_type != "MOCK"
             or provider.state != "VALIDATED"
+            or provider.deleted_at is not None
+            or (provider.adapter_type != "MOCK" and not provider.credential_secret_ref)
+            or (
+                route.prompt_profile_id is not None
+                and (
+                    prompt is None
+                    or prompt.owner_id != owner_id
+                    or prompt.role != role
+                    or prompt.state != "VALIDATED"
+                )
+            )
         ):
             raise AgentRuntimeError("AGENT_ROUTE_NOT_READY")
         try:
-            provider_registry.resolve(provider.adapter_type)
+            provider_registry.resolve(
+                provider.adapter_type,
+                endpoint=provider.endpoint,
+                credential=("route-check" if provider.adapter_type != "MOCK" else None),
+            )
         except AdapterNotImplementedError as exc:
             raise AgentRuntimeError("AGENT_ADAPTER_NOT_ALLOWED") from exc
         bindings[role] = RouteBinding(route, model, provider)
@@ -184,6 +207,23 @@ def _invoke_mock(
     db.add(invocation)
     db.flush()
     stage.invocation_id = invocation.id
+    prompt = (
+        db.get(LlmPromptProfile, binding.route.prompt_profile_id)
+        if binding.route.prompt_profile_id
+        else None
+    )
+    if prompt is not None and (
+        prompt.owner_id != binding.route.owner_id
+        or prompt.role != stage.role
+        or prompt.state != "VALIDATED"
+        or hashlib.sha256(prompt.system_prompt.encode("utf-8")).hexdigest()
+        != prompt.content_hash
+    ):
+        raise AgentRuntimeError("AGENT_PROMPT_SNAPSHOT_MISMATCH")
+    messages = []
+    if prompt is not None:
+        messages.append({"role": "system", "content": prompt.system_prompt})
+    messages.append({"role": "user", "content": _canonical(role_input)})
     request = LlmRequest(
         invocation_id=invocation.id,
         role=stage.role,
@@ -191,7 +231,7 @@ def _invoke_mock(
         prompt_version=binding.route.prompt_version,
         input_schema_version="agent-runtime-input-v1",
         input_hash=stage.input_hash,
-        messages=[{"role": "user", "content": _canonical(role_input)}],
+        messages=messages,
         output_json_schema={"type": "object"},
         timeout_ms=binding.route.timeout_ms,
         max_output_tokens=binding.route.max_output_tokens_override
@@ -214,9 +254,26 @@ def _invoke_mock(
         if binding.route.seed_override is not None
         else binding.model.seed,
     )
-    result = provider_registry.resolve(binding.provider.adapter_type).generate_structured(
-        request, binding.model.provider_model_id
-    )
+    credential = None
+    if binding.provider.adapter_type != "MOCK":
+        if not binding.provider.credential_secret_ref:
+            raise AgentRuntimeError("AGENT_PROVIDER_CREDENTIAL_REQUIRED")
+        try:
+            credential = LlmSecretStore(
+                get_settings().llm_secret_directory
+            ).read(binding.provider.credential_secret_ref)
+        except LlmSecretError as exc:
+            raise AgentRuntimeError("AGENT_PROVIDER_CREDENTIAL_UNREADABLE") from exc
+    result = provider_registry.resolve(
+        binding.provider.adapter_type,
+        endpoint=binding.provider.endpoint,
+        credential=credential,
+        chat_path=(
+            get_template(binding.provider.provider_template_id).chat_path
+            if binding.provider.provider_template_id
+            else None
+        ),
+    ).generate_structured(request, binding.model.provider_model_id)
     invocation.state = result.status
     invocation.actual_provider = result.actual_provider
     invocation.actual_model = result.actual_model
@@ -230,7 +287,7 @@ def _invoke_mock(
     invocation.validation_status = result.schema_validation
     invocation.completed_at = now
     if result.status != "SUCCEEDED" or result.schema_validation != "PASSED":
-        raise AgentRuntimeError("AGENT_MOCK_INVOCATION_FAILED")
+        raise AgentRuntimeError("AGENT_LLM_INVOCATION_FAILED")
 
 
 def _assessment(
@@ -339,6 +396,12 @@ def create_diagnostic_run(
             "route_version": binding.route.version,
             "model_id": binding.model.id,
             "model_version": binding.model.version,
+            "prompt_profile_id": binding.route.prompt_profile_id,
+            "prompt_content_hash": (
+                db.get(LlmPromptProfile, binding.route.prompt_profile_id).content_hash
+                if binding.route.prompt_profile_id
+                else None
+            ),
             "generation_parameters": {
                 "temperature": str(
                     binding.route.temperature_override

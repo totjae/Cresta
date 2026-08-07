@@ -3,7 +3,20 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.llm.discovery import ModelDiscoveryError, discover_models
+from app.llm.discovery import ModelDiscoveryError, catalog_items, discover_models
+
+
+def test_catalog_contains_40_templates_in_required_order() -> None:
+    items = catalog_items()
+    assert len(items) == 40
+    assert [item.template_id for item in items[:3]] == ["openai", "anthropic", "google"]
+    assert [item.label for item in items[3:]] == sorted(
+        (item.label for item in items[3:]), key=str.casefold
+    )
+    assert sum(item.can_register for item in items) == 35
+    assert {item.template_id for item in items if not item.can_register} == {
+        "bedrock", "gemini-express", "copilot", "novelai", "vertex"
+    }
 
 
 def test_openai_discovery_uses_bearer_and_normalizes_models() -> None:

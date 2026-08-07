@@ -32,6 +32,7 @@ from app.models import (
     IndicatorSnapshot,
     LlmInvocation,
     LlmModelProfile,
+    LlmPromptProfile,
     LlmProviderProfile,
     LlmRoleRoute,
     MarketSnapshot,
@@ -207,6 +208,11 @@ def _binding(db: Session, run: AgentRun, stage: AgentStageRun) -> RouteBinding:
     model = db.get(LlmModelProfile, route.primary_model_profile_id) if route else None
     provider = db.get(LlmProviderProfile, model.provider_profile_id) if model else None
     versions = json.loads(run.route_versions_json).get(stage.role, {})
+    prompt = (
+        db.get(LlmPromptProfile, route.prompt_profile_id)
+        if route and route.prompt_profile_id
+        else None
+    )
     if (
         route is None
         or model is None
@@ -215,7 +221,18 @@ def _binding(db: Session, run: AgentRun, stage: AgentStageRun) -> RouteBinding:
         or route.version != versions.get("route_version")
         or model.id != versions.get("model_id")
         or model.version != versions.get("model_version")
-        or provider.adapter_type != "MOCK"
+        or provider.state != "VALIDATED"
+        or provider.deleted_at is not None
+        or (provider.adapter_type != "MOCK" and not provider.credential_secret_ref)
+        or route.prompt_profile_id != versions.get("prompt_profile_id")
+        or (
+            route.prompt_profile_id is not None
+            and (
+                prompt is None
+                or prompt.state != "VALIDATED"
+                or prompt.content_hash != versions.get("prompt_content_hash")
+            )
+        )
     ):
         raise AgentRuntimeError("AGENT_ROUTE_SNAPSHOT_MISMATCH")
     return RouteBinding(route, model, provider)

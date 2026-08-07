@@ -13,6 +13,7 @@ from app.llm.profiles import (
     create_model,
     create_provider,
     create_route,
+    delete_provider,
     disable_model,
     effective_generation_parameters,
     get_model,
@@ -21,6 +22,7 @@ from app.llm.profiles import (
     list_routes,
     preview_assignment_activation,
     preview_provider_credential,
+    preview_provider_deletion,
     preview_provider_registration,
     register_provider_with_discovery,
     set_provider_credential,
@@ -29,7 +31,8 @@ from app.llm.profiles import (
     validate_model,
     validate_route,
 )
-from app.models import LlmModelProfile, LlmProviderProfile, LlmRoleRoute
+from app.llm.prompts import create_prompt, get_prompt, list_prompts, validate_prompt
+from app.models import LlmModelProfile, LlmPromptProfile, LlmProviderProfile, LlmRoleRoute
 from app.schemas import (
     LlmAssignmentActivateRequest,
     LlmAssignmentActivationRequest,
@@ -41,9 +44,14 @@ from app.schemas import (
     LlmModelCreateRequest,
     LlmModelListResponse,
     LlmModelResponse,
+    LlmPromptCreateRequest,
+    LlmPromptListResponse,
+    LlmPromptResponse,
     LlmProviderCatalogItem,
     LlmProviderCatalogResponse,
     LlmProviderCreateRequest,
+    LlmProviderDeletionPreviewResponse,
+    LlmProviderDeletionRequest,
     LlmProviderListResponse,
     LlmProviderRegistrationPreviewRequest,
     LlmProviderRegistrationPreviewResponse,
@@ -65,6 +73,7 @@ def _provider_response(profile: LlmProviderProfile) -> LlmProviderResponse:
     return LlmProviderResponse(
         id=profile.id,
         name=profile.name,
+        provider_template_id=profile.provider_template_id,
         adapter_type=profile.adapter_type,
         endpoint=profile.endpoint,
         credential_configured=profile.credential_secret_ref is not None,
@@ -99,6 +108,11 @@ def _model_response(model: LlmModelProfile) -> LlmModelResponse:
 
 def _route_response(db: Session, owner_id: str, route: LlmRoleRoute) -> LlmRouteResponse:
     model = get_model(db, owner_id, route.primary_model_profile_id)
+    prompt = (
+        get_prompt(db, owner_id=owner_id, prompt_id=route.prompt_profile_id)
+        if route.prompt_profile_id
+        else None
+    )
     return LlmRouteResponse(
         id=route.id,
         role=route.role,
@@ -111,6 +125,8 @@ def _route_response(db: Session, owner_id: str, route: LlmRoleRoute) -> LlmRoute
         daily_call_limit=route.daily_call_limit,
         daily_cost_limit_krw=route.daily_cost_limit_krw,
         prompt_version=route.prompt_version,
+        prompt_profile_id=route.prompt_profile_id,
+        prompt_content_hash=prompt.content_hash if prompt else None,
         output_schema_version=route.output_schema_version,
         temperature_override=route.temperature_override,
         top_p_override=route.top_p_override,
@@ -126,6 +142,22 @@ def _route_response(db: Session, owner_id: str, route: LlmRoleRoute) -> LlmRoute
     )
 
 
+def _prompt_response(prompt: LlmPromptProfile) -> LlmPromptResponse:
+    return LlmPromptResponse(
+        id=prompt.id,
+        role=prompt.role,
+        version_number=prompt.version_number,
+        version_label=prompt.version_label,
+        system_prompt=prompt.system_prompt,
+        content_hash=prompt.content_hash,
+        state=prompt.state,
+        reason=prompt.reason,
+        validated_at=prompt.validated_at,
+        version=prompt.version,
+        created_at=prompt.created_at,
+    )
+
+
 @router.get("/provider-catalog", response_model=LlmProviderCatalogResponse)
 def get_provider_catalog(
     request: Request,
@@ -134,7 +166,22 @@ def get_provider_catalog(
     return LlmProviderCatalogResponse(
         request_id=request.state.request_id,
         items=[
-            LlmProviderCatalogItem(adapter_type=item.adapter_type, label=item.label)
+            LlmProviderCatalogItem(
+                template_id=item.template_id,
+                adapter_type=item.adapter_type,
+                label=item.label,
+                can_register=item.can_register,
+                support_level=item.support_level,
+                configuration_fields=[
+                    {
+                        "key": field.key,
+                        "label": field.label,
+                        "minimum_length": field.minimum_length,
+                        "maximum_length": field.maximum_length,
+                    }
+                    for field in item.configuration_fields
+                ],
+            )
             for item in catalog_items()
         ],
     )
@@ -154,7 +201,7 @@ def post_provider_registration_preview(
         db,
         owner_id=context.user.id,
         name=payload.name,
-        adapter_type=payload.adapter_type,
+        template_id=payload.template_id or payload.adapter_type or "",
     )
     return LlmProviderRegistrationPreviewResponse(
         request_id=request.state.request_id, target_id=target_id
@@ -177,7 +224,8 @@ def post_provider_registration(
         db,
         user=context.user,
         name=payload.name,
-        adapter_type=payload.adapter_type,
+        template_id=payload.template_id or payload.adapter_type or "",
+        configuration=payload.configuration,
         credential=payload.credential,
         reauth_proof=payload.reauth_proof,
         correlation_id=request.state.request_id,
@@ -199,6 +247,45 @@ def get_providers(
     return LlmProviderListResponse(
         request_id=request.state.request_id,
         items=[_provider_response(item) for item in list_providers(db, context.user.id)],
+    )
+
+
+@router.post(
+    "/providers/{provider_id}/delete-preview",
+    response_model=LlmProviderDeletionPreviewResponse,
+)
+def post_provider_delete_preview(
+    provider_id: str,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> LlmProviderDeletionPreviewResponse:
+    provider, target_id = preview_provider_deletion(
+        db, owner_id=context.user.id, provider_id=provider_id
+    )
+    return LlmProviderDeletionPreviewResponse(
+        request_id=request.state.request_id,
+        target_id=target_id,
+        provider_id=provider.id,
+    )
+
+
+@router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_provider_profile(
+    provider_id: str,
+    payload: LlmProviderDeletionRequest,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    delete_provider(
+        db,
+        user=context.user,
+        provider_id=provider_id,
+        reauth_proof=payload.reauth_proof,
+        correlation_id=request.state.request_id,
+        settings=settings,
     )
 
 
@@ -381,6 +468,56 @@ def post_model_disable(
     return _model_response(model)
 
 
+@router.get("/prompts", response_model=LlmPromptListResponse)
+def get_prompt_profiles(
+    request: Request,
+    role: str | None = None,
+    context: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+) -> LlmPromptListResponse:
+    return LlmPromptListResponse(
+        request_id=request.state.request_id,
+        items=[
+            _prompt_response(item)
+            for item in list_prompts(db, owner_id=context.user.id, role=role)
+        ],
+    )
+
+
+@router.post("/prompts", response_model=LlmPromptResponse, status_code=status.HTTP_201_CREATED)
+def post_prompt_profile(
+    payload: LlmPromptCreateRequest,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> LlmPromptResponse:
+    prompt = create_prompt(
+        db,
+        user=context.user,
+        role=payload.role,
+        system_prompt=payload.system_prompt,
+        reason=payload.reason,
+        correlation_id=request.state.request_id,
+    )
+    return _prompt_response(prompt)
+
+
+@router.post("/prompts/{prompt_id}/validate", response_model=LlmPromptResponse)
+def post_prompt_validate(
+    prompt_id: str,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> LlmPromptResponse:
+    prompt = validate_prompt(
+        db,
+        user=context.user,
+        prompt_id=prompt_id,
+        correlation_id=request.state.request_id,
+    )
+    return _prompt_response(prompt)
+
+
 @router.get("/routes", response_model=LlmRouteListResponse)
 def get_routes(
     request: Request,
@@ -451,6 +588,7 @@ def post_route(
         daily_call_limit=payload.daily_call_limit,
         daily_cost_limit_krw=payload.daily_cost_limit_krw,
         prompt_version=payload.prompt_version,
+        prompt_profile_id=payload.prompt_profile_id,
         output_schema_version=payload.output_schema_version,
         temperature_override=payload.temperature_override,
         top_p_override=payload.top_p_override,

@@ -485,6 +485,7 @@ class LlmProviderCreateRequest(StrictModel):
 class LlmProviderResponse(StrictModel):
     id: str
     name: str
+    provider_template_id: str | None
     adapter_type: LlmAdapterType
     endpoint: str | None
     credential_configured: bool
@@ -503,8 +504,12 @@ class LlmProviderListResponse(StrictModel):
 
 
 class LlmProviderCatalogItem(StrictModel):
-    adapter_type: Literal["OPENAI_RESPONSES", "ANTHROPIC_MESSAGES", "GEMINI_GENERATE_CONTENT"]
+    template_id: str
+    adapter_type: str
     label: str
+    can_register: bool
+    support_level: str
+    configuration_fields: list[dict[str, object]]
 
 
 class LlmProviderCatalogResponse(StrictModel):
@@ -516,7 +521,9 @@ class LlmProviderCatalogResponse(StrictModel):
 class LlmProviderRegistrationPreviewRequest(StrictModel):
     schema_version: str = Field(pattern=r"^1\.0$")
     name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
-    adapter_type: Literal["OPENAI_RESPONSES", "ANTHROPIC_MESSAGES", "GEMINI_GENERATE_CONTENT"]
+    template_id: str | None = Field(default=None, min_length=2, max_length=64)
+    adapter_type: str | None = Field(default=None, min_length=2, max_length=40)
+    configuration: dict[str, str] = Field(default_factory=dict)
 
 
 class LlmProviderRegistrationPreviewResponse(StrictModel):
@@ -528,6 +535,19 @@ class LlmProviderRegistrationPreviewResponse(StrictModel):
 
 class LlmProviderRegistrationRequest(LlmProviderRegistrationPreviewRequest):
     credential: str = Field(min_length=1, max_length=8192, repr=False)
+    reauth_proof: str = Field(min_length=32, max_length=256)
+
+
+class LlmProviderDeletionPreviewResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    target_action: Literal["LLM_PROVIDER_DELETE"] = "LLM_PROVIDER_DELETE"
+    target_id: str
+    provider_id: str
+
+
+class LlmProviderDeletionRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
     reauth_proof: str = Field(min_length=32, max_length=256)
 
 
@@ -599,6 +619,33 @@ class LlmProviderRegistrationResponse(StrictModel):
     models: list[LlmModelResponse]
 
 
+class LlmPromptCreateRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    role: LlmRole
+    system_prompt: str = Field(min_length=20, max_length=12000)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class LlmPromptResponse(StrictModel):
+    id: str
+    role: LlmRole
+    version_number: int
+    version_label: str
+    system_prompt: str
+    content_hash: str
+    state: str
+    reason: str
+    validated_at: datetime | None
+    version: int
+    created_at: datetime
+
+
+class LlmPromptListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[LlmPromptResponse]
+
+
 class LlmRouteCreateRequest(StrictModel):
     schema_version: str = Field(pattern=r"^1\.0$")
     role: LlmRole
@@ -606,7 +653,8 @@ class LlmRouteCreateRequest(StrictModel):
     timeout_ms: int = Field(default=10000, ge=1000, le=60000)
     daily_call_limit: int = Field(default=100, ge=1, le=100000)
     daily_cost_limit_krw: Decimal = Field(default=Decimal(0), ge=0)
-    prompt_version: str = Field(min_length=1, max_length=64)
+    prompt_profile_id: str | None = Field(default=None, min_length=36, max_length=36)
+    prompt_version: str | None = Field(default=None, min_length=1, max_length=64)
     output_schema_version: str = Field(min_length=1, max_length=64)
     temperature_override: Decimal | None = Field(default=None, ge=0, le=2)
     top_p_override: Decimal | None = Field(default=None, ge=0, le=1)
@@ -641,6 +689,8 @@ class LlmRouteResponse(StrictModel):
     daily_call_limit: int
     daily_cost_limit_krw: Decimal
     prompt_version: str
+    prompt_profile_id: str | None
+    prompt_content_hash: str | None
     output_schema_version: str
     temperature_override: Decimal | None
     top_p_override: Decimal | None
