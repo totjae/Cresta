@@ -149,25 +149,12 @@ def test_role_assignments_reuse_model_and_activate_atomically(
         json={"schema_version": "1.0", "route_ids": selected},
     )
     assert preview.status_code == 200, preview.text
-    target_id = preview.json()["target_id"]
-    reauth = client.post(
-        "/api/v1/auth/reauth/totp",
-        headers=headers,
-        json={
-            "schema_version": "1.0",
-            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(datetime.now(UTC)),
-            "target_action": "LLM_ROLE_ASSIGNMENT_ACTIVATE",
-            "target_id": target_id,
-        },
-    )
-    assert reauth.status_code == 200, reauth.text
     activated = client.post(
         "/api/v1/ai/role-assignments/activate",
         headers=headers,
         json={
             "schema_version": "1.0",
             "route_ids": selected,
-            "reauth_proof": reauth.json()["reauth_proof"],
         },
     )
     assert activated.status_code == 200, activated.text

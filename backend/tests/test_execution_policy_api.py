@@ -7,8 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.auth.crypto import token_hash
-from app.models import AuditLog, ConfigurationVersion, ReauthProof, User
+from app.models import AuditLog, ConfigurationVersion
 from tests.conftest import TEST_PASSWORD, TEST_TOTP_SECRET
 
 
@@ -31,7 +30,7 @@ def _login(client: TestClient) -> str:
     return response.json()["csrf_token"]
 
 
-def test_execution_policy_version_lifecycle_requires_bound_reauth(
+def test_execution_policy_version_lifecycle_uses_authenticated_session(
     client: TestClient, db: Session
 ) -> None:
     csrf = _login(client)
@@ -60,21 +59,10 @@ def test_execution_policy_version_lifecycle_requires_bound_reauth(
     assert validated.json()["state"] == "VALIDATED"
     assert client.get("/api/v1/settings/execution-policy").json()["source"] == "SAFE_DEFAULT"
 
-    reauth = client.post(
-        "/api/v1/auth/reauth/totp",
-        headers=headers,
-        json={
-            "schema_version": "1.0",
-            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(datetime.now(UTC)),
-            "target_action": "EXECUTION_POLICY_ACTIVATE",
-            "target_id": version_id,
-        },
-    )
-    assert reauth.status_code == 200, reauth.text
     activated = client.post(
         f"/api/v1/settings/execution-policy/{version_id}/activate",
         headers=headers,
-        json={"schema_version": "1.0", "reauth_proof": reauth.json()["reauth_proof"]},
+        json={"schema_version": "1.0"},
     )
     assert activated.status_code == 200, activated.text
     assert activated.json()["state"] == "ACTIVE"
@@ -106,23 +94,10 @@ def test_execution_policy_version_lifecycle_requires_bound_reauth(
     assert client.post(
         f"/api/v1/settings/execution-policy/{second_id}/validate", headers=headers
     ).status_code == 200
-    raw_proof = "second-policy-proof-value-000000000000"
-    user = db.scalar(select(User).where(User.login_id == "admin"))
-    assert user is not None
-    db.add(
-        ReauthProof(
-            proof_hash=token_hash(raw_proof),
-            user_id=user.id,
-            target_action="EXECUTION_POLICY_ACTIVATE",
-            target_id=second_id,
-            expires_at=datetime.now(UTC) + timedelta(minutes=5),
-        )
-    )
-    db.commit()
     replacement = client.post(
         f"/api/v1/settings/execution-policy/{second_id}/activate",
         headers=headers,
-        json={"schema_version": "1.0", "reauth_proof": raw_proof},
+        json={"schema_version": "1.0"},
     )
     assert replacement.status_code == 200, replacement.text
     assert db.get(ConfigurationVersion, version_id).state == "SUPERSEDED"

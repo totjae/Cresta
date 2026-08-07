@@ -59,7 +59,7 @@ def _ready_worker(db: Session) -> None:
     )
 
 
-def test_mock_order_test_requires_bound_reauth_and_queues_one_share(
+def test_mock_order_test_uses_session_csrf_and_queues_one_share(
     client: TestClient,
     db: Session,
     settings: Settings,
@@ -69,18 +69,6 @@ def test_mock_order_test_requires_bound_reauth_and_queues_one_share(
     _ready_worker(db)
     csrf = _login(client)
     test_request_id = "mock-browser-request-0001"
-    reauth = client.post(
-        "/api/v1/auth/reauth/totp",
-        headers={"Origin": "https://testserver", "X-CSRF-Token": csrf},
-        json={
-            "schema_version": "1.0",
-            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(datetime.now(UTC)),
-            "target_action": "KIWOOM_MOCK_ORDER_TEST",
-            "target_id": test_request_id,
-        },
-    )
-    assert reauth.status_code == 200, reauth.text
-
     response = client.post(
         "/api/v1/system/broker/mock-order-test",
         headers={"Origin": "https://testserver", "X-CSRF-Token": csrf},
@@ -90,7 +78,6 @@ def test_mock_order_test_requires_bound_reauth_and_queues_one_share(
             "symbol": "005930",
             "order_type": "MARKET",
             "limit_price": None,
-            "reauth_proof": reauth.json()["reauth_proof"],
             "confirmation": "KIWOOM_MOCK_ONE_SHARE",
         },
     )
@@ -122,16 +109,15 @@ def test_mock_order_test_requires_bound_reauth_and_queues_one_share(
         headers={"Origin": "https://testserver", "X-CSRF-Token": csrf},
         json={
             "schema_version": "1.0",
-            "test_request_id": "different-target-id",
-            "symbol": "000660",
+            "test_request_id": test_request_id,
+            "symbol": "005930",
             "order_type": "MARKET",
             "limit_price": None,
-            "reauth_proof": reauth.json()["reauth_proof"],
             "confirmation": "KIWOOM_MOCK_ONE_SHARE",
         },
     )
-    assert repeated.status_code == 403
-    assert repeated.json()["error"]["code"] == "REAUTH_PROOF_INVALID"
+    assert repeated.status_code == 409
+    assert repeated.json()["error"]["code"] == "MOCK_TEST_REQUEST_ALREADY_USED"
 
 
 def test_mock_order_test_fails_closed_when_worker_is_not_ready(
@@ -150,7 +136,6 @@ def test_mock_order_test_fails_closed_when_worker_is_not_ready(
             "symbol": "005930",
             "order_type": "MARKET",
             "limit_price": None,
-            "reauth_proof": "x" * 32,
             "confirmation": "KIWOOM_MOCK_ONE_SHARE",
         },
     )

@@ -171,3 +171,10 @@ Argon2id 초기 최소값은 memory 64 MiB, iterations 3, parallelism 1로 한�
 - Provider deletion is a TOTP-bound destructive action and is rejected while an ACTIVE route references the Provider.
 - Credential files are deleted before the Provider tombstone is committed; deletion failure closes the operation.
 - Prompt validation rejects credential/TOTP/header extraction, arbitrary shell/tool execution, direct Broker calls, and direct order execution instructions. Runtime structured data is never interpolated into the system prompt.
+
+## 2026-08-08 개발 단계 TOTP 적용 범위
+
+- `SEC-DEV-001`: 현재 개발 단계에서 TOTP는 로그인 완료에만 요구한다. 로그인 후 설정 변경, Provider credential 등록·삭제, 역할 배정, 실행 권한 활성화와 MOCK 주문 시험은 인증 세션과 CSRF를 요구하지만 별도 TOTP 재인증 proof를 요구하지 않는다.
+- `SEC-DEV-002`: `SEC-061`~`SEC-065`, `SEC-081`, `SEC-086`의 행동별 재인증 요구는 서비스 완성 후 위험 분석을 거쳐 선택적으로 재도입할 때까지 보류한다. 이 절이 해당 요구사항보다 우선한다.
+- `SEC-DEV-003`: 재인증 기반시설과 감사 스키마는 향후 재도입을 위해 유지할 수 있으나 현재 Console의 로그인 이후 흐름에서는 호출하지 않는다.
+- `SEC-DEV-004`: TOTP 제거가 세션 소유권, CSRF, 변경 사유, 상태 전이, 낙관적 잠금, 원자성, 비밀 원문 비노출 또는 Guard 검사를 완화하지 않는다.

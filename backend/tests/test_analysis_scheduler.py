@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-import pyotp
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -33,7 +32,6 @@ from app.models import (
     User,
     WatchlistItem,
 )
-from tests.conftest import TEST_TOTP_SECRET
 from tests.test_agent_runtime import _routes
 from tests.test_llm_role_assignments import _login
 
@@ -152,24 +150,12 @@ def test_tick_admits_shadow_agent_run_when_all_active_routes_exist(
         json={"schema_version": "1.0", "route_ids": route_ids},
     )
     assert preview.status_code == 200
-    proof = client.post(
-        "/api/v1/auth/reauth/totp",
-        headers=headers,
-        json={
-            "schema_version": "1.0",
-            "target_action": preview.json()["target_action"],
-            "target_id": preview.json()["target_id"],
-            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).now(),
-        },
-    )
-    assert proof.status_code == 200, proof.text
     activated = client.post(
         "/api/v1/ai/role-assignments/activate",
         headers=headers,
         json={
             "schema_version": "1.0",
             "route_ids": route_ids,
-            "reauth_proof": proof.json()["reauth_proof"],
         },
     )
     assert activated.status_code == 200, activated.text

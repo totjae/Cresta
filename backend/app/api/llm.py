@@ -227,7 +227,6 @@ def post_provider_registration(
         template_id=payload.template_id or payload.adapter_type or "",
         configuration=payload.configuration,
         credential=payload.credential,
-        reauth_proof=payload.reauth_proof,
         correlation_id=request.state.request_id,
         settings=settings,
     )
@@ -283,7 +282,6 @@ def delete_provider_profile(
         db,
         user=context.user,
         provider_id=provider_id,
-        reauth_proof=payload.reauth_proof,
         correlation_id=request.state.request_id,
         settings=settings,
     )
@@ -392,7 +390,6 @@ def post_provider_credential(
         user=context.user,
         provider_id=provider_id,
         credential=payload.credential,
-        reauth_proof=payload.reauth_proof,
         correlation_id=request.state.request_id,
         settings=settings,
     )
@@ -651,7 +648,6 @@ def post_assignment_activate(
         db,
         user=context.user,
         route_ids=payload.route_ids,
-        reauth_proof=payload.reauth_proof,
         correlation_id=request.state.request_id,
     )
     return LlmAssignmentActivationResponse(

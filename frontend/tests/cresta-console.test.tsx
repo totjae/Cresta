@@ -177,7 +177,7 @@ describe("CrestaConsole authentication", () => {
 describe("Kiwoom MOCK browser diagnostic", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("queues one share only after TOTP reauthentication", async () => {
+  it("queues one share after an authenticated confirmation", async () => {
     const brokerResponse = {
       schema_version: "1.0", request_id: "broker-1", environment: "MOCK",
       account_alias: "KIWOOM_MOCK_PRIMARY", state: "READY", gate_status: "READY",
@@ -191,7 +191,6 @@ describe("Kiwoom MOCK browser diagnostic", () => {
       if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-5", login_id: "admin", expires_at: "2026-08-04T09:00:00Z", csrf_token: "csrf-mock-order" });
       if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
       if (path === "/api/v1/system/broker") return jsonResponse(brokerResponse);
-      if (path === "/api/v1/auth/reauth/totp") return jsonResponse({ reauth_proof: "proof-memory-only", expires_at: "2026-08-04T01:05:00Z" });
       if (path === "/api/v1/system/broker/mock-order-test") return jsonResponse({
         schema_version: "1.0", request_id: "mock-1", result_type: "ORDER_QUEUED",
         order_id: "order-1", status: "CREATED", environment: "MOCK",
@@ -207,17 +206,15 @@ describe("Kiwoom MOCK browser diagnostic", () => {
     expect(await screen.findByRole("heading", { name: "시스템 상태" })).toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "모의주문 확인" }));
     expect(await screen.findByRole("dialog", { name: "키움 모의주문 1주 확인" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("현재 TOTP 코드"), "123456");
     await user.click(screen.getByRole("button", { name: "모의주문 실행" }));
     expect(await screen.findByText(/CREATED 상태로 등록/)).toBeInTheDocument();
 
-    const reauthCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/auth/reauth/totp");
     const orderCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/system/broker/mock-order-test");
-    expect(reauthCall?.[1]).toEqual(expect.objectContaining({ method: "POST", headers: expect.objectContaining({ "X-CSRF-Token": "csrf-mock-order" }) }));
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/auth/reauth/totp")).toBe(false);
     expect(orderCall?.[1]).toEqual(expect.objectContaining({ method: "POST", headers: expect.objectContaining({ "X-CSRF-Token": "csrf-mock-order" }) }));
     expect(JSON.parse(String(orderCall?.[1]?.body))).toEqual(expect.objectContaining({
       symbol: "005930", order_type: "MARKET", limit_price: null,
-      confirmation: "KIWOOM_MOCK_ONE_SHARE", reauth_proof: "proof-memory-only",
+      confirmation: "KIWOOM_MOCK_ONE_SHARE",
     }));
   });
 });
@@ -225,7 +222,7 @@ describe("Kiwoom MOCK browser diagnostic", () => {
 describe("execution policy settings", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("validates and activates independent action modes with TOTP", async () => {
+  it("validates and activates independent action modes without reauthentication", async () => {
     const safePolicy = {
       buy: "MANUAL_APPROVAL", partial_sell: "MANUAL_APPROVAL", full_sell: "MANUAL_APPROVAL",
       take_profit: "MANUAL_APPROVAL", fixed_stop_loss: "AUTOMATIC", trailing_stop: "AUTOMATIC",
@@ -239,7 +236,6 @@ describe("execution policy settings", () => {
       if (path === "/api/v1/settings/execution-policy" && !init?.method) return jsonResponse({ active_version_id: active ? "policy-1" : null, source: active ? "USER_DEFAULT" : "SAFE_DEFAULT", policy: { ...safePolicy, buy: active ? "AUTOMATIC" : "MANUAL_APPROVAL" } });
       if (path.endsWith("/drafts")) return jsonResponse({ version_id: "policy-1", sequence: 1, state: "DRAFT", policy: safePolicy, reason: "모의 자동화", created_at: "2026-08-04T01:00:00Z", validated_at: null, activated_at: null });
       if (path.endsWith("/validate")) return jsonResponse({ version_id: "policy-1", sequence: 1, state: "VALIDATED", policy: safePolicy, reason: "모의 자동화", created_at: "2026-08-04T01:00:00Z", validated_at: "2026-08-04T01:01:00Z", activated_at: null });
-      if (path === "/api/v1/auth/reauth/totp") return jsonResponse({ reauth_proof: "policy-proof", expires_at: "2026-08-04T01:05:00Z" });
       if (path.endsWith("/activate")) { active = true; return jsonResponse({ version_id: "policy-1", sequence: 1, state: "ACTIVE", policy: safePolicy, reason: "모의 자동화", created_at: "2026-08-04T01:00:00Z", validated_at: "2026-08-04T01:01:00Z", activated_at: "2026-08-04T01:02:00Z" }); }
       return jsonResponse({}, 404);
     });
@@ -253,17 +249,13 @@ describe("execution policy settings", () => {
     await user.type(screen.getByLabelText("변경 사유"), "모의 자동화");
     await user.click(screen.getByRole("button", { name: "변경안 검증" }));
     expect(await screen.findByRole("dialog", { name: "실행 권한 활성화" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("현재 TOTP 코드"), "123456");
     await user.click(screen.getByRole("button", { name: "활성화" }));
     expect(await screen.findByText(/새 활성 버전으로 적용/)).toBeInTheDocument();
     expect(await screen.findByText("policy-1")).toBeInTheDocument();
-    const proofCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/auth/reauth/totp");
-    expect(JSON.parse(String(proofCall?.[1]?.body))).toEqual(expect.objectContaining({
-      target_action: "EXECUTION_POLICY_ACTIVATE", target_id: "policy-1",
-    }));
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/auth/reauth/totp")).toBe(false);
   });
 
-  it("registers a provider only after TOTP and successful model discovery", async () => {
+  it("registers a provider after confirmation and successful model discovery", async () => {
     const safePolicy = {
       buy: "MANUAL_APPROVAL", partial_sell: "MANUAL_APPROVAL", full_sell: "MANUAL_APPROVAL",
       take_profit: "MANUAL_APPROVAL", fixed_stop_loss: "AUTOMATIC", trailing_stop: "AUTOMATIC",
@@ -276,7 +268,6 @@ describe("execution policy settings", () => {
       if (path === "/api/v1/settings/execution-policy") return jsonResponse({ active_version_id: null, source: "SAFE_DEFAULT", policy: safePolicy });
       if (path === "/api/v1/ai/provider-catalog") return jsonResponse({ items: [{ template_id: "openai", adapter_type: "OPENAI_RESPONSES", label: "OpenAI", can_register: true, support_level: "compatible", configuration_fields: [] }] });
       if (path.endsWith("/provider-registrations/preview")) return jsonResponse({ target_action: "LLM_PROVIDER_REGISTER", target_id: "registration-target" });
-      if (path === "/api/v1/auth/reauth/totp") return jsonResponse({ reauth_proof: "registration-proof-value-1234567890", expires_at: "2026-08-06T01:05:00Z" });
       if (path.endsWith("/provider-registrations") && init?.method === "POST") return jsonResponse({ provider: { id: "provider-1" }, models: [{ id: "model-1" }] }, 201);
       if (path === "/api/v1/ai/providers") return jsonResponse({ schema_version: "1.0", request_id: "providers-1", items: [] });
       if (path === "/api/v1/ai/models") return jsonResponse({ schema_version: "1.0", request_id: "models-1", items: [] });
@@ -298,7 +289,6 @@ describe("execution policy settings", () => {
     await user.type(screen.getByLabelText("API 키"), "secret-provider-key");
     await user.click(screen.getAllByRole("button", { name: "연결 시험 및 등록" }).at(-1)!);
     expect(await screen.findByRole("dialog", { name: "Provider 연결 시험 및 등록" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("현재 TOTP 코드"), "123456");
     await user.click(screen.getAllByRole("button", { name: "연결 시험 및 등록" }).at(-1)!);
     expect(await screen.findByText(/1개 모델을 확인/)).toBeInTheDocument();
 
@@ -308,11 +298,11 @@ describe("execution policy settings", () => {
     }));
     expect(JSON.parse(String(createCall?.[1]?.body))).toEqual(expect.objectContaining({
       name: "openai-primary", template_id: "openai", configuration: {}, credential: "secret-provider-key",
-      reauth_proof: "registration-proof-value-1234567890",
     }));
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/auth/reauth/totp")).toBe(false);
   });
 
-  it("selects one reusable model per role and activates the set with one TOTP", async () => {
+  it("selects one reusable model per role and activates the set atomically", async () => {
     const roles = ["TECHNICAL_SCOUT", "NEWS_DISCLOSURE_SCOUT", "MARKET_SECTOR_SCOUT", "POSITION_RISK_SCOUT", "CORE"];
     const route = (role: string, index: number, state = "VALIDATED") => ({
       id: `assignment-route-${index}`, role, primary_model_profile_id: "model-shared", primary_model_alias: "shared-model",
@@ -343,7 +333,6 @@ describe("execution policy settings", () => {
       if (path === "/api/v1/ai/routes") return jsonResponse({ items: active ? routes.map((item) => ({ ...item, state: "ACTIVE" })) : routes });
       if (path === "/api/v1/ai/role-assignments" && !init?.method) return jsonResponse({ items: roles.map((role, index) => ({ role, current: active ? { ...routes[index], state: "ACTIVE" } : null, candidates: active ? [] : [routes[index]], history_count: 1, status: active ? "ACTIVE" : "CANDIDATE" })) });
       if (path.endsWith("/activation-preview")) return jsonResponse({ target_action: "LLM_ROLE_ASSIGNMENT_ACTIVATE", target_id: "assignment-target", routes });
-      if (path === "/api/v1/auth/reauth/totp") return jsonResponse({ reauth_proof: "assignment-proof", expires_at: "2026-08-06T01:05:00Z" });
       if (path.endsWith("/role-assignments/activate")) { active = true; return jsonResponse({ routes: routes.map((item) => ({ ...item, state: "ACTIVE" })) }); }
       return jsonResponse({}, 404);
     });
@@ -356,15 +345,11 @@ describe("execution policy settings", () => {
     expect(screen.getByText("0/5 ACTIVE")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "현재 배정 적용" }));
     expect(await screen.findByRole("dialog", { name: "역할별 모델 배정 적용" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("현재 TOTP 코드"), "123456");
     await user.click(screen.getByRole("button", { name: "5개 역할 적용" }));
     expect(await screen.findByText(/원자적으로 적용/)).toBeInTheDocument();
     expect(await screen.findByText("5/5 ACTIVE")).toBeInTheDocument();
 
-    const proofCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/auth/reauth/totp");
-    expect(JSON.parse(String(proofCall?.[1]?.body))).toEqual(expect.objectContaining({
-      target_action: "LLM_ROLE_ASSIGNMENT_ACTIVATE", target_id: "assignment-target",
-    }));
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/auth/reauth/totp")).toBe(false);
     const activationCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/ai/role-assignments/activate");
     expect(JSON.parse(String(activationCall?.[1]?.body)).route_ids).toEqual(
       Object.fromEntries(roles.map((role, index) => [role, `assignment-route-${index}`])),

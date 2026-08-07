@@ -7,13 +7,11 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.auth.service import consume_reauth_proof
 from app.models import AuditLog, ConfigurationVersion, User
 from app.schemas import ExecutionPolicyPayload
 
 SCOPE = "USER_DEFAULT"
 CATEGORY = "EXECUTION_POLICY"
-REAUTH_ACTION = "EXECUTION_POLICY_ACTIVATE"
 
 SAFE_DEFAULT_POLICY = ExecutionPolicyPayload(
     buy="MANUAL_APPROVAL",
@@ -116,7 +114,6 @@ def activate_version(
     *,
     user: User,
     version_id: str,
-    reauth_proof: str,
     correlation_id: str,
     request_ip: str,
     user_agent: str,
@@ -136,13 +133,6 @@ def activate_version(
     current_id = current.id if current else None
     if version.base_active_version_id != current_id:
         raise ExecutionPolicyError("CONFIGURATION_VERSION_CONFLICT")
-    consume_reauth_proof(
-        db,
-        user=user,
-        raw_proof=reauth_proof,
-        target_action=REAUTH_ACTION,
-        target_id=version.id,
-    )
     if current is not None:
         current.state = "SUPERSEDED"
         db.flush()

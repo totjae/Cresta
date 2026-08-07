@@ -43,7 +43,7 @@ def _login(client: TestClient) -> str:
     return response.json()["csrf_token"]
 
 
-def test_provider_delete_is_totp_bound_and_hidden(client: TestClient, db: Session) -> None:
+def test_provider_delete_uses_session_csrf_and_is_hidden(client: TestClient, db: Session) -> None:
     csrf = _login(client)
     headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
     created = client.post(
@@ -64,24 +64,11 @@ def test_provider_delete_is_totp_bound_and_hidden(client: TestClient, db: Sessio
         f"/api/v1/ai/providers/{provider_id}/delete-preview", headers=headers
     )
     assert preview.status_code == 200, preview.text
-    proof = client.post(
-        "/api/v1/auth/reauth/totp",
-        headers=headers,
-        json={
-            "schema_version": "1.0",
-            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(
-                datetime.now(UTC) + timedelta(seconds=30)
-            ),
-            "target_action": "LLM_PROVIDER_DELETE",
-            "target_id": preview.json()["target_id"],
-        },
-    )
-    assert proof.status_code == 200, proof.text
     deleted = client.request(
         "DELETE",
         f"/api/v1/ai/providers/{provider_id}",
         headers=headers,
-        json={"schema_version": "1.0", "reauth_proof": proof.json()["reauth_proof"]},
+        json={"schema_version": "1.0"},
     )
     assert deleted.status_code == 204, deleted.text
     assert client.get("/api/v1/ai/providers", headers=headers).json()["items"] == []
@@ -307,7 +294,7 @@ def test_mock_adapter_is_deterministic_and_has_no_tools() -> None:
     assert adapter.healthcheck().capabilities.tool_calling is False
 
 
-def test_external_credential_is_write_only_totp_bound_and_not_stored_in_db(
+def test_external_credential_is_write_only_and_not_stored_in_db(
     client: TestClient,
     db: Session,
     settings: Settings,
@@ -348,17 +335,6 @@ def test_external_credential_is_write_only_totp_bound_and_not_stored_in_db(
         f"/api/v1/ai/providers/{provider['id']}/credential-preview", headers=headers
     )
     assert preview.status_code == 200, preview.text
-    reauth = client.post(
-        "/api/v1/auth/reauth/totp",
-        headers=headers,
-        json={
-            "schema_version": "1.0",
-            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(datetime.now(UTC)),
-            "target_action": preview.json()["target_action"],
-            "target_id": preview.json()["target_id"],
-        },
-    )
-    assert reauth.status_code == 200, reauth.text
     raw_secret = "sk-test-write-only-value"
     configured = client.post(
         f"/api/v1/ai/providers/{provider['id']}/credential",
@@ -366,7 +342,6 @@ def test_external_credential_is_write_only_totp_bound_and_not_stored_in_db(
         json={
             "schema_version": "1.0",
             "credential": raw_secret,
-            "reauth_proof": reauth.json()["reauth_proof"],
         },
     )
     assert configured.status_code == 200, configured.text
@@ -436,19 +411,6 @@ def test_external_credential_is_write_only_totp_bound_and_not_stored_in_db(
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
 
-    replay = client.post(
-        f"/api/v1/ai/providers/{provider['id']}/credential",
-        headers=headers,
-        json={
-            "schema_version": "1.0",
-            "credential": "replacement-must-not-apply",
-            "reauth_proof": reauth.json()["reauth_proof"],
-        },
-    )
-    assert replay.status_code == 403
-    assert secret_path.read_text(encoding="utf-8").strip() == raw_secret
-
-
 def test_provider_registration_discovers_models_before_persisting(
     client: TestClient,
     db: Session,
@@ -490,16 +452,7 @@ def test_provider_registration_discovers_models_before_persisting(
             "adapter_type": "OPENAI_RESPONSES",
         },
     )
-    proof = client.post(
-        "/api/v1/auth/reauth/totp",
-        headers=headers,
-        json={
-            "schema_version": "1.0",
-            "totp_code": pyotp.TOTP(TEST_TOTP_SECRET).at(datetime.now(UTC)),
-            "target_action": preview.json()["target_action"],
-            "target_id": preview.json()["target_id"],
-        },
-    )
+    assert preview.status_code == 200, preview.text
     raw_secret = "registration-write-only-secret"
     registered = client.post(
         "/api/v1/ai/provider-registrations",
@@ -509,7 +462,6 @@ def test_provider_registration_discovers_models_before_persisting(
             "name": "openai-primary",
             "adapter_type": "OPENAI_RESPONSES",
             "credential": raw_secret,
-            "reauth_proof": proof.json()["reauth_proof"],
         },
     )
     assert registered.status_code == 201, registered.text

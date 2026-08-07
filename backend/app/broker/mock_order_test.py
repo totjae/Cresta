@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth.service import consume_reauth_proof
 from app.broker.worker_state import get_broker_status
 from app.config import Settings
 from app.models import AuditLog, OrderIntent, TradingOrder, User
@@ -15,7 +14,6 @@ from app.reconciliation import ACCOUNT_ALIAS
 from app.schemas import MockOrderTestRequest
 
 KST = timezone(timedelta(hours=9))
-REAUTH_ACTION = "KIWOOM_MOCK_ORDER_TEST"
 ACTIVE_STATES = {
     "CREATED",
     "VALIDATING",
@@ -78,13 +76,6 @@ def create_mock_order_test(
     ):
         raise MockOrderTestError("ACTIVE_SYMBOL_ORDER_EXISTS", 409)
 
-    consume_reauth_proof(
-        db,
-        user=user,
-        raw_proof=payload.reauth_proof,
-        target_action=REAUTH_ACTION,
-        target_id=payload.test_request_id,
-    )
     intent = OrderIntent(
         account_alias=ACCOUNT_ALIAS,
         environment="MOCK",

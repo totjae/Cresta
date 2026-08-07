@@ -76,7 +76,6 @@ class ExecutionPolicyDraftRequest(StrictModel):
 
 class ExecutionPolicyActivateRequest(StrictModel):
     schema_version: str = Field(pattern=r"^1\.0$")
-    reauth_proof: str = Field(min_length=32, max_length=256)
 
 
 class ExecutionPolicyVersionResponse(StrictModel):
@@ -345,7 +344,6 @@ class MockOrderTestRequest(StrictModel):
     symbol: str = Field(pattern=r"^\d{6}$")
     order_type: str = Field(pattern=r"^(MARKET|LIMIT)$")
     limit_price: Decimal | None = Field(default=None, gt=0)
-    reauth_proof: str = Field(min_length=32, max_length=256)
     confirmation: str = Field(pattern=r"^KIWOOM_MOCK_ONE_SHARE$")
 
 
@@ -535,7 +533,6 @@ class LlmProviderRegistrationPreviewResponse(StrictModel):
 
 class LlmProviderRegistrationRequest(LlmProviderRegistrationPreviewRequest):
     credential: str = Field(min_length=1, max_length=8192, repr=False)
-    reauth_proof: str = Field(min_length=32, max_length=256)
 
 
 class LlmProviderDeletionPreviewResponse(StrictModel):
@@ -548,7 +545,6 @@ class LlmProviderDeletionPreviewResponse(StrictModel):
 
 class LlmProviderDeletionRequest(StrictModel):
     schema_version: str = Field(pattern=r"^1\.0$")
-    reauth_proof: str = Field(min_length=32, max_length=256)
 
 
 class LlmProviderTestResponse(StrictModel):
@@ -571,7 +567,6 @@ class LlmCredentialPreviewResponse(StrictModel):
 class LlmCredentialSetRequest(StrictModel):
     schema_version: str = Field(pattern=r"^1\.0$")
     credential: str = Field(min_length=1, max_length=8192, repr=False)
-    reauth_proof: str = Field(min_length=32, max_length=256)
 
 
 class LlmModelCreateRequest(StrictModel):
@@ -726,7 +721,7 @@ class LlmAssignmentActivationRequest(StrictModel):
 
 
 class LlmAssignmentActivateRequest(LlmAssignmentActivationRequest):
-    reauth_proof: str = Field(min_length=32, max_length=256)
+    pass
 
 
 class LlmAssignmentPreviewResponse(StrictModel):

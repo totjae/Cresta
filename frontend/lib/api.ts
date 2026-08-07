@@ -447,18 +447,6 @@ export const authApi = {
       }),
     });
   },
-  reauthTotp(csrfToken: string, code: string, targetAction: string, targetId: string) {
-    return request<{ reauth_proof: string; expires_at: string }>("/api/v1/auth/reauth/totp", {
-      method: "POST",
-      headers: { "X-CSRF-Token": csrfToken },
-      body: JSON.stringify({
-        schema_version: "1.0",
-        totp_code: code,
-        target_action: targetAction,
-        target_id: targetId,
-      }),
-    });
-  },
   logout(csrfToken: string) {
     return request<{ status: string }>("/api/v1/auth/logout", {
       method: "POST",
@@ -481,7 +469,6 @@ export const systemApi = {
       symbol: string;
       order_type: "MARKET" | "LIMIT";
       limit_price: string | null;
-      reauth_proof: string;
     },
   ) {
     return request<MockOrderTestResult>("/api/v1/system/broker/mock-order-test", {
@@ -511,10 +498,10 @@ export const settingsApi = {
       method: "POST", headers: { "X-CSRF-Token": csrfToken },
     });
   },
-  activate(csrfToken: string, versionId: string, reauthProof: string) {
+  activate(csrfToken: string, versionId: string) {
     return request<ExecutionPolicyVersion>(`/api/v1/settings/execution-policy/${encodeURIComponent(versionId)}/activate`, {
       method: "POST", headers: { "X-CSRF-Token": csrfToken },
-      body: JSON.stringify({ schema_version: "1.0", reauth_proof: reauthProof }),
+      body: JSON.stringify({ schema_version: "1.0" }),
     });
   },
 };
@@ -542,7 +529,6 @@ export const llmApi = {
     templateId: string,
     configuration: Record<string, string>,
     credential: string,
-    reauthProof: string,
   ) {
     return request<{ provider: LlmProviderProfile; models: LlmModelProfile[] }>(
       "/api/v1/ai/provider-registrations",
@@ -555,7 +541,6 @@ export const llmApi = {
           template_id: templateId,
           configuration,
           credential,
-          reauth_proof: reauthProof,
         }),
       },
     );
@@ -589,13 +574,13 @@ export const llmApi = {
       { method: "POST", headers: { "X-CSRF-Token": csrfToken } },
     );
   },
-  setCredential(csrfToken: string, providerId: string, credential: string, reauthProof: string) {
+  setCredential(csrfToken: string, providerId: string, credential: string) {
     return request<LlmProviderProfile>(
       `/api/v1/ai/providers/${encodeURIComponent(providerId)}/credential`,
       {
         method: "POST",
         headers: { "X-CSRF-Token": csrfToken },
-        body: JSON.stringify({ schema_version: "1.0", credential, reauth_proof: reauthProof }),
+        body: JSON.stringify({ schema_version: "1.0", credential }),
       },
     );
   },
@@ -617,11 +602,11 @@ export const llmApi = {
       { method: "POST", headers: { "X-CSRF-Token": csrfToken } },
     );
   },
-  deleteProvider(csrfToken: string, providerId: string, reauthProof: string) {
+  deleteProvider(csrfToken: string, providerId: string) {
     return request<void>(`/api/v1/ai/providers/${encodeURIComponent(providerId)}`, {
       method: "DELETE",
       headers: { "X-CSRF-Token": csrfToken },
-      body: JSON.stringify({ schema_version: "1.0", reauth_proof: reauthProof }),
+      body: JSON.stringify({ schema_version: "1.0" }),
     });
   },
   models(signal?: AbortSignal) {
@@ -764,7 +749,6 @@ export const llmApi = {
   activateAssignments(
     csrfToken: string,
     routeIds: Record<string, string>,
-    reauthProof: string,
   ) {
     return request<{ routes: LlmRoleRoute[] }>("/api/v1/ai/role-assignments/activate", {
       method: "POST",
@@ -772,7 +756,6 @@ export const llmApi = {
       body: JSON.stringify({
         schema_version: "1.0",
         route_ids: routeIds,
-        reauth_proof: reauthProof,
       }),
     });
   },

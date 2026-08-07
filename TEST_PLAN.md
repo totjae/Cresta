@@ -404,3 +404,12 @@ Local evidence: the complete backend suite, Ruff, frontend TypeScript, 11 compon
 - Verify the role assignment UI creates/selects Prompt Profiles and never displays raw prompt content in run history.
 
 Local evidence: the complete 164-test backend suite, Ruff, frontend TypeScript, 11 component tests, Next production build, and SQLite `0018` upgrade→downgrade-to-`0017`→upgrade passed. PostgreSQL migration and a real external-provider request remain server verification items.
+
+# 로그인 전용 TOTP 개발 정책 시험 (2026-08-08)
+
+- `T-SEC-DEV-001`: ID·비밀번호·TOTP 로그인 전에는 Console과 설정 API에 접근할 수 없고 로그인 완료 후 세션이 발급되는지 검증한다.
+- `T-SEC-DEV-002`: 실행 권한 활성화, Provider 등록·credential 설정·삭제, 역할 배정 활성화와 MOCK 주문 시험이 로그인 세션·CSRF를 요구하되 `reauth_proof` 없이 수행되는지 검증한다.
+- `T-SEC-DEV-003`: Console의 로그인 이후 확인창에 TOTP 입력란이 없고 `/auth/reauth/totp` 호출이 발생하지 않는지 검증한다.
+- `T-SEC-DEV-004`: 재인증 제거 후에도 변경 사유·validation·원자 전환·활성 route 삭제 차단·READY gate·멱등성과 비밀 원문 비노출이 유지되는지 검증한다.
+
+Local evidence: backend 전체 164개 시험과 Ruff, frontend TypeScript 및 11개 component 시험을 통과했다. 로그인 TOTP는 유지되며 로그인 이후 설정·Provider·역할 배정·MOCK 주문 UI의 재인증 호출은 0건이다.

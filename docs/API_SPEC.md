@@ -358,3 +358,9 @@ POST /api/v1/ai/providers/{provider_id}/credential
 - `POST /api/v1/ai/prompts` creates an immutable DRAFT for one Agent role and assigns its next server-side version number.
 - `POST /api/v1/ai/prompts/{prompt_id}/validate` validates safety and moves a DRAFT to VALIDATED.
 - Route creation accepts `prompt_profile_id`; the server derives `prompt_version` from the referenced profile and rejects role/state mismatches.
+
+## 2026-08-08 개발 단계 재인증 정책
+
+- `API-DEV-001`: 로그인 이후 현재 구현된 설정·Provider·역할 배정·MOCK 주문 시험 mutation은 세션과 CSRF를 요구하지만 request body의 `reauth_proof`를 요구하지 않는다.
+- `API-DEV-002`: `/auth/reauth/totp` 기반시설은 향후 선택적 고위험 행동 재인증을 위해 유지할 수 있으나 현재 Console 흐름에서는 사용하지 않는다.
+- `API-DEV-003`: API-044·096·131·134·140·142의 TOTP proof 부분은 서비스 완성 후 재도입 전까지 보류한다. 변경 사유, validation, idempotency, 원자성, 상태 gate와 감사 요구는 유지한다.

@@ -401,7 +401,6 @@ function SettingsPage({ session, onSessionExpired }: { session: SessionData; onS
   const [activeVersion, setActiveVersion] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [pendingVersion, setPendingVersion] = useState("");
-  const [totp, setTotp] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -436,15 +435,13 @@ function SettingsPage({ session, onSessionExpired }: { session: SessionData; onS
     event.preventDefault();
     setBusy(true); setMessage("");
     try {
-      const proof = await authApi.reauthTotp(session.csrf_token, totp, "EXECUTION_POLICY_ACTIVATE", pendingVersion);
-      await settingsApi.activate(session.csrf_token, pendingVersion, proof.reauth_proof);
-      setPendingVersion(""); setTotp(""); setReason("");
+      await settingsApi.activate(session.csrf_token, pendingVersion);
+      setPendingVersion(""); setReason("");
       await loadPolicy();
       setMessage("행동별 실행 권한이 새 활성 버전으로 적용되었습니다.");
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
-      else setMessage("설정을 활성화하지 못했습니다. TOTP 또는 버전 충돌을 확인해 주세요.");
-      setTotp("");
+      else setMessage("설정을 활성화하지 못했습니다. 버전 충돌을 확인해 주세요.");
     } finally { setBusy(false); }
   }
 
@@ -461,7 +458,7 @@ function SettingsPage({ session, onSessionExpired }: { session: SessionData; onS
       </form>}
     </section>
     <LlmFoundationPanel session={session} onSessionExpired={onSessionExpired} />
-    {pendingVersion && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="policy-confirm-title"><span className="section-kicker">TOTP REAUTHENTICATION</span><h2 id="policy-confirm-title">실행 권한 활성화</h2><p>검증된 버전만 운영에 적용됩니다. 자동 실행 항목은 이후 건별 TOTP 없이 Guard 검사 후 실행됩니다.</p><form onSubmit={activate}><label htmlFor="policy-totp">현재 TOTP 코드</label><input id="policy-totp" className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus /><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setPendingVersion(""); setTotp(""); }} disabled={busy}>취소</button><button type="submit" className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "적용 중" : "활성화"}</button></div></form></section></div>}
+    {pendingVersion && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="policy-confirm-title"><span className="section-kicker">SETTING CONFIRMATION</span><h2 id="policy-confirm-title">실행 권한 활성화</h2><p>검증된 버전을 운영 설정에 적용합니다. 활성화 전 선택한 실행 모드를 다시 확인해 주세요.</p><form onSubmit={activate}><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setPendingVersion("")} disabled={busy}>취소</button><button type="submit" className="primary-button" disabled={busy}>{busy ? "적용 중" : "활성화"}</button></div></form></section></div>}
   </>;
 }
 
@@ -515,13 +512,12 @@ function LlmFoundationPanel({
   const [providerTemplateId, setProviderTemplateId] = useState("openai");
   const [providerConfiguration, setProviderConfiguration] = useState<Record<string, string>>({});
   const [providerCredential, setProviderCredential] = useState("");
-  const [credentialTarget, setCredentialTarget] = useState<{ name: string; templateId: string; configuration: Record<string, string>; targetId: string; credential: string } | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ providerId: string; providerName: string; targetId: string } | null>(null);
+  const [credentialTarget, setCredentialTarget] = useState<{ name: string; templateId: string; configuration: Record<string, string>; credential: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ providerId: string; providerName: string } | null>(null);
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
   const [roleDrafts, setRoleDrafts] = useState<Record<string, RoleParameterDraft>>({});
   const [selectedRouteIds, setSelectedRouteIds] = useState<Record<string, string>>({});
-  const [activationTarget, setActivationTarget] = useState<{ id: string; routeIds: Record<string, string> } | null>(null);
-  const [totp, setTotp] = useState("");
+  const [activationTarget, setActivationTarget] = useState<{ routeIds: Record<string, string> } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -582,9 +578,9 @@ function LlmFoundationPanel({
   async function createProviderProfile(event: FormEvent) {
     event.preventDefault(); setBusy(true); setMessage("");
     try {
-      const preview = await llmApi.previewRegistration(session.csrf_token, providerName, providerTemplateId, providerConfiguration);
-      setCredentialTarget({ name: providerName, templateId: providerTemplateId, configuration: { ...providerConfiguration }, targetId: preview.target_id, credential: providerCredential });
-      setMessage("TOTP 확인 후 실제 API 키와 모델 목록을 검증합니다. 성공한 연결만 저장됩니다.");
+      await llmApi.previewRegistration(session.csrf_token, providerName, providerTemplateId, providerConfiguration);
+      setCredentialTarget({ name: providerName, templateId: providerTemplateId, configuration: { ...providerConfiguration }, credential: providerCredential });
+      setMessage("확인 후 실제 API 키와 모델 목록을 검증합니다. 성공한 연결만 저장됩니다.");
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
       else setMessage("등록 준비를 완료하지 못했습니다. 연결 이름이 중복되지 않았는지 확인해 주세요.");
@@ -596,9 +592,8 @@ function LlmFoundationPanel({
     if (!credentialTarget) return;
     setBusy(true); setMessage("");
     try {
-      const proof = await authApi.reauthTotp(session.csrf_token, totp, "LLM_PROVIDER_REGISTER", credentialTarget.targetId);
-      const result = await llmApi.registerProvider(session.csrf_token, credentialTarget.name, credentialTarget.templateId, credentialTarget.configuration, credentialTarget.credential, proof.reauth_proof);
-      setCredentialTarget(null); setProviderCredential(""); setTotp("");
+      const result = await llmApi.registerProvider(session.csrf_token, credentialTarget.name, credentialTarget.templateId, credentialTarget.configuration, credentialTarget.credential);
+      setCredentialTarget(null); setProviderCredential("");
       setProviderName("");
       setExpandedProviders((current) => ({ ...current, [result.provider.id]: true }));
       await load(undefined, true);
@@ -607,15 +602,14 @@ function LlmFoundationPanel({
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
       else setMessage("연결 시험 또는 모델 조회에 실패했습니다. Provider와 API 키를 확인해 주세요. 실패한 연결은 저장되지 않았습니다.");
       setProviderCredential("");
-      setTotp("");
     } finally { setBusy(false); }
   }
 
   async function previewDeleteProvider(provider: LlmProviderProfile) {
     setBusy(true); setMessage("");
     try {
-      const preview = await llmApi.previewDelete(session.csrf_token, provider.id);
-      setDeleteTarget({ providerId: provider.id, providerName: provider.name, targetId: preview.target_id });
+      await llmApi.previewDelete(session.csrf_token, provider.id);
+      setDeleteTarget({ providerId: provider.id, providerName: provider.name });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
       else if (error instanceof ApiError && error.message.includes("PROVIDER_IN_ACTIVE_ROUTE")) setMessage("현재 역할에 적용된 Provider는 먼저 다른 모델로 역할 배정을 변경해야 삭제할 수 있습니다.");
@@ -628,15 +622,13 @@ function LlmFoundationPanel({
     if (!deleteTarget) return;
     setBusy(true); setMessage("");
     try {
-      const proof = await authApi.reauthTotp(session.csrf_token, totp, "LLM_PROVIDER_DELETE", deleteTarget.targetId);
-      await llmApi.deleteProvider(session.csrf_token, deleteTarget.providerId, proof.reauth_proof);
-      setDeleteTarget(null); setTotp("");
+      await llmApi.deleteProvider(session.csrf_token, deleteTarget.providerId);
+      setDeleteTarget(null);
       await load(undefined, true);
       setMessage("Provider와 저장된 API 키를 안전하게 삭제했습니다.");
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
-      else setMessage("Provider를 삭제하지 못했습니다. TOTP와 현재 역할 배정을 확인해 주세요.");
-      setTotp("");
+      else setMessage("Provider를 삭제하지 못했습니다. 현재 역할 배정을 확인해 주세요.");
     } finally { setBusy(false); }
   }
 
@@ -696,7 +688,7 @@ function LlmFoundationPanel({
     setBusy(true); setMessage("");
     try {
       const preview = await llmApi.previewAssignments(session.csrf_token, selectedRouteIds);
-      setActivationTarget({ id: preview.target_id, routeIds: { ...selectedRouteIds } });
+      setActivationTarget({ routeIds: { ...selectedRouteIds } });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
       else setMessage("5개 역할의 검증 후보를 모두 명시적으로 선택해 주세요.");
@@ -708,20 +700,13 @@ function LlmFoundationPanel({
     if (!activationTarget) return;
     setBusy(true); setMessage("");
     try {
-      const proof = await authApi.reauthTotp(
-        session.csrf_token,
-        totp,
-        "LLM_ROLE_ASSIGNMENT_ACTIVATE",
-        activationTarget.id,
-      );
-      await llmApi.activateAssignments(session.csrf_token, activationTarget.routeIds, proof.reauth_proof);
-      setActivationTarget(null); setTotp("");
+      await llmApi.activateAssignments(session.csrf_token, activationTarget.routeIds);
+      setActivationTarget(null);
       await load(undefined, true);
       setMessage("5개 역할의 현재 모델 배정을 원자적으로 적용했습니다.");
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
-      else setMessage("역할 배정을 활성화하지 못했습니다. TOTP와 후보 상태를 확인해 주세요.");
-      setTotp("");
+      else setMessage("역할 배정을 활성화하지 못했습니다. 후보 상태를 확인해 주세요.");
     } finally { setBusy(false); }
   }
 
@@ -750,13 +735,13 @@ function LlmFoundationPanel({
       </article>; })}</div>
     </div>}
 
-    {tab === "assignments" && <div className="assignment-board"><div className="assignment-summary"><div><strong>역할별 현재 모델</strong><small>검증 후보를 모두 선택한 뒤 TOTP 한 번으로 원자 적용합니다.</small></div><span className={`status-pill ${assignments.every((item) => item.status === "ACTIVE") ? "ok" : "neutral"}`}>{assignments.filter((item) => item.status === "ACTIVE").length}/{llmRoles.length} ACTIVE</span></div>{assignments.map((assignment) => { const draft = roleDrafts[assignment.role] ?? emptyRoleDraft; const candidateOptions = [...(assignment.current ? [assignment.current] : []), ...assignment.candidates]; const selected = candidateOptions.find((route) => route.id === selectedRouteIds[assignment.role]); const selectedModel = models.find((model) => model.id === draft.modelId); return <article className="assignment-row" key={assignment.role}><div className="assignment-title"><div><strong>{assignment.role}</strong><small>현재 {assignment.current?.primary_model_alias ?? "미배정"} · 이력 {assignment.history_count}개</small></div><span className={`status-pill ${assignment.status === "ACTIVE" ? "ok" : "neutral"}`}>{assignment.status}</span></div><label>적용 후보<select aria-label={`${assignment.role} 적용 후보`} value={selectedRouteIds[assignment.role] ?? ""} onChange={(event) => setSelectedRouteIds((current) => ({ ...current, [assignment.role]: event.target.value }))}><option value="">명시적으로 선택</option>{candidateOptions.map((route) => <option key={route.id} value={route.id}>{route.primary_model_alias} · {route.state} · {formatDateTime(route.created_at)}</option>)}</select></label>{selected && <small className="effective-params">적용값: temperature {selected.effective_parameters.temperature} · top_p {selected.effective_parameters.top_p ?? "AUTO"} · max {selected.effective_parameters.max_output_tokens} · seed {selected.effective_parameters.seed ?? "AUTO"}</small>}<details className="parameter-drawer"><summary>모델·프롬프트 및 역할 파라미터</summary><div className="parameter-grid"><label>등록 모델<select value={draft.modelId} onChange={(event) => updateRoleDraft(assignment.role, { modelId: event.target.value })}><option value="">검증 모델 선택</option>{validatedModels.map((model) => <option key={model.id} value={model.id}>{providers.find((provider) => provider.id === model.provider_profile_id)?.name ?? "Provider"} · {model.alias}</option>)}</select></label><label>프롬프트 버전<select value={draft.promptId} onChange={(event) => updateRoleDraft(assignment.role, { promptId: event.target.value, promptText: "" })}><option value="">검증 프롬프트 선택</option>{prompts.filter((prompt) => prompt.role === assignment.role && prompt.state === "VALIDATED").map((prompt) => <option key={prompt.id} value={prompt.id}>{prompt.version_label}</option>)}</select></label><label className="prompt-editor-field">새 프롬프트 버전<textarea value={draft.promptText} maxLength={12000} onChange={(event) => updateRoleDraft(assignment.role, { promptText: event.target.value, promptId: "" })} placeholder="기존 내용을 수정하려면 새 버전으로 입력하세요. 20자 이상" /></label><label>temperature<input type="number" min="0" max="2" step="0.1" value={draft.temperature} onChange={(event) => updateRoleDraft(assignment.role, { temperature: event.target.value })} placeholder={selectedModel?.temperature ?? "상속"} /></label><label>top_p<input type="number" min="0" max="1" step="0.1" value={draft.topP} onChange={(event) => updateRoleDraft(assignment.role, { topP: event.target.value })} placeholder={selectedModel?.top_p ?? "Adapter 기본"} /></label><label>max output<input type="number" min="1" max="32768" value={draft.maxOutputTokens} onChange={(event) => updateRoleDraft(assignment.role, { maxOutputTokens: event.target.value })} placeholder={String(selectedModel?.max_output_tokens ?? "상속")} /></label><label>reasoning<select value={draft.reasoningEffort} disabled={!selectedModel?.capabilities.reasoning} onChange={(event) => updateRoleDraft(assignment.role, { reasoningEffort: event.target.value as RoleParameterDraft["reasoningEffort"] })}><option value="">기본값</option><option value="LOW">LOW</option><option value="MEDIUM">MEDIUM</option><option value="HIGH">HIGH</option></select></label><label>seed<input type="number" value={draft.seed} disabled={!selectedModel?.capabilities.seed} onChange={(event) => updateRoleDraft(assignment.role, { seed: event.target.value })} placeholder="상속" /></label></div><button className="secondary-button" disabled={busy || !draft.modelId || (!draft.promptId && draft.promptText.trim().length < 20)} onClick={() => void createCandidate(assignment.role as (typeof llmRoles)[number])}>변경 후보 검증</button></details></article>; })}<div className="assignment-actions"><small>{completeSelection ? "5개 역할 후보가 선택되었습니다." : "각 역할의 적용 후보를 선택해 주세요."}</small><button className="primary-button" disabled={busy || !completeSelection} onClick={() => void previewActivation()}>{busy ? "검증 중…" : "현재 배정 적용"}</button></div></div>}
+    {tab === "assignments" && <div className="assignment-board"><div className="assignment-summary"><div><strong>역할별 현재 모델</strong><small>검증 후보를 모두 선택한 뒤 한 번에 원자 적용합니다.</small></div><span className={`status-pill ${assignments.every((item) => item.status === "ACTIVE") ? "ok" : "neutral"}`}>{assignments.filter((item) => item.status === "ACTIVE").length}/{llmRoles.length} ACTIVE</span></div>{assignments.map((assignment) => { const draft = roleDrafts[assignment.role] ?? emptyRoleDraft; const candidateOptions = [...(assignment.current ? [assignment.current] : []), ...assignment.candidates]; const selected = candidateOptions.find((route) => route.id === selectedRouteIds[assignment.role]); const selectedModel = models.find((model) => model.id === draft.modelId); return <article className="assignment-row" key={assignment.role}><div className="assignment-title"><div><strong>{assignment.role}</strong><small>현재 {assignment.current?.primary_model_alias ?? "미배정"} · 이력 {assignment.history_count}개</small></div><span className={`status-pill ${assignment.status === "ACTIVE" ? "ok" : "neutral"}`}>{assignment.status}</span></div><label>적용 후보<select aria-label={`${assignment.role} 적용 후보`} value={selectedRouteIds[assignment.role] ?? ""} onChange={(event) => setSelectedRouteIds((current) => ({ ...current, [assignment.role]: event.target.value }))}><option value="">명시적으로 선택</option>{candidateOptions.map((route) => <option key={route.id} value={route.id}>{route.primary_model_alias} · {route.state} · {formatDateTime(route.created_at)}</option>)}</select></label>{selected && <small className="effective-params">적용값: temperature {selected.effective_parameters.temperature} · top_p {selected.effective_parameters.top_p ?? "AUTO"} · max {selected.effective_parameters.max_output_tokens} · seed {selected.effective_parameters.seed ?? "AUTO"}</small>}<details className="parameter-drawer"><summary>모델·프롬프트 및 역할 파라미터</summary><div className="parameter-grid"><label>등록 모델<select value={draft.modelId} onChange={(event) => updateRoleDraft(assignment.role, { modelId: event.target.value })}><option value="">검증 모델 선택</option>{validatedModels.map((model) => <option key={model.id} value={model.id}>{providers.find((provider) => provider.id === model.provider_profile_id)?.name ?? "Provider"} · {model.alias}</option>)}</select></label><label>프롬프트 버전<select value={draft.promptId} onChange={(event) => updateRoleDraft(assignment.role, { promptId: event.target.value, promptText: "" })}><option value="">검증 프롬프트 선택</option>{prompts.filter((prompt) => prompt.role === assignment.role && prompt.state === "VALIDATED").map((prompt) => <option key={prompt.id} value={prompt.id}>{prompt.version_label}</option>)}</select></label><label className="prompt-editor-field">새 프롬프트 버전<textarea value={draft.promptText} maxLength={12000} onChange={(event) => updateRoleDraft(assignment.role, { promptText: event.target.value, promptId: "" })} placeholder="기존 내용을 수정하려면 새 버전으로 입력하세요. 20자 이상" /></label><label>temperature<input type="number" min="0" max="2" step="0.1" value={draft.temperature} onChange={(event) => updateRoleDraft(assignment.role, { temperature: event.target.value })} placeholder={selectedModel?.temperature ?? "상속"} /></label><label>top_p<input type="number" min="0" max="1" step="0.1" value={draft.topP} onChange={(event) => updateRoleDraft(assignment.role, { topP: event.target.value })} placeholder={selectedModel?.top_p ?? "Adapter 기본"} /></label><label>max output<input type="number" min="1" max="32768" value={draft.maxOutputTokens} onChange={(event) => updateRoleDraft(assignment.role, { maxOutputTokens: event.target.value })} placeholder={String(selectedModel?.max_output_tokens ?? "상속")} /></label><label>reasoning<select value={draft.reasoningEffort} disabled={!selectedModel?.capabilities.reasoning} onChange={(event) => updateRoleDraft(assignment.role, { reasoningEffort: event.target.value as RoleParameterDraft["reasoningEffort"] })}><option value="">기본값</option><option value="LOW">LOW</option><option value="MEDIUM">MEDIUM</option><option value="HIGH">HIGH</option></select></label><label>seed<input type="number" value={draft.seed} disabled={!selectedModel?.capabilities.seed} onChange={(event) => updateRoleDraft(assignment.role, { seed: event.target.value })} placeholder="상속" /></label></div><button className="secondary-button" disabled={busy || !draft.modelId || (!draft.promptId && draft.promptText.trim().length < 20)} onClick={() => void createCandidate(assignment.role as (typeof llmRoles)[number])}>변경 후보 검증</button></details></article>; })}<div className="assignment-actions"><small>{completeSelection ? "5개 역할 후보가 선택되었습니다." : "각 역할의 적용 후보를 선택해 주세요."}</small><button className="primary-button" disabled={busy || !completeSelection} onClick={() => void previewActivation()}>{busy ? "검증 중…" : "현재 배정 적용"}</button></div></div>}
 
     {tab === "history" && <div className="catalog-list history-list">{routes.map((route) => <article className="catalog-row" key={route.id}><div><strong>{route.role} · {route.primary_model_alias}</strong><small>{formatDateTime(route.created_at)} · temperature {route.effective_parameters.temperature} · max {route.effective_parameters.max_output_tokens}</small></div><span className={`status-pill ${route.state === "ACTIVE" ? "ok" : "neutral"}`}>{route.state}</span></article>)}</div>}
 
-    {activationTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="assignment-confirm-title"><span className="section-kicker">TOTP REAUTHENTICATION</span><h2 id="assignment-confirm-title">역할별 모델 배정 적용</h2><p>선택한 5개 역할 배정을 한 번에 적용합니다. 기존 활성 배정은 이력으로 보존되며 SHADOW 진단만 변경됩니다.</p><form onSubmit={activateAll}><label>현재 TOTP 코드<input className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setActivationTarget(null); setTotp(""); }} disabled={busy}>취소</button><button className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "적용 중…" : "5개 역할 적용"}</button></div></form></section></div>}
-    {deleteTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="provider-delete-title"><span className="section-kicker">TOTP REAUTHENTICATION</span><h2 id="provider-delete-title">Provider 삭제</h2><p><b>{deleteTarget.providerName}</b> 연결과 저장된 API 키를 삭제합니다. 판단·감사 이력은 보존됩니다.</p><form onSubmit={confirmDeleteProvider}><label>현재 TOTP 코드<input className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setDeleteTarget(null); setTotp(""); }} disabled={busy}>취소</button><button className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "삭제 중…" : "Provider 삭제"}</button></div></form></section></div>}
-    {credentialTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="credential-confirm-title"><span className="section-kicker">CONNECTION VERIFICATION</span><h2 id="credential-confirm-title">Provider 연결 시험 및 등록</h2><p>실제 API 키로 모델 목록을 조회합니다. 성공하면 키는 서버 전용 파일에 저장되고 발견 모델은 사용 안 함 상태로 등록됩니다.</p><form onSubmit={saveProviderCredential}><label>현재 TOTP 코드<input className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setCredentialTarget(null); setProviderCredential(""); setTotp(""); }} disabled={busy}>취소</button><button className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "연결 확인 중…" : "연결 시험 및 등록"}</button></div></form></section></div>}
+    {activationTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="assignment-confirm-title"><span className="section-kicker">ASSIGNMENT CONFIRMATION</span><h2 id="assignment-confirm-title">역할별 모델 배정 적용</h2><p>선택한 5개 역할 배정을 한 번에 적용합니다. 기존 활성 배정은 이력으로 보존되며 SHADOW 진단만 변경됩니다.</p><form onSubmit={activateAll}><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setActivationTarget(null)} disabled={busy}>취소</button><button className="primary-button" disabled={busy}>{busy ? "적용 중…" : "5개 역할 적용"}</button></div></form></section></div>}
+    {deleteTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="provider-delete-title"><span className="section-kicker">DELETE CONFIRMATION</span><h2 id="provider-delete-title">Provider 삭제</h2><p><b>{deleteTarget.providerName}</b> 연결과 저장된 API 키를 삭제합니다. 판단·감사 이력은 보존됩니다.</p><form onSubmit={confirmDeleteProvider}><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setDeleteTarget(null)} disabled={busy}>취소</button><button className="primary-button" disabled={busy}>{busy ? "삭제 중…" : "Provider 삭제"}</button></div></form></section></div>}
+    {credentialTarget && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="credential-confirm-title"><span className="section-kicker">CONNECTION VERIFICATION</span><h2 id="credential-confirm-title">Provider 연결 시험 및 등록</h2><p>실제 API 키로 모델 목록을 조회합니다. 성공하면 키는 서버 전용 파일에 저장되고 발견 모델은 사용 안 함 상태로 등록됩니다.</p><form onSubmit={saveProviderCredential}><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setCredentialTarget(null); setProviderCredential(""); }} disabled={busy}>취소</button><button className="primary-button" disabled={busy}>{busy ? "연결 확인 중…" : "연결 시험 및 등록"}</button></div></form></section></div>}
   </section>;
 }
 
@@ -896,7 +881,6 @@ function SystemPage({ session, onSessionExpired }: { session: SessionData; onSes
   const [orderType, setOrderType] = useState<"MARKET" | "LIMIT">("MARKET");
   const [limitPrice, setLimitPrice] = useState("");
   const [targetId, setTargetId] = useState("");
-  const [totp, setTotp] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [createdOrderId, setCreatedOrderId] = useState("");
@@ -934,27 +918,19 @@ function SystemPage({ session, onSessionExpired }: { session: SessionData; onSes
     if (!targetId) return;
     setBusy(true); setMessage("");
     try {
-      const reauth = await authApi.reauthTotp(
-        session.csrf_token,
-        totp,
-        "KIWOOM_MOCK_ORDER_TEST",
-        targetId,
-      );
       const result = await systemApi.mockOrderTest(session.csrf_token, {
         test_request_id: targetId,
         symbol,
         order_type: orderType,
         limit_price: orderType === "LIMIT" ? limitPrice : null,
-        reauth_proof: reauth.reauth_proof,
       });
       setCreatedOrderId(result.order_id);
       setMessage("모의주문 1주가 CREATED 상태로 등록되었습니다. Worker가 전송 결과를 처리합니다.");
-      setTargetId(""); setTotp("");
+      setTargetId("");
       await loadBroker();
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 401) onSessionExpired();
-      else setMessage("모의주문을 등록하지 못했습니다. Broker 상태와 TOTP를 확인해 주세요.");
-      setTotp("");
+      else setMessage("모의주문을 등록하지 못했습니다. Broker 상태를 확인해 주세요.");
     } finally { setBusy(false); }
   }
 
@@ -990,10 +966,10 @@ function SystemPage({ session, onSessionExpired }: { session: SessionData; onSes
       </article>
     </section>
     {targetId && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="mock-confirm-title">
-      <span className="section-kicker">TOTP REAUTHENTICATION</span><h2 id="mock-confirm-title">키움 모의주문 1주 확인</h2>
+      <span className="section-kicker">ORDER CONFIRMATION</span><h2 id="mock-confirm-title">키움 모의주문 1주 확인</h2>
       <p>{symbol} 종목을 {orderType === "MARKET" ? "시장가" : `${Number(limitPrice).toLocaleString("ko-KR")}원 지정가`}로 1주 매수합니다.</p>
-      <form onSubmit={submitMockOrder}><label htmlFor="mock-totp">현재 TOTP 코드</label><input id="mock-totp" className="totp-input" value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" required autoFocus />
-        <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setTargetId(""); setTotp(""); }} disabled={busy}>취소</button><button type="submit" className="primary-button" disabled={busy || totp.length !== 6}>{busy ? "등록 중" : "모의주문 실행"}</button></div>
+      <form onSubmit={submitMockOrder}>
+        <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTargetId("")} disabled={busy}>취소</button><button type="submit" className="primary-button" disabled={busy}>{busy ? "등록 중" : "모의주문 실행"}</button></div>
       </form>
     </section></div>}
   </>;

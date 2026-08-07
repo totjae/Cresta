@@ -417,3 +417,5 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 - Role assignment selects enabled registered models and exposes only parameters supported by the model capability contract. External candidates can be validated at SHADOW.
 - Each role assignment card provides a prompt version selector and a prompt editor. Saving creates and validates a new immutable version; changing an existing prompt never overwrites prior routes or run provenance.
 - Prompt content is shown only in the authenticated configuration screen and is not rendered in Agent run/history screens.
+- `UI-DEV-001`: 현재 개발 단계의 Console은 로그인 화면에서만 TOTP를 입력받는다. 로그인 후 설정·Provider·역할 배정·MOCK 주문 시험 확인창에는 TOTP 입력란을 표시하거나 재인증 API를 호출하지 않는다.
+- `UI-DEV-002`: 로그인 이후 파괴적 작업과 활성화는 일반 확인창, 명확한 영향 설명, 인증 세션, CSRF와 서버측 상태 검사를 유지한다. UI-AUTH-006·UI-037·057·073·086·089·111·114의 TOTP 부분은 서비스 완성 후 재평가 전까지 보류한다.

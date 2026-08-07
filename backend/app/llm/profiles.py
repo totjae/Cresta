@@ -11,7 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.auth.service import consume_reauth_proof
 from app.config import Settings
 from app.llm.adapters.mock import MOCK_CAPABILITIES
 from app.llm.contracts import ModelCapabilities, ProviderHealth
@@ -60,10 +59,6 @@ ASSIGNMENT_ROLES = (
     "POSITION_RISK_SCOUT",
     "CORE",
 )
-ASSIGNMENT_REAUTH_ACTION = "LLM_ROLE_ASSIGNMENT_ACTIVATE"
-CREDENTIAL_REAUTH_ACTION = "LLM_PROVIDER_CREDENTIAL_SET"
-REGISTRATION_REAUTH_ACTION = "LLM_PROVIDER_REGISTER"
-DELETION_REAUTH_ACTION = "LLM_PROVIDER_DELETE"
 
 
 class LlmProfileError(Exception):
@@ -258,20 +253,12 @@ def register_provider_with_discovery(
     template_id: str,
     configuration: dict[str, str] | None,
     credential: str,
-    reauth_proof: str,
     correlation_id: str,
     settings: Settings,
 ) -> tuple[LlmProviderProfile, list[LlmModelProfile]]:
     normalized_name = name.strip()
-    target_id = preview_provider_registration(
+    preview_provider_registration(
         db, owner_id=user.id, name=normalized_name, template_id=template_id
-    )
-    consume_reauth_proof(
-        db,
-        user=user,
-        raw_proof=reauth_proof,
-        target_action=REGISTRATION_REAUTH_ACTION,
-        target_id=target_id,
     )
     db.commit()
     try:
@@ -464,19 +451,11 @@ def delete_provider(
     *,
     user: User,
     provider_id: str,
-    reauth_proof: str,
     correlation_id: str,
     settings: Settings,
 ) -> None:
-    provider, target_id = preview_provider_deletion(
+    provider, _ = preview_provider_deletion(
         db, owner_id=user.id, provider_id=provider_id
-    )
-    consume_reauth_proof(
-        db,
-        user=user,
-        raw_proof=reauth_proof,
-        target_action=DELETION_REAUTH_ACTION,
-        target_id=target_id,
     )
     models = list(
         db.scalars(
@@ -581,20 +560,11 @@ def set_provider_credential(
     user: User,
     provider_id: str,
     credential: str,
-    reauth_proof: str,
     correlation_id: str,
     settings: Settings,
 ) -> LlmProviderProfile:
     profile = get_provider(db, user.id, provider_id)
     preview_provider_credential(db, owner_id=user.id, provider_id=provider_id)
-    target_id = credential_target_id(profile)
-    consume_reauth_proof(
-        db,
-        user=user,
-        raw_proof=reauth_proof,
-        target_action=CREDENTIAL_REAUTH_ACTION,
-        target_id=target_id,
-    )
     try:
         secret_ref = LlmSecretStore(settings.llm_secret_directory).write_provider_credential(
             profile.id, credential
@@ -996,18 +966,10 @@ def activate_assignments(
     *,
     user: User,
     route_ids: dict[str, str],
-    reauth_proof: str,
     correlation_id: str,
 ) -> list[LlmRoleRoute]:
     selected = _assignment_routes(db, owner_id=user.id, route_ids=route_ids, lock=True)
     target_id = assignment_target_id(route_ids)
-    consume_reauth_proof(
-        db,
-        user=user,
-        raw_proof=reauth_proof,
-        target_action=ASSIGNMENT_REAUTH_ACTION,
-        target_id=target_id,
-    )
     current = list(
         db.scalars(
             select(LlmRoleRoute)

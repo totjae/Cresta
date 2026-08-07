@@ -90,7 +90,6 @@ def activate_execution_policy(
         db,
         user=context.user,
         version_id=version_id,
-        reauth_proof=payload.reauth_proof,
         correlation_id=request.state.request_id,
         request_ip=request.client.host if request.client else "unknown",
         user_agent=request.headers.get("user-agent", "unknown"),
