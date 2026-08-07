@@ -464,6 +464,20 @@ def delete_provider(
             )
         )
     )
+    model_ids = [model.id for model in models]
+    routes = (
+        list(
+            db.scalars(
+                select(LlmRoleRoute).where(
+                    LlmRoleRoute.owner_id == user.id,
+                    LlmRoleRoute.primary_model_profile_id.in_(model_ids),
+                    LlmRoleRoute.state.in_(("DRAFT", "VALIDATED")),
+                )
+            )
+        )
+        if model_ids
+        else []
+    )
     secret_ref = provider.credential_secret_ref
     if secret_ref:
         try:
@@ -478,6 +492,9 @@ def delete_provider(
     for model in models:
         model.state = "DISABLED"
         model.version += 1
+    for route in routes:
+        route.state = "SUPERSEDED"
+        route.version += 1
     _audit(
         db,
         user=user,
@@ -660,6 +677,33 @@ def get_model(db: Session, owner_id: str, model_id: str) -> LlmModelProfile:
     if provider.id != model.provider_profile_id:
         raise LlmProfileError("MODEL_NOT_FOUND", 404)
     return model
+
+
+def get_model_for_history(
+    db: Session, owner_id: str, model_id: str
+) -> LlmModelProfile:
+    model = db.get(LlmModelProfile, model_id)
+    if model is None:
+        raise LlmProfileError("MODEL_NOT_FOUND", 404)
+    provider = db.get(LlmProviderProfile, model.provider_profile_id)
+    if provider is None or provider.owner_id != owner_id:
+        raise LlmProfileError("MODEL_NOT_FOUND", 404)
+    return model
+
+
+def route_dependencies_available(
+    db: Session, owner_id: str, route: LlmRoleRoute
+) -> bool:
+    model = db.get(LlmModelProfile, route.primary_model_profile_id)
+    if model is None or model.state != "VALIDATED":
+        return False
+    provider = db.get(LlmProviderProfile, model.provider_profile_id)
+    return bool(
+        provider is not None
+        and provider.owner_id == owner_id
+        and provider.deleted_at is None
+        and provider.state == "VALIDATED"
+    )
 
 
 def validate_model(

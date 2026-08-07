@@ -16,7 +16,7 @@ from app.llm.profiles import (
     delete_provider,
     disable_model,
     effective_generation_parameters,
-    get_model,
+    get_model_for_history,
     list_models,
     list_providers,
     list_routes,
@@ -25,6 +25,7 @@ from app.llm.profiles import (
     preview_provider_deletion,
     preview_provider_registration,
     register_provider_with_discovery,
+    route_dependencies_available,
     set_provider_credential,
     sync_provider_models,
     test_provider,
@@ -107,7 +108,7 @@ def _model_response(model: LlmModelProfile) -> LlmModelResponse:
 
 
 def _route_response(db: Session, owner_id: str, route: LlmRoleRoute) -> LlmRouteResponse:
-    model = get_model(db, owner_id, route.primary_model_profile_id)
+    model = get_model_for_history(db, owner_id, route.primary_model_profile_id)
     prompt = (
         get_prompt(db, owner_id=owner_id, prompt_id=route.prompt_profile_id)
         if route.prompt_profile_id
@@ -547,7 +548,12 @@ def get_role_assignments(
     for role in roles:
         role_routes = [route for route in routes if route.role == role]
         active = next((route for route in role_routes if route.state == "ACTIVE"), None)
-        candidates = [route for route in role_routes if route.state == "VALIDATED"]
+        candidates = [
+            route
+            for route in role_routes
+            if route.state == "VALIDATED"
+            and route_dependencies_available(db, context.user.id, route)
+        ]
         status_value = (
             "ACTIVE"
             if active

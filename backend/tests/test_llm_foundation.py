@@ -60,6 +60,47 @@ def test_provider_delete_uses_session_csrf_and_is_hidden(client: TestClient, db:
     )
     assert created.status_code == 201, created.text
     provider_id = created.json()["id"]
+    assert client.post(f"/api/v1/ai/providers/{provider_id}/test", headers=headers).status_code == 200
+    model = client.post(
+        "/api/v1/ai/models",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "provider_profile_id": provider_id,
+            "alias": "deleted-provider-history-model",
+            "provider_model_id": "deterministic-mock-v2",
+            "capabilities": {
+                "structured_output": True,
+                "tool_calling": False,
+                "web_search": False,
+                "streaming": False,
+                "reasoning": False,
+                "seed": True,
+                "usage_reporting": True,
+                "local_execution": True,
+            },
+            "max_context_tokens": 4096,
+            "max_output_tokens": 512,
+            "temperature": "0",
+        },
+    ).json()
+    assert client.post(f"/api/v1/ai/models/{model['id']}/validate", headers=headers).status_code == 200
+    route = client.post(
+        "/api/v1/ai/routes",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "role": "TECHNICAL_SCOUT",
+            "primary_model_profile_id": model["id"],
+            "timeout_ms": 10000,
+            "daily_call_limit": 100,
+            "daily_cost_limit_krw": "0",
+            "prompt_version": "deleted-provider-history-v1",
+            "output_schema_version": "agent-assessment-v1",
+            "reason": "삭제 후 이력 조회 회귀 검증",
+        },
+    ).json()
+    assert client.post(f"/api/v1/ai/routes/{route['id']}/validate", headers=headers).status_code == 200
     preview = client.post(
         f"/api/v1/ai/providers/{provider_id}/delete-preview", headers=headers
     )
@@ -76,6 +117,31 @@ def test_provider_delete_uses_session_csrf_and_is_hidden(client: TestClient, db:
     assert tombstone is not None
     assert tombstone.deleted_at is not None
     assert tombstone.state == "DISABLED"
+    history = client.get("/api/v1/ai/routes", headers=headers)
+    assert history.status_code == 200, history.text
+    assert history.json()["items"][0]["state"] == "SUPERSEDED"
+    assert history.json()["items"][0]["primary_model_alias"] == "deleted-provider-history-model"
+    assignments = client.get("/api/v1/ai/role-assignments", headers=headers)
+    assert assignments.status_code == 200, assignments.text
+    technical = next(
+        item for item in assignments.json()["items"] if item["role"] == "TECHNICAL_SCOUT"
+    )
+    assert technical["current"] is None
+    assert technical["candidates"] == []
+    legacy_route = db.get(LlmRoleRoute, route["id"])
+    assert legacy_route is not None
+    legacy_route.state = "VALIDATED"
+    db.commit()
+    legacy_history = client.get("/api/v1/ai/routes", headers=headers)
+    assert legacy_history.status_code == 200, legacy_history.text
+    legacy_assignments = client.get("/api/v1/ai/role-assignments", headers=headers)
+    assert legacy_assignments.status_code == 200, legacy_assignments.text
+    legacy_technical = next(
+        item
+        for item in legacy_assignments.json()["items"]
+        if item["role"] == "TECHNICAL_SCOUT"
+    )
+    assert legacy_technical["candidates"] == []
 
 
 def test_mock_provider_model_and_shadow_route_lifecycle(client: TestClient, db: Session) -> None:

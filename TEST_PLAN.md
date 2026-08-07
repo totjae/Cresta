@@ -413,3 +413,8 @@ Local evidence: the complete 164-test backend suite, Ruff, frontend TypeScript, 
 - `T-SEC-DEV-004`: 재인증 제거 후에도 변경 사유·validation·원자 전환·활성 route 삭제 차단·READY gate·멱등성과 비밀 원문 비노출이 유지되는지 검증한다.
 
 Local evidence: backend 전체 164개 시험과 Ruff, frontend TypeScript 및 11개 component 시험을 통과했다. 로그인 TOTP는 유지되며 로그인 이후 설정·Provider·역할 배정·MOCK 주문 UI의 재인증 호출은 0건이다.
+
+# Provider 삭제 후 이력 회귀 시험 (2026-08-08)
+
+- `T-LLM-DELETE-001`: 비활성 route가 있는 Provider를 삭제하면 관련 route가 `SUPERSEDED`로 전환되고 Provider·활성 모델·역할 후보 목록에서 제외되는지 검증한다.
+- `T-LLM-DELETE-002`: 삭제 후 `/ai/routes`, `/ai/role-assignments`와 Console 재조회가 성공하고 보존 route 이력의 모델 별칭·파라미터 provenance를 표시할 수 있는지 검증한다.
