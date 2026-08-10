@@ -72,3 +72,10 @@
 - `DEFAULT`, `PRIORITY`, `FLEX` 서비스 티어를 route version에 저장하고 외부 Adapter 요청에 전달한다.
 - 진단 run 유효시간은 선택된 route timeout 합계와 안전 여유시간을 반영하여 10초 경계 응답이 run 자체의 1분 만료와 충돌하지 않도록 조정했다.
 - 현재 전송은 non-streaming이며 최종 JSON을 받은 뒤 서버 계약 검증을 통과해야만 stage 성공으로 채택한다.
+
+## 2026-08-11 Provider web search and runtime clock
+
+- APIchat Adapter 동작을 읽기 전용으로 분석해 OpenAI Responses, Anthropic Messages, Gemini generateContent 및 LLM Gateway 호환 웹 검색 변환을 추가했다.
+- 역할 route에 versioned 웹 검색 권한을 추가하고 뉴스·공시/시장·업종 Scout만 SHADOW에서 허용하도록 fail-closed 검증을 적용했다.
+- 모든 LLM 호출에 UTC와 Asia/Seoul 현재 시각 및 최신성 지침을 주입하고 invocation 감사 이력에 실행 시각과 검색 사용 여부를 저장한다.
+- Provider 검색 결과를 검증된 EvidenceBundle로 승격하는 수집 Adapter는 아직 구현되지 않았으므로 검색 결과는 주문·승인 경계 밖에 있다.

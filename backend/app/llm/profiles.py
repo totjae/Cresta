@@ -200,9 +200,19 @@ def _discovered_alias(model_id: str, used: set[str]) -> str:
     return alias
 
 
-def _discovered_capabilities(adapter_type: str) -> ModelCapabilities:
+def _discovered_capabilities(
+    adapter_type: str, provider_template_id: str | None = None
+) -> ModelCapabilities:
     return ModelCapabilities(
         structured_output=True,
+        web_search=(
+            adapter_type in {
+                "OPENAI_RESPONSES",
+                "ANTHROPIC_MESSAGES",
+                "GEMINI_GENERATE_CONTENT",
+            }
+            or provider_template_id == "llm-gateway"
+        ),
         reasoning=adapter_type in {"OPENAI_RESPONSES", "GEMINI_GENERATE_CONTENT"},
         seed=adapter_type == "GEMINI_GENERATE_CONTENT",
         usage_reporting=True,
@@ -223,9 +233,20 @@ def _add_discovered_models(
     by_provider_id = {item.provider_model_id: item for item in existing}
     used_aliases = {item.alias for item in existing}
     created: list[LlmModelProfile] = []
-    capabilities = _discovered_capabilities(provider.adapter_type)
+    capabilities = _discovered_capabilities(
+        provider.adapter_type, provider.provider_template_id
+    )
     for item in discovered:
         if item.provider_model_id in by_provider_id:
+            existing_model = by_provider_id[item.provider_model_id]
+            declared = ModelCapabilities.model_validate_json(
+                existing_model.capabilities_json
+            )
+            if capabilities.web_search and not declared.web_search:
+                existing_model.capabilities_json = declared.model_copy(
+                    update={"web_search": True}
+                ).model_dump_json()
+                existing_model.version += 1
             continue
         model = LlmModelProfile(
             provider_profile_id=provider.id,
@@ -850,6 +871,7 @@ def create_route(
     reason: str,
     correlation_id: str,
     service_tier: str = "DEFAULT",
+    web_search_enabled: bool = False,
 ) -> LlmRoleRoute:
     if role not in ROLES:
         raise LlmProfileError("ROLE_UNSUPPORTED")
@@ -888,6 +910,7 @@ def create_route(
         ),
         timeout_ms=timeout_ms,
         service_tier=service_tier,
+        web_search_enabled=web_search_enabled,
         daily_call_limit=daily_call_limit,
         daily_cost_limit_krw=daily_cost_limit_krw,
         prompt_version=resolved_prompt_version,
@@ -914,6 +937,7 @@ def create_route(
             "failure_policy": failure_policy,
             "fallback_configured": fallback_model_profile_id is not None,
             "service_tier": service_tier,
+            "web_search_enabled": web_search_enabled,
         },
     )
     db.commit()
@@ -1004,6 +1028,11 @@ def validate_route(
         raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_REASONING")
     if route.seed_override is not None and any(not item.seed for item in model_capabilities):
         raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_SEED")
+    if route.web_search_enabled:
+        if route.role not in {"NEWS_DISCLOSURE_SCOUT", "MARKET_SECTOR_SCOUT"}:
+            raise LlmProfileError("WEB_SEARCH_ROLE_UNSUPPORTED")
+        if any(not item.web_search for item in model_capabilities):
+            raise LlmProfileError("MODEL_CAPABILITY_UNSUPPORTED_WEB_SEARCH")
     try:
         validate_foundation_route(route, model)
     except RouteBoundaryError as exc:

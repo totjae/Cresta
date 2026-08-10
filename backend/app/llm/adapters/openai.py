@@ -13,6 +13,7 @@ class OpenAIResponsesAdapter(ExternalHttpAdapter):
         structured_output=True,
         reasoning=True,
         usage_reporting=True,
+        web_search=True,
     )
 
     def _request_parts(
@@ -40,6 +41,9 @@ class OpenAIResponsesAdapter(ExternalHttpAdapter):
             body["reasoning"] = {"effort": request.reasoning_effort.lower()}
         if request.service_tier != "DEFAULT":
             body["service_tier"] = request.service_tier.lower()
+        if request.tool_policy == "ALLOWLIST" and "WEB_SEARCH" in request.allowed_tools:
+            body["tools"] = [{"type": "web_search"}]
+            body["include"] = ["web_search_call.action.sources"]
         return (
             f"{self.endpoint}/responses",
             {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"},

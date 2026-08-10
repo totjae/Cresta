@@ -9,7 +9,9 @@ from app.llm.contracts import LlmRequest, ModelCapabilities
 class OpenAICompatibleAdapter(ExternalHttpAdapter):
     adapter_type = "OPENAI_COMPATIBLE"
     provider_name = "OPENAI_COMPATIBLE"
-    capabilities = ModelCapabilities(structured_output=True, usage_reporting=True)
+    capabilities = ModelCapabilities(
+        structured_output=True, web_search=True, usage_reporting=True
+    )
 
     def __init__(self, *, endpoint: str, api_key: str, chat_path: str = "/v1/chat/completions", client=None) -> None:
         super().__init__(endpoint=endpoint, api_key=api_key, client=client)
@@ -31,6 +33,8 @@ class OpenAICompatibleAdapter(ExternalHttpAdapter):
             body["seed"] = request.seed
         if request.service_tier != "DEFAULT":
             body["service_tier"] = request.service_tier.lower()
+        if request.tool_policy == "ALLOWLIST" and "WEB_SEARCH" in request.allowed_tools:
+            body["web_search"] = True
         return (
             f"{self.endpoint}{self.chat_path}",
             {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"},

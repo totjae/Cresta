@@ -9,7 +9,9 @@ from app.llm.contracts import LlmRequest, ModelCapabilities
 class AnthropicMessagesAdapter(ExternalHttpAdapter):
     adapter_type = "ANTHROPIC_MESSAGES"
     provider_name = "ANTHROPIC"
-    capabilities = ModelCapabilities(structured_output=True, usage_reporting=True)
+    capabilities = ModelCapabilities(
+        structured_output=True, web_search=True, usage_reporting=True
+    )
 
     def _request_parts(
         self, request: LlmRequest, model_id: str
@@ -34,6 +36,14 @@ class AnthropicMessagesAdapter(ExternalHttpAdapter):
             body["top_p"] = request.top_p
         if request.service_tier != "DEFAULT":
             body["service_tier"] = request.service_tier.lower()
+        if request.tool_policy == "ALLOWLIST" and "WEB_SEARCH" in request.allowed_tools:
+            body["tools"] = [
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 5,
+                }
+            ]
         return (
             f"{self.endpoint}/messages",
             {

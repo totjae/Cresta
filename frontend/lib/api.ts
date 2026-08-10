@@ -79,6 +79,8 @@ export type AgentInvocationData = {
   validation_status: string;
   error_code: string | null;
   fallback_path: string[];
+  runtime_context_at: string | null;
+  web_search_enabled: boolean;
   created_at: string;
 };
 
@@ -348,6 +350,7 @@ export type LlmRoleRoute = {
   execution_stage: "SHADOW";
   timeout_ms: number;
   service_tier: "DEFAULT" | "PRIORITY" | "FLEX";
+  web_search_enabled: boolean;
   max_attempts: number;
   daily_call_limit: number;
   daily_cost_limit_krw: string;
@@ -715,6 +718,7 @@ export const llmApi = {
       seed?: number | null;
       timeoutMs?: number;
       serviceTier?: "DEFAULT" | "PRIORITY" | "FLEX";
+      webSearchEnabled?: boolean;
     } = {},
   ) {
     return request<LlmRoleRoute>("/api/v1/ai/routes", {
@@ -728,6 +732,7 @@ export const llmApi = {
         fallback_model_profile_id: fallbackModelProfileId,
         timeout_ms: parameters.timeoutMs ?? 30000,
         service_tier: parameters.serviceTier ?? "DEFAULT",
+        web_search_enabled: parameters.webSearchEnabled ?? false,
         daily_call_limit: 100,
         daily_cost_limit_krw: "0",
         prompt_profile_id: promptProfileId,

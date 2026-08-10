@@ -238,6 +238,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid #82b4ff; outline-
 .compact-editor input, .compact-editor select, .parameter-grid input, .parameter-grid select, .assignment-row > label select { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid #31425e; border-radius: 6px; background: #081225; color: var(--text); }
 .parameter-grid textarea { width: 100%; min-height: 130px; padding: 10px; resize: vertical; border: 1px solid #31425e; border-radius: 6px; background: #081225; color: var(--text); font: inherit; line-height: 1.5; }
 .parameter-grid .prompt-editor-field { grid-column: 1 / -1; }
+.parameter-grid .toggle-row { grid-template-columns: auto 1fr; align-items: center; align-content: center; min-height: 38px; padding: 8px 10px; border: 1px solid #31425e; border-radius: 6px; background: #081225; }
+.parameter-grid .toggle-row input { width: 16px; min-height: 16px; padding: 0; accent-color: var(--accent); }
+.parameter-grid .toggle-row span { display: grid; gap: 3px; color: var(--text); font-size: 11px; }
+.parameter-grid .toggle-row small { color: #7f8da3; font-size: 9px; font-weight: 500; }
 .catalog-list { border-top: 1px solid #293850; }
 .catalog-row { display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; padding: 14px 5px; border-bottom: 1px solid #293850; }
 .catalog-row > div:last-child { display: flex; align-items: center; gap: 9px; }

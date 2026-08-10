@@ -371,4 +371,6 @@ POST /api/v1/ai/providers/{provider_id}/credential
 
 - `POST /api/v1/ai/routes` accepts `timeout_ms` from `1000` through `600000` and `service_tier` as `DEFAULT`, `PRIORITY`, or `FLEX`.
 - `GET /api/v1/ai/routes` and role-assignment responses return both fields for every immutable route version.
+- `POST /api/v1/ai/routes` accepts `web_search_enabled` with default `false`; validation permits `true` only for supported SHADOW Scout roles whose primary and fallback models declare web-search capability.
+- Agent-run invocation responses expose `runtime_context_at` and `web_search_enabled` for audit without exposing prompts, credentials, or raw provider responses.
 - New requests default to 30 seconds and `DEFAULT`; existing rows retain their configured timeout and receive `DEFAULT` during migration.

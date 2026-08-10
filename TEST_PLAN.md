@@ -443,3 +443,10 @@ Local evidence: 외부 Adapter fixture로 4 Scout·Core 유효 응답의 stage �
 - `T-LLM-ROUTE-006`: route API가 1–600초 timeout과 `DEFAULT/PRIORITY/FLEX`를 검증·영속화·조회하고 migration이 기존 route를 `DEFAULT`로 보존하는지 검증한다.
 - `T-LLM-ADAPTER-007`: `DEFAULT`는 service tier 필드를 생략하고 명시적 `PRIORITY/FLEX`는 native/compatible Adapter 요청에 소문자로 전달되는지, 완성 응답이라도 전체 제한시간을 넘으면 결과를 폐기하는지 fixture로 검증한다.
 - `T-LLM-UI-008`: 역할별 배정에서 timeout과 tier를 후보에 저장하고 route 요약에서 확인할 수 있으며 `FLEX` 선택 시 600초 권장값이 적용되는지 검증한다.
+
+# LLM Provider web search·runtime clock 시험 (2026-08-11)
+
+- `T-LLM-WEB-009`: 웹 검색 비활성 route는 `tool_policy=NONE`, 활성 route는 Provider별 native 검색 필드로 변환되는지 검증한다.
+- `T-LLM-WEB-010`: Core와 capability 미지원 모델의 웹 검색 route 검증이 fail-closed인지 확인한다.
+- `T-LLM-TIME-011`: 모든 invocation system context에 UTC와 Asia/Seoul 실행 시각이 있고 DB 이력에 같은 시각과 검색 여부가 저장되는지 검증한다.
+- `T-LLM-WEB-012`: Provider 검색 실패가 자동 보정 없이 `FAIL_STOP/FAILOVER`와 오류 이력으로만 처리되는지 확인한다.

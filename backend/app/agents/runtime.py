@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -255,6 +256,8 @@ def _invoke_once(
         requested_model_profile_id=model.id,
         state="RUNNING",
         input_hash=stage.input_hash,
+        runtime_context_at=now,
+        web_search_enabled=binding.route.web_search_enabled,
     )
     db.add(invocation)
     db.flush()
@@ -276,6 +279,28 @@ def _invoke_once(
     messages = []
     if prompt is not None:
         messages.append({"role": "system", "content": prompt.system_prompt})
+    runtime_utc = now.astimezone(UTC)
+    runtime_kst = runtime_utc.astimezone(ZoneInfo("Asia/Seoul"))
+    messages.append(
+        {
+            "role": "system",
+            "content": "\n".join(
+                [
+                    "[Cresta runtime context v1]",
+                    f"Current time: {runtime_utc.isoformat()} (UTC).",
+                    f"Current time: {runtime_kst.isoformat()} (Asia/Seoul).",
+                    "Use these timestamps as the current date and time for this request.",
+                    "Do not treat model memory as current market, news, or disclosure evidence.",
+                    (
+                        "Web search is enabled. Prefer recent sources, check each source date, "
+                        "and never use information published after the current timestamp."
+                        if binding.route.web_search_enabled
+                        else "Web search is disabled. Report missing current evidence instead of guessing."
+                    ),
+                ]
+            ),
+        }
+    )
     messages.append({"role": "user", "content": _canonical(role_input)})
     request = LlmRequest(
         invocation_id=invocation.id,
@@ -309,6 +334,8 @@ def _invoke_once(
         seed=binding.route.seed_override
         if binding.route.seed_override is not None
         else model.seed,
+        tool_policy="ALLOWLIST" if binding.route.web_search_enabled else "NONE",
+        allowed_tools=["WEB_SEARCH"] if binding.route.web_search_enabled else [],
     )
     credential = None
     if provider.adapter_type != "MOCK":

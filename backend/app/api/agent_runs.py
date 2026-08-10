@@ -73,6 +73,8 @@ def _response(
                 validation_status=invocation.validation_status,
                 error_code=invocation.error_code,
                 fallback_path=json.loads(invocation.fallback_path_json),
+                runtime_context_at=invocation.runtime_context_at,
+                web_search_enabled=invocation.web_search_enabled,
                 created_at=invocation.created_at,
             )
             for index, invocation in enumerate(invocations, start=1)

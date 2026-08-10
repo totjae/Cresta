@@ -135,6 +135,8 @@ def test_external_outputs_are_server_validated_and_adopted_without_trading(
     assert technical["output"]["reason_codes"] == ["EXTERNAL_SHADOW_ASSESSMENT"]
     assert technical["invocation"]["actual_provider"] == "EXTERNAL_FIXTURE"
     assert technical["invocation"]["validation_status"] == "PASSED"
+    assert technical["invocation"]["web_search_enabled"] is False
+    assert technical["invocation"]["runtime_context_at"] is not None
 
     scout_request = next(
         request for request in adapter.requests if request.role == "TECHNICAL_SCOUT"
@@ -145,6 +147,11 @@ def test_external_outputs_are_server_validated_and_adopted_without_trading(
     assert scout_input["indicator_snapshot"]["price_vs_vwap_pct"] == "0.143062"
     assert "credential" not in scout_input
     assert scout_request.tool_policy == "NONE"
+    runtime_context = scout_request.messages[-2]["content"]
+    assert "[Cresta runtime context v1]" in runtime_context
+    assert "Current time:" in runtime_context
+    assert "Asia/Seoul" in runtime_context
+    assert "Web search is disabled" in runtime_context
     assert db.scalar(select(func.count()).select_from(Decision)) == 0
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pyotp
@@ -91,6 +92,7 @@ def _candidate(
     role: str,
     model_id: str,
     reasoning: str | None = None,
+    web_search: bool = False,
 ) -> dict[str, object]:
     response = client.post(
         "/api/v1/ai/routes",
@@ -100,6 +102,7 @@ def _candidate(
             "role": role,
             "primary_model_profile_id": model_id,
             "timeout_ms": 10000,
+            "web_search_enabled": web_search,
             "daily_call_limit": 100,
             "daily_cost_limit_krw": "0",
             "prompt_version": f"{role.lower()}-shadow-v1",
@@ -130,6 +133,7 @@ def test_role_assignments_reuse_model_and_activate_atomically(
         validated = client.post(f"/api/v1/ai/routes/{route['id']}/validate", headers=headers)
         assert validated.status_code == 200, validated.text
         selected[role] = str(route["id"])
+        assert validated.json()["web_search_enabled"] is False
         assert validated.json()["effective_parameters"]["temperature"] == "0.100"
         assert validated.json()["effective_parameters"]["temperature_source"] == "ROLE_OVERRIDE"
         assert validated.json()["effective_parameters"]["top_p"] == "0.900"
@@ -180,6 +184,51 @@ def test_role_candidate_rejects_unsupported_reasoning_parameter(client: TestClie
     response = client.post(f"/api/v1/ai/routes/{route['id']}/validate", headers=headers)
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "MODEL_PARAMETER_UNSUPPORTED_REASONING"
+
+
+def test_role_candidate_rejects_web_search_without_model_capability(
+    client: TestClient,
+) -> None:
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    model_id = _foundation(client, headers)
+    route = _candidate(
+        client,
+        headers,
+        role="NEWS_DISCLOSURE_SCOUT",
+        model_id=model_id,
+        web_search=True,
+    )
+    response = client.post(f"/api/v1/ai/routes/{route['id']}/validate", headers=headers)
+    assert response.status_code == 422
+    assert (
+        response.json()["error"]["code"]
+        == "MODEL_CAPABILITY_UNSUPPORTED_WEB_SEARCH"
+    )
+
+
+def test_core_route_rejects_web_search_even_when_model_declares_it(
+    client: TestClient, db: Session
+) -> None:
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    model_id = _foundation(client, headers)
+    model = db.get(LlmModelProfile, model_id)
+    assert model is not None
+    capabilities = json.loads(model.capabilities_json)
+    capabilities["web_search"] = True
+    model.capabilities_json = json.dumps(capabilities)
+    db.commit()
+    route = _candidate(
+        client,
+        headers,
+        role="CORE",
+        model_id=model_id,
+        web_search=True,
+    )
+    response = client.post(f"/api/v1/ai/routes/{route['id']}/validate", headers=headers)
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "WEB_SEARCH_ROLE_UNSUPPORTED"
 
 
 def test_role_candidate_accepts_one_explicit_fallback_model(

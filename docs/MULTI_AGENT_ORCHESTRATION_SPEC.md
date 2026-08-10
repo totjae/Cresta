@@ -293,3 +293,9 @@ app/llm/*                     Provider/Gateway 호출 계층
 - 첫 외부 뉴스·검색 공급자와 DART 수집 방식은 공식 이용 조건 확인 후 확정한다.
 - `NEWS_DISCLOSURE_SCOUT`, `MARKET_SECTOR_SCOUT`, `POSITION_RISK_SCOUT`의 role별 세부 reason code는 구현 fixture 작성 전에 별도 schema version으로 확정한다.
 - Ollama 모델과 context 크기는 N100 실측 전까지 SHADOW 전용이다.
+
+### Provider 검색과 현재 시각 경계 (2026-08-11)
+
+- `MAO-075`: 현재 SHADOW 구현에서 Provider 내장 web search는 `NEWS_DISCLOSURE_SCOUT`와 `MARKET_SECTOR_SCOUT`의 명시적 role route에만 허용하며 Core에는 계속 제공하지 않는다.
+- `MAO-076`: Provider 검색 결과는 `UNTRUSTED_EXTERNAL_DATA`이며 검증된 EvidenceBundle로 자동 승격하지 않는다. Evidence 수집 Adapter가 구현되기 전에는 주문·승인 근거가 될 수 없다.
+- `MAO-077`: 각 LLM invocation은 UTC와 Asia/Seoul 현재 시각을 서버 소유 runtime context로 받으며 해당 시각은 invocation 이력에 저장한다.

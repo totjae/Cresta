@@ -1071,6 +1071,7 @@ class LlmRoleRoute(Base):
     execution_stage: Mapped[str] = mapped_column(String(24), nullable=False, default="SHADOW")
     timeout_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=30000)
     service_tier: Mapped[str] = mapped_column(String(16), nullable=False, default="DEFAULT")
+    web_search_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     daily_call_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     daily_cost_limit_krw: Mapped[Decimal] = mapped_column(
@@ -1128,6 +1129,8 @@ class LlmInvocation(Base):
     provider_request_id: Mapped[str | None] = mapped_column(String(128))
     gateway_request_id: Mapped[str | None] = mapped_column(String(128))
     input_hash: Mapped[str | None] = mapped_column(String(64))
+    runtime_context_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    web_search_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     raw_response_hash: Mapped[str | None] = mapped_column(String(64))
     usage_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

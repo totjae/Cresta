@@ -442,3 +442,20 @@ Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 �
 - `LLM-PROVIDER-124`: 서비스 티어와 timeout은 역할 배정 version의 일부다. 후보 검증과 원자 활성화를 거쳐야 변경되며 기존 run과 route 이력은 당시 값을 보존한다.
 - `LLM-PROVIDER-125`: Provider 또는 모델이 티어를 지원하지 않아 실패하면 자동 보정하거나 다른 티어로 재전송하지 않는다. 기존 `FAIL_STOP` 또는 명시적 단일 `FAILOVER` 정책과 안전한 오류 이력을 적용한다.
 - `LLM-PROVIDER-126`: `FLEX` 선택 시 Console은 600초를 권장값으로 채우지만 사용자가 역할 특성에 맞게 1–600초 범위에서 명시적으로 변경할 수 있다.
+
+### 역할별 Provider 웹 검색과 실행 시각 컨텍스트 (2026-08-11)
+
+- `LLM-PROVIDER-127`: `llm_role_routes.web_search_enabled`는 모델 capability와 별개인 역할별 권한이다. 두 값이 모두 참인 경우에만 canonical request의 `tool_policy=ALLOWLIST`, `allowed_tools=[WEB_SEARCH]`를 생성한다.
+- `LLM-PROVIDER-128`: 현재 SHADOW 단계에서 Provider 웹 검색은 `NEWS_DISCLOSURE_SCOUT`와 `MARKET_SECTOR_SCOUT`에만 허용한다. Core, 기술 Scout 및 포지션 위험 Scout에는 검색 도구를 제공하지 않는다.
+- `LLM-PROVIDER-129`: 기본 모델과 예비 모델 모두 `capabilities.web_search=true`가 아니면 route 검증을 `MODEL_CAPABILITY_UNSUPPORTED_WEB_SEARCH`로 거부한다. Provider가 실행 시 기능을 거부하면 기존 `FAIL_STOP/FAILOVER` 정책과 오류 이력만 적용하며 자동 보정하지 않는다.
+- `LLM-PROVIDER-130`: OpenAI Responses는 `tools=[{type:web_search}]`, Anthropic Messages는 `web_search_20250305`, Gemini generateContent는 `google_search`, LLM Gateway 호환 요청은 `web_search=true`로 변환한다.
+- `LLM-PROVIDER-131`: 모든 외부 Agent 호출에는 서버가 UTC와 `Asia/Seoul` 실행 시각을 별도 system runtime context로 주입한다. 사용자 prompt version은 변경하지 않으며 주입 시각과 검색 활성 여부를 `llm_invocations`에 기록한다.
+- `LLM-PROVIDER-132`: runtime context는 모델 기억을 현재 뉴스·공시·시장 근거로 간주하지 말고, 검색 비활성 시 최신 근거 부족을 추측 대신 보고하며, 검색 활성 시 출처 날짜를 확인하고 실행 시각 이후 자료를 사용하지 않도록 지시한다.
+- `LLM-PROVIDER-133`: Provider 내장 검색 결과는 현재 단계에서 검증된 `EvidenceBundle`로 자동 승격하지 않는다. 따라서 검색 활성 route는 SHADOW 진단 전용이며 주문 또는 승인 생성의 근거로 사용할 수 없다.
+
+Provider 검색 필드 확인 자료:
+
+- OpenAI Responses web search: <https://platform.openai.com/docs/quickstart/make-your-first-api-request>
+- Claude API web search: <https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool>
+- Gemini generateContent Google Search grounding: <https://ai.google.dev/gemini-api/docs/generate-content/google-search>
+- 내부 동작 참고(읽기 전용): `C:\Users\Jae\Documents\APIchat\apps\api\src\chat-streaming.ts`

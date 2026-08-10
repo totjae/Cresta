@@ -15,6 +15,7 @@ class GeminiGenerateContentAdapter(ExternalHttpAdapter):
         reasoning=True,
         seed=True,
         usage_reporting=True,
+        web_search=True,
     )
 
     def _request_parts(
@@ -45,6 +46,8 @@ class GeminiGenerateContentAdapter(ExternalHttpAdapter):
             body["service_tier"] = request.service_tier.lower()
         if system_parts:
             body["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
+        if request.tool_policy == "ALLOWLIST" and "WEB_SEARCH" in request.allowed_tools:
+            body["tools"] = [{"google_search": {}}]
         return (
             f"{self.endpoint}/models/{model}:generateContent",
             {"x-goog-api-key": self._api_key, "Content-Type": "application/json"},

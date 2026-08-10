@@ -649,6 +649,7 @@ class LlmRouteCreateRequest(StrictModel):
     fallback_model_profile_id: str | None = Field(default=None, min_length=36, max_length=36)
     timeout_ms: int = Field(default=30000, ge=1000, le=600000)
     service_tier: Literal["DEFAULT", "PRIORITY", "FLEX"] = "DEFAULT"
+    web_search_enabled: bool = False
     daily_call_limit: int = Field(default=100, ge=1, le=100000)
     daily_cost_limit_krw: Decimal = Field(default=Decimal(0), ge=0)
     prompt_profile_id: str | None = Field(default=None, min_length=36, max_length=36)
@@ -686,6 +687,7 @@ class LlmRouteResponse(StrictModel):
     execution_stage: Literal["SHADOW"]
     timeout_ms: int
     service_tier: Literal["DEFAULT", "PRIORITY", "FLEX"]
+    web_search_enabled: bool
     max_attempts: int
     daily_call_limit: int
     daily_cost_limit_krw: Decimal
@@ -777,6 +779,8 @@ class AgentInvocationResponse(StrictModel):
     validation_status: str
     error_code: str | None
     fallback_path: list[str]
+    runtime_context_at: datetime | None
+    web_search_enabled: bool
     created_at: datetime
 
 

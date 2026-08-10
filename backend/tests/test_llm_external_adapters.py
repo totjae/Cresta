@@ -9,10 +9,13 @@ from app.ids import uuid7
 from app.llm.adapters.anthropic import AnthropicMessagesAdapter
 from app.llm.adapters.gemini import GeminiGenerateContentAdapter
 from app.llm.adapters.openai import OpenAIResponsesAdapter
+from app.llm.adapters.openai_compatible import OpenAICompatibleAdapter
 from app.llm.contracts import LlmRequest
 
 
-def _request(service_tier: str = "DEFAULT") -> LlmRequest:
+def _request(
+    service_tier: str = "DEFAULT", *, web_search: bool = False
+) -> LlmRequest:
     return LlmRequest(
         invocation_id=uuid7(),
         role="TECHNICAL_SCOUT",
@@ -35,6 +38,8 @@ def _request(service_tier: str = "DEFAULT") -> LlmRequest:
         max_output_tokens=256,
         temperature=0,
         top_p=0.9,
+        tool_policy="ALLOWLIST" if web_search else "NONE",
+        allowed_tools=["WEB_SEARCH"] if web_search else [],
     )
 
 
@@ -150,6 +155,66 @@ def test_gemini_generate_content_contract_and_usage_normalization() -> None:
     assert result.status == "SUCCEEDED"
     assert result.actual_model == "gemini-test-001"
     assert (result.input_tokens, result.output_tokens) == (7, 2)
+
+
+@pytest.mark.parametrize(
+    ("adapter_factory", "model_id", "assert_web_tool"),
+    [
+        (
+            lambda client: OpenAIResponsesAdapter(
+                endpoint="https://api.openai.com/v1", api_key="secret", client=client
+            ),
+            "gpt-test",
+            lambda body: body["tools"] == [{"type": "web_search"}]
+            and body["include"] == ["web_search_call.action.sources"],
+        ),
+        (
+            lambda client: AnthropicMessagesAdapter(
+                endpoint="https://api.anthropic.com/v1", api_key="secret", client=client
+            ),
+            "claude-test",
+            lambda body: body["tools"][0]["type"] == "web_search_20250305",
+        ),
+        (
+            lambda client: GeminiGenerateContentAdapter(
+                endpoint="https://generativelanguage.googleapis.com/v1beta",
+                api_key="secret",
+                client=client,
+            ),
+            "gemini-test",
+            lambda body: body["tools"] == [{"google_search": {}}],
+        ),
+    ],
+)
+def test_native_adapters_enable_only_allowlisted_web_search(
+    adapter_factory, model_id: str, assert_web_tool
+) -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(503, json={"error": "fixture"})
+
+    adapter = adapter_factory(httpx.Client(transport=httpx.MockTransport(handler)))
+    adapter.generate_structured(_request(web_search=True), model_id)
+    assert assert_web_tool(captured["body"])
+
+
+def test_llm_gateway_compatible_request_uses_provider_web_search_switch() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(503, json={"error": "fixture"})
+
+    adapter = OpenAICompatibleAdapter(
+        endpoint="https://api.llmgateway.example/v1",
+        api_key="secret",
+        chat_path="/chat/completions",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    adapter.generate_structured(_request(web_search=True), "gateway-model")
+    assert captured["body"]["web_search"] is True
 
 
 @pytest.mark.parametrize(

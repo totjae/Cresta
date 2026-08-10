@@ -291,4 +291,5 @@ market_snapshots(symbol, market, observed_at desc)
 ## LLM route service policy migration (2026-08-10)
 
 - Migration `20260810_0020` adds non-null `llm_role_routes.service_tier` with `DEFAULT`, `PRIORITY`, and `FLEX` values.
+- Migration `20260811_0021` adds `llm_role_routes.web_search_enabled` and records `runtime_context_at` plus `web_search_enabled` on every `llm_invocations` attempt.
 - The same migration widens `timeout_ms` to 1–600 seconds and changes only the server default for newly created routes to 30 seconds. Historical values are not rewritten.
