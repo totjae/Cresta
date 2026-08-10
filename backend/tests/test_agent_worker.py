@@ -268,4 +268,7 @@ def test_failed_primary_uses_one_fallback_and_preserves_both_invocations(
     assert failed_technical["state"] == "FAILED"
     assert failed_technical["error_code"] == "AGENT_LLM_FAIL_STOP"
     assert len(failed_technical["invocations"]) == 1
+    assert failed_technical["invocations"][0]["state"] == "PROVIDER_ERROR"
+    assert failed_technical["invocations"][0]["error_code"] == "LLM_PROVIDER_ERROR"
+    assert failed_technical["invocations"][0]["validation_status"] == "NOT_RUN"
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0

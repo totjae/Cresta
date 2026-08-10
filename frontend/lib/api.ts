@@ -71,6 +71,7 @@ export type AgentInvocationData = {
   invocation_id: string;
   attempt_number: number;
   requested_model_profile_id: string | null;
+  requested_model_alias: string | null;
   state: string;
   actual_provider: string | null;
   actual_model: string | null;

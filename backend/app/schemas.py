@@ -767,6 +767,7 @@ class AgentInvocationResponse(StrictModel):
     invocation_id: str
     attempt_number: int
     requested_model_profile_id: str | None
+    requested_model_alias: str | None
     state: str
     actual_provider: str | None
     actual_model: str | None

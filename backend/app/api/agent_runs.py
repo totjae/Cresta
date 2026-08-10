@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 from app.agents.runtime import create_diagnostic_run, get_agent_run, list_agent_runs
 from app.api.dependencies import AuthContext, get_auth_context, require_csrf
 from app.db import get_db
-from app.models import AgentRun, AgentStageRun, EvidenceBundle, LlmInvocation
+from app.models import (
+    AgentRun,
+    AgentStageRun,
+    EvidenceBundle,
+    LlmInvocation,
+    LlmModelProfile,
+)
 from app.schemas import (
     AgentDiagnosticRunRequest,
     AgentEvidenceBundleResponse,
@@ -41,11 +47,25 @@ def _response(
                 .order_by(LlmInvocation.created_at, LlmInvocation.id)
             )
         )
+        requested_models = {
+            model_id: db.get(LlmModelProfile, model_id)
+            for model_id in {
+                invocation.requested_model_profile_id
+                for invocation in invocations
+                if invocation.requested_model_profile_id
+            }
+        }
         invocation_responses = [
             AgentInvocationResponse(
                 invocation_id=invocation.id,
                 attempt_number=index,
                 requested_model_profile_id=invocation.requested_model_profile_id,
+                requested_model_alias=(
+                    requested_models[invocation.requested_model_profile_id].alias
+                    if invocation.requested_model_profile_id
+                    and requested_models.get(invocation.requested_model_profile_id)
+                    else None
+                ),
                 state=invocation.state,
                 actual_provider=invocation.actual_provider,
                 actual_model=invocation.actual_model,

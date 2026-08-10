@@ -435,3 +435,5 @@ Local evidence: route 계약의 기본 `FAIL_STOP`, 서로 다른 검증 모델 
 - `T-AGENT-EXT-004`: Adapter request에 역할별 JSON Schema와 정규화된 market·indicator·position·evidence 입력이 전달되고 credential·주문 도구·원문은 포함되지 않는지 검증한다.
 
 Local evidence: 외부 Adapter fixture로 4 Scout·Core 유효 응답의 stage 채택, server-owned provenance, strict-schema 필수 필드, request ID·usage 영속화, 계약 오류의 `INVALID_OUTPUT/FAIL_STOP` 및 주문 0건을 검증했다. backend 168개 회귀 시험·Ruff, frontend TypeScript·11개 component 시험·production build가 통과했다. 실제 유료 Provider의 요청·응답은 Ubuntu 서버에서 별도 검증한다.
+
+- `T-AGENT-EXT-005`: Adapter가 정규화한 terminal 상태와 `LLM_*` 오류는 `AGENT_LLM_FAIL_STOP` stage 처리 후에도 그대로 보존되고, 완료되지 않은 invocation만 `AGENT_INVOCATION_OUTCOME_UNKNOWN`으로 격리되는지 검증한다.

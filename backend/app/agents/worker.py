@@ -553,19 +553,17 @@ def execute_claimed_stage(
         _execute_stage(db, stage, run, now)
     except Exception as exc:
         logger.exception("Agent stage failed role=%s stage=%s", stage.role, stage.id)
-        if stage.invocation_id:
+        if stage.invocation_id and not isinstance(exc, AgentRuntimeError):
             invocations = list(
                 db.scalars(
-                    select(LlmInvocation).where(
-                        LlmInvocation.stage_run_id == stage.id,
-                        LlmInvocation.state == "RUNNING",
-                    )
+                    select(LlmInvocation).where(LlmInvocation.stage_run_id == stage.id)
                 )
             )
             for invocation in invocations:
-                invocation.state = "AMBIGUOUS"
-                invocation.error_code = "AGENT_INVOCATION_OUTCOME_UNKNOWN"
-                invocation.completed_at = now
+                if invocation.state == "RUNNING" and invocation.completed_at is None:
+                    invocation.state = "AMBIGUOUS"
+                    invocation.error_code = "AGENT_INVOCATION_OUTCOME_UNKNOWN"
+                    invocation.completed_at = now
         stage.state = "TIMED_OUT" if isinstance(exc, TimeoutError) else "FAILED"
         stage.error_code = getattr(exc, "code", None) or str(exc)[:64] or "AGENT_STAGE_FAILED"
         stage.completed_at = now

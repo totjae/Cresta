@@ -277,6 +277,7 @@ app/llm/*                     Provider/Gateway 호출 계층
 | MAO-116 | Scout 모델 출력에는 평가 필드만 허용한다. `stage_run_id`, role, symbol, input reference, 관측·만료 시각은 서버가 현재 run에서 덧붙이며 모델이 위조하거나 변경할 수 없다. 모델의 evidence reference는 실제 입력 reference의 부분집합이어야 한다. |
 | MAO-117 | 외부 Core 응답은 현재 SHADOW 계약상 `WAIT`만 허용한다. 유효한 외부 응답은 stage output에 저장하지만 판단·승인·주문 테이블에는 복사하지 않는다. |
 | MAO-118 | Mock Adapter는 결정론적 fixture 출력을 계속 사용한다. 외부 primary가 실패해 Mock fallback이 성공한 경우에도 stage 결과는 Mock fixture로 생성하고 두 invocation 이력을 모두 보존한다. |
+| MAO-119 | Adapter가 `TIMED_OUT`, `RATE_LIMITED`, `PROVIDER_ERROR`, `INVALID_OUTPUT` 또는 `AMBIGUOUS`로 종료한 invocation은 하위 `FAIL_STOP` stage 예외 처리가 상태·오류 코드·검증 결과를 덮어쓰지 않는다. `AGENT_INVOCATION_OUTCOME_UNKNOWN`은 Adapter 결과가 기록되지 않은 `RUNNING` invocation에만 사용한다. |
 
 ## 13. 검증·인수 조건
 
