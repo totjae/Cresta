@@ -467,3 +467,4 @@ Provider 검색 필드 확인 자료:
 - `LLM-PROVIDER-136`: OpenAI 호환 Adapter는 canonical `output_json_schema`를 strict `json_schema` response format으로 전송하고 같은 schema를 server-owned system instruction으로 명시한다. Provider가 이를 지원하지 않거나 결과가 계약과 다르면 자동 완화·파라미터 제거·재호출 없이 기존 `FAIL_STOP/FAILOVER` 정책을 적용한다.
 - `LLM-PROVIDER-137`: LLM Gateway에서 발견한 `gpt-5/o1/o3/o4` 모델은 모델 단위로 `reasoning=true` capability를 갖는다. 모델 재동기화는 서버가 확실히 지원한다고 판정한 capability만 추가하고 사용자가 검증한 capability를 자동으로 제거하지 않는다.
 - `LLM-PROVIDER-138`: OpenAI 호환 요청은 APIchat과 동일하게 LLM Gateway 웹 검색에만 `web_search=true`를 사용한다. Cresta 전용 strict schema, invocation 감사, fail-closed 처리는 APIchat의 자유 형식 채팅 동작 위에 추가되는 독립 경계다.
+- `LLM-PROVIDER-139`: OpenAI 공식 Responses Adapter도 모델 ID가 `gpt-5` 또는 `o1/o3/o4` 계열이면 reasoning 설정 유무와 관계없이 `temperature`와 `top_p`를 전송하지 않는다. `reasoning_effort`가 명시된 경우에만 Responses API의 `reasoning.effort`로 전송한다.

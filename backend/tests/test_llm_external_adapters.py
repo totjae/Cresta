@@ -88,6 +88,33 @@ def test_openai_responses_contract_and_usage_normalization() -> None:
     assert "openai-secret" not in result.model_dump_json()
 
 
+def test_openai_responses_reasoning_model_omits_sampling_by_model_id() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(503, json={"error": "fixture"})
+
+    adapter = OpenAIResponsesAdapter(
+        endpoint="https://api.openai.com/v1",
+        api_key="secret",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    adapter.generate_structured(_request(), "gpt-5-mini")
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert "temperature" not in body
+    assert "top_p" not in body
+    assert "reasoning" not in body
+
+    adapter.generate_structured(_request(reasoning_effort="HIGH"), "gpt-5-mini")
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["reasoning"] == {"effort": "high"}
+    assert "temperature" not in body
+    assert "top_p" not in body
+
+
 def test_anthropic_messages_contract_and_usage_normalization() -> None:
     captured: dict[str, object] = {}
 

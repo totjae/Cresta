@@ -4,6 +4,7 @@ from typing import Any
 
 from app.llm.adapters.http_base import ExternalHttpAdapter, parse_json_text, safe_model_id
 from app.llm.contracts import LlmRequest, ModelCapabilities
+from app.llm.parameter_policy import is_openai_reasoning_model
 
 
 class OpenAIResponsesAdapter(ExternalHttpAdapter):
@@ -19,8 +20,10 @@ class OpenAIResponsesAdapter(ExternalHttpAdapter):
     def _request_parts(
         self, request: LlmRequest, model_id: str
     ) -> tuple[str, dict[str, str], dict[str, Any]]:
+        normalized_model_id = safe_model_id(model_id)
+        reasoning_model = is_openai_reasoning_model(normalized_model_id)
         body: dict[str, Any] = {
-            "model": safe_model_id(model_id),
+            "model": normalized_model_id,
             "input": request.messages,
             "max_output_tokens": request.max_output_tokens,
             "text": {
@@ -33,9 +36,9 @@ class OpenAIResponsesAdapter(ExternalHttpAdapter):
             },
             "store": False,
         }
-        if request.reasoning_effort is None:
+        if not reasoning_model:
             body["temperature"] = request.temperature
-        if request.top_p is not None and request.reasoning_effort is None:
+        if request.top_p is not None and not reasoning_model:
             body["top_p"] = request.top_p
         if request.reasoning_effort is not None:
             body["reasoning"] = {"effort": request.reasoning_effort.lower()}

@@ -85,3 +85,9 @@
 - APIchat의 실제 Provider parameter policy와 OpenAI-compatible request builder를 읽기 전용으로 대조했다.
 - GPT-5/o계열 토큰 한도 필드, reasoning sampling 억제, reasoning effort 전달, strict schema 요청과 모델별 capability 동기화를 구현했다.
 - 로컬 전체 backend 시험은 통과했으며 실제 LLM Gateway 계정의 GPT-5와 Gateway 경유 Gemini SHADOW 호출은 Ubuntu 서버 배포 후 검증한다.
+
+## 2026-08-11 OpenAI Responses reasoning normalization
+
+- 서버 SHADOW 결과에서 OpenAI 공식 `gpt-5-mini`가 DEFAULT tier에서도 즉시 거부되는 경로를 분리했다.
+- Responses Adapter가 GPT-5/o계열의 `temperature/top_p`를 reasoning 기본값에서도 제거하도록 APIchat 모델 정책을 공통 적용했다.
+- 집중 시험 20개와 backend 전체 183개 시험 및 Ruff를 통과했으며 Ubuntu 서버의 Technical Scout 재검증은 남아 있다.

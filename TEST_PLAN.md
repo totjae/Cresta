@@ -457,5 +457,6 @@ Local evidence: 외부 Adapter fixture로 4 Scout·Core 유효 응답의 stage �
 - `T-LLM-ADAPTER-014`: 일반 OpenAI 호환 및 Gateway 경유 Gemini 모델은 `max_tokens`, 허용된 sampling 파라미터, strict JSON Schema response format과 server-owned schema instruction을 받는지 확인한다.
 - `T-LLM-ADAPTER-015`: LLM Gateway 모델 동기화 시 reasoning 계열 모델 capability가 추가되고 기존 capability를 하향 변경하지 않는지 확인한다.
 - `T-LLM-ADAPTER-016`: Provider가 정규화된 요청이나 strict schema를 거부하면 요청을 변경해 재호출하지 않고 기존 오류 상태와 0회 retry를 유지하는지 확인한다.
+- `T-LLM-ADAPTER-017`: OpenAI Responses Adapter의 GPT-5/o계열 요청은 reasoning 기본값에서도 `temperature/top_p`를 생략하고, 명시한 reasoning effort만 `reasoning.effort`로 전달하는지 확인한다.
 
-Local evidence: OpenAI 호환 Adapter와 parameter policy 집중 시험 19개, backend 전체 182개 시험 및 Ruff가 통과했다. 실제 LLM Gateway와 외부 모델의 SHADOW 호출은 Ubuntu 서버 검증 항목이다.
+Local evidence: OpenAI 호환·Responses Adapter와 parameter policy 집중 시험 20개, backend 전체 183개 시험 및 Ruff가 통과했다. 실제 OpenAI와 LLM Gateway 외부 모델의 SHADOW 호출은 Ubuntu 서버 검증 항목이다.
