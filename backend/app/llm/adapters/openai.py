@@ -38,6 +38,8 @@ class OpenAIResponsesAdapter(ExternalHttpAdapter):
             body["top_p"] = request.top_p
         if request.reasoning_effort is not None:
             body["reasoning"] = {"effort": request.reasoning_effort.lower()}
+        if request.service_tier != "DEFAULT":
+            body["service_tier"] = request.service_tier.lower()
         return (
             f"{self.endpoint}/responses",
             {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"},

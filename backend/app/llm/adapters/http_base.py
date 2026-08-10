@@ -49,21 +49,29 @@ class ExternalHttpAdapter(ABC):
     def generate_structured(self, request: LlmRequest, model_id: str) -> LlmResult:
         url, headers, body = self._request_parts(request, model_id)
         started = time.monotonic()
+        response_timeout_seconds = request.timeout_ms / 1000
+        http_timeout = httpx.Timeout(
+            response_timeout_seconds,
+            connect=min(3.0, response_timeout_seconds),
+        )
         try:
             if self._client is None:
-                with httpx.Client(timeout=request.timeout_ms / 1000) as client:
+                with httpx.Client(timeout=http_timeout) as client:
                     response = client.post(url, headers=headers, json=body)
             else:
                 response = self._client.post(
                     url,
                     headers=headers,
                     json=body,
-                    timeout=request.timeout_ms / 1000,
+                    timeout=http_timeout,
                 )
         except httpx.TimeoutException:
             return self._failure(request, "TIMED_OUT", started)
         except httpx.RequestError:
             return self._failure(request, "AMBIGUOUS", started)
+
+        if (time.monotonic() - started) * 1000 > request.timeout_ms:
+            return self._failure(request, "TIMED_OUT", started)
 
         provider_request_id = (
             response.headers.get("x-request-id")

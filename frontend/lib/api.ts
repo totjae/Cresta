@@ -347,6 +347,7 @@ export type LlmRoleRoute = {
   fallback_model_alias: string | null;
   execution_stage: "SHADOW";
   timeout_ms: number;
+  service_tier: "DEFAULT" | "PRIORITY" | "FLEX";
   max_attempts: number;
   daily_call_limit: number;
   daily_cost_limit_krw: string;
@@ -712,6 +713,8 @@ export const llmApi = {
       maxOutputTokens?: number | null;
       reasoningEffort?: "LOW" | "MEDIUM" | "HIGH" | null;
       seed?: number | null;
+      timeoutMs?: number;
+      serviceTier?: "DEFAULT" | "PRIORITY" | "FLEX";
     } = {},
   ) {
     return request<LlmRoleRoute>("/api/v1/ai/routes", {
@@ -723,7 +726,8 @@ export const llmApi = {
         primary_model_profile_id: modelProfileId,
         failure_policy: failurePolicy,
         fallback_model_profile_id: fallbackModelProfileId,
-        timeout_ms: 10000,
+        timeout_ms: parameters.timeoutMs ?? 30000,
+        service_tier: parameters.serviceTier ?? "DEFAULT",
         daily_call_limit: 100,
         daily_cost_limit_krw: "0",
         prompt_profile_id: promptProfileId,

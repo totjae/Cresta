@@ -433,3 +433,12 @@ Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 �
 - `LLM-PROVIDER-118`: 기본·예비 모델이 모두 실패하거나 정책이 `FAIL_STOP`이면 해당 역할을 실패로 종료하고 AI 판단에 의한 승인·주문을 생성하지 않는다. 신규매수는 `WAIT` 또는 `RISK_BLOCK`으로 제한한다.
 - `LLM-PROVIDER-119`: AI 실패 중에도 고정 손절, 비상정지와 장마감 청산 등 Cresta Guard의 규칙 기반 보호 기능은 독립적으로 계속 동작한다.
 - `LLM-PROVIDER-120`: 각 호출 이력에는 역할, 기본 모델, 예비 모델, 오류 코드, 실패 파라미터(확인 가능한 경우), fallback 시도 여부, 실제 사용 모델과 최종 `SUCCEEDED/FAIL_STOP` 결과를 저장한다. credential과 provider 원문 응답은 저장하지 않는다.
+
+### 역할별 응답 제한시간과 서비스 티어 (2026-08-10)
+
+- `LLM-PROVIDER-121`: `timeout_ms`는 연결 성공 시각이나 첫 토큰 시각이 아니라 최종 구조화 JSON 응답을 모두 수신할 때까지의 역할별 전체 응답 제한시간이다. 범위는 1–600초이고 신규 후보 기본값은 30초다. TCP/TLS 연결 단계는 이 값과 별도로 최대 3초로 제한한다.
+- `LLM-PROVIDER-122`: 현재 Adapter는 non-streaming 응답을 사용한다. 향후 streaming transport를 추가하더라도 Agent 판단은 완성된 JSON의 서버 schema 검증이 끝난 뒤에만 확정한다.
+- `LLM-PROVIDER-123`: 역할 route는 `DEFAULT`, `PRIORITY`, `FLEX` 서비스 티어를 저장한다. `DEFAULT`는 요청 필드를 생략하여 Provider의 Standard/Auto 정책을 따르고, 나머지는 Adapter가 소문자 provider 필드로 전달한다.
+- `LLM-PROVIDER-124`: 서비스 티어와 timeout은 역할 배정 version의 일부다. 후보 검증과 원자 활성화를 거쳐야 변경되며 기존 run과 route 이력은 당시 값을 보존한다.
+- `LLM-PROVIDER-125`: Provider 또는 모델이 티어를 지원하지 않아 실패하면 자동 보정하거나 다른 티어로 재전송하지 않는다. 기존 `FAIL_STOP` 또는 명시적 단일 `FAILOVER` 정책과 안전한 오류 이력을 적용한다.
+- `LLM-PROVIDER-126`: `FLEX` 선택 시 Console은 600초를 권장값으로 채우지만 사용자가 역할 특성에 맞게 1–600초 범위에서 명시적으로 변경할 수 있다.

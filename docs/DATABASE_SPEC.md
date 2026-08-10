@@ -287,3 +287,8 @@ market_snapshots(symbol, market, observed_at desc)
 - Migration `20260808_0019` converts legacy `fallback_policy=NONE` to `FAIL_STOP` and permits only `FAIL_STOP` or `FAILOVER`.
 - `fallback_model_profile_ids_json` remains the existing storage field but application validation permits zero models for `FAIL_STOP` and exactly one different validated model for `FAILOVER`.
 - A fallback attempt creates a second `llm_invocations` row for the same stage; invocation rows and safe error codes remain queryable after the run finishes.
+
+## LLM route service policy migration (2026-08-10)
+
+- Migration `20260810_0020` adds non-null `llm_role_routes.service_tier` with `DEFAULT`, `PRIORITY`, and `FLEX` values.
+- The same migration widens `timeout_ms` to 1–600 seconds and changes only the server default for newly created routes to 30 seconds. Historical values are not rewritten.

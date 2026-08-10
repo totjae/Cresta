@@ -1022,7 +1022,11 @@ class LlmRoleRoute(Base):
             "fallback_policy IN ('FAIL_STOP','FAILOVER')",
             name="ck_llm_role_routes_foundation_fallback",
         ),
-        CheckConstraint("timeout_ms BETWEEN 1000 AND 60000", name="ck_llm_role_routes_timeout"),
+        CheckConstraint("timeout_ms BETWEEN 1000 AND 600000", name="ck_llm_role_routes_timeout"),
+        CheckConstraint(
+            "service_tier IN ('DEFAULT','PRIORITY','FLEX')",
+            name="ck_llm_role_routes_service_tier",
+        ),
         CheckConstraint("max_attempts = 1", name="ck_llm_role_routes_attempts"),
         CheckConstraint(
             "temperature_override IS NULL OR "
@@ -1065,7 +1069,8 @@ class LlmRoleRoute(Base):
         String(32), nullable=False, default="FAIL_STOP"
     )
     execution_stage: Mapped[str] = mapped_column(String(24), nullable=False, default="SHADOW")
-    timeout_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=10000)
+    timeout_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=30000)
+    service_tier: Mapped[str] = mapped_column(String(16), nullable=False, default="DEFAULT")
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     daily_call_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     daily_cost_limit_krw: Mapped[Decimal] = mapped_column(

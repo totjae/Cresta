@@ -30,7 +30,8 @@ class LlmRequest(ContractModel):
     input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     messages: list[dict[str, Any]]
     output_json_schema: dict[str, Any]
-    timeout_ms: int = Field(ge=1000, le=60000)
+    timeout_ms: int = Field(ge=1000, le=600000)
+    service_tier: Literal["DEFAULT", "PRIORITY", "FLEX"] = "DEFAULT"
     max_output_tokens: int = Field(gt=0, le=32768)
     temperature: float = Field(ge=0, le=2)
     top_p: float | None = Field(default=None, ge=0, le=1)

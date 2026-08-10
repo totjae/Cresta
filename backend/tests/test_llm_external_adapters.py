@@ -12,7 +12,7 @@ from app.llm.adapters.openai import OpenAIResponsesAdapter
 from app.llm.contracts import LlmRequest
 
 
-def _request() -> LlmRequest:
+def _request(service_tier: str = "DEFAULT") -> LlmRequest:
     return LlmRequest(
         invocation_id=uuid7(),
         role="TECHNICAL_SCOUT",
@@ -31,6 +31,7 @@ def _request() -> LlmRequest:
             "additionalProperties": False,
         },
         timeout_ms=3000,
+        service_tier=service_tier,
         max_output_tokens=256,
         temperature=0,
         top_p=0.9,
@@ -69,6 +70,7 @@ def test_openai_responses_contract_and_usage_normalization() -> None:
     assert outbound.url == "https://api.openai.com/v1/responses"
     assert outbound.headers["authorization"] == "Bearer openai-secret"
     assert body["store"] is False
+    assert "service_tier" not in body
     assert body["text"]["format"]["type"] == "json_schema"
     assert result.status == "SUCCEEDED"
     assert result.output_json == {"status": "OK"}
@@ -151,6 +153,43 @@ def test_gemini_generate_content_contract_and_usage_normalization() -> None:
 
 
 @pytest.mark.parametrize(
+    ("adapter_factory", "model_id"),
+    [
+        (
+            lambda client: OpenAIResponsesAdapter(
+                endpoint="https://api.openai.com/v1", api_key="secret", client=client
+            ),
+            "gpt-test",
+        ),
+        (
+            lambda client: AnthropicMessagesAdapter(
+                endpoint="https://api.anthropic.com/v1", api_key="secret", client=client
+            ),
+            "claude-test",
+        ),
+        (
+            lambda client: GeminiGenerateContentAdapter(
+                endpoint="https://generativelanguage.googleapis.com/v1beta",
+                api_key="secret",
+                client=client,
+            ),
+            "gemini-test",
+        ),
+    ],
+)
+def test_native_adapters_forward_explicit_service_tier(adapter_factory, model_id: str) -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(503, json={"error": "fixture"})
+
+    adapter = adapter_factory(httpx.Client(transport=httpx.MockTransport(handler)))
+    adapter.generate_structured(_request("PRIORITY"), model_id)
+    assert captured["body"]["service_tier"] == "priority"
+
+
+@pytest.mark.parametrize(
     ("status_code", "expected"),
     [(429, "RATE_LIMITED"), (500, "PROVIDER_ERROR"), (401, "PROVIDER_ERROR")],
 )
@@ -210,3 +249,33 @@ def test_external_adapter_timeout_and_invalid_json_are_normalized() -> None:
     result = invalid_adapter.generate_structured(_request(), "gpt-test")
     assert result.status == "INVALID_OUTPUT"
     assert result.raw_response_hash is not None
+
+
+def test_completed_http_response_past_total_deadline_is_discarded(monkeypatch) -> None:
+    ticks = iter([0.0, 1.1, 1.1])
+    monkeypatch.setattr("app.llm.adapters.http_base.time.monotonic", lambda: next(ticks))
+    adapter = OpenAIResponsesAdapter(
+        endpoint="https://api.openai.com/v1",
+        api_key="secret",
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(
+                    200,
+                    json={
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [
+                                    {"type": "output_text", "text": '{"status":"OK"}'}
+                                ],
+                            }
+                        ]
+                    },
+                )
+            )
+        ),
+    )
+    request = _request().model_copy(update={"timeout_ms": 1000})
+    result = adapter.generate_structured(request, "gpt-test")
+    assert result.status == "TIMED_OUT"
+    assert result.output_json is None

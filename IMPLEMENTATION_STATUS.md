@@ -65,3 +65,10 @@
 - 외부 Provider 요청에서 system prompt와 구조화 user input 분리, 응답 schema·usage·request ID 실서버 확인
 - timeout·provider 오류 시 FAIL_STOP과 단일 FAILOVER 이력, 프롬프트 원문 비노출 확인
 - 이후 뉴스·공시 source Adapter와 Guard·승인·주문 생성 연결
+
+## 2026-08-10 역할별 LLM 서비스 정책
+
+- 역할 후보에서 전체 구조화 응답 timeout을 1–600초로 설정하며 신규 기본값은 30초다.
+- `DEFAULT`, `PRIORITY`, `FLEX` 서비스 티어를 route version에 저장하고 외부 Adapter 요청에 전달한다.
+- 진단 run 유효시간은 선택된 route timeout 합계와 안전 여유시간을 반영하여 10초 경계 응답이 run 자체의 1분 만료와 충돌하지 않도록 조정했다.
+- 현재 전송은 non-streaming이며 최종 JSON을 받은 뒤 서버 계약 검증을 통과해야만 stage 성공으로 채택한다.

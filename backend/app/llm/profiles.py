@@ -849,6 +849,7 @@ def create_route(
     seed_override: int | None,
     reason: str,
     correlation_id: str,
+    service_tier: str = "DEFAULT",
 ) -> LlmRoleRoute:
     if role not in ROLES:
         raise LlmProfileError("ROLE_UNSUPPORTED")
@@ -886,6 +887,7 @@ def create_route(
             separators=(",", ":"),
         ),
         timeout_ms=timeout_ms,
+        service_tier=service_tier,
         daily_call_limit=daily_call_limit,
         daily_cost_limit_krw=daily_cost_limit_krw,
         prompt_version=resolved_prompt_version,
@@ -911,6 +913,7 @@ def create_route(
             "execution_stage": "SHADOW",
             "failure_policy": failure_policy,
             "fallback_configured": fallback_model_profile_id is not None,
+            "service_tier": service_tier,
         },
     )
     db.commit()
@@ -965,6 +968,23 @@ def validate_route(
             raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED") from exc
     if provider.adapter_type != "MOCK" and not provider.credential_secret_ref:
         raise LlmProfileError("PROVIDER_CREDENTIAL_REQUIRED")
+    tier_adapters = [provider.adapter_type, *(
+        get_provider(db, user.id, item.provider_profile_id).adapter_type
+        for item in fallback_models
+    )]
+    if route.service_tier == "PRIORITY" and any(
+        adapter_type == "MOCK" for adapter_type in tier_adapters
+    ):
+        raise LlmProfileError("SERVICE_TIER_UNSUPPORTED")
+    if route.service_tier == "FLEX" and any(
+        adapter_type not in {
+            "OPENAI_RESPONSES",
+            "GEMINI_GENERATE_CONTENT",
+            "OPENAI_COMPATIBLE",
+        }
+        for adapter_type in tier_adapters
+    ):
+        raise LlmProfileError("SERVICE_TIER_UNSUPPORTED")
     try:
         provider_registry.resolve(
             provider.adapter_type,

@@ -366,3 +366,9 @@ POST /api/v1/ai/providers/{provider_id}/credential
 - `API-DEV-002`: `/auth/reauth/totp` 기반시설은 향후 선택적 고위험 행동 재인증을 위해 유지할 수 있으나 현재 Console 흐름에서는 사용하지 않는다.
 - `API-DEV-003`: API-044·096·131·134·140·142의 TOTP proof 부분은 서비스 완성 후 재도입 전까지 보류한다. 변경 사유, validation, idempotency, 원자성, 상태 gate와 감사 요구는 유지한다.
 - `API-DEV-004`: Provider 삭제 후 `/ai/providers`와 `/ai/models`는 tombstone 대상을 제외하고, `/ai/routes`는 보존된 `SUPERSEDED` 이력을 계속 반환한다. `/ai/role-assignments`는 삭제된 Provider route를 현재 배정이나 후보로 반환하지 않는다.
+
+## LLM route timeout and service tier (2026-08-10)
+
+- `POST /api/v1/ai/routes` accepts `timeout_ms` from `1000` through `600000` and `service_tier` as `DEFAULT`, `PRIORITY`, or `FLEX`.
+- `GET /api/v1/ai/routes` and role-assignment responses return both fields for every immutable route version.
+- New requests default to 30 seconds and `DEFAULT`; existing rows retain their configured timeout and receive `DEFAULT` during migration.

@@ -209,9 +209,10 @@ def test_mock_provider_model_and_shadow_route_lifecycle(client: TestClient, db: 
             "schema_version": "1.0",
             "role": "TECHNICAL_SCOUT",
             "primary_model_profile_id": model["id"],
-            "timeout_ms": 10000,
+            "timeout_ms": 600000,
             "daily_call_limit": 100,
             "daily_cost_limit_krw": "0",
+            "service_tier": "DEFAULT",
             "prompt_version": "technical-shadow-v1",
             "output_schema_version": "agent-assessment-v1",
             "reason": "foundation SHADOW 계약 검증",
@@ -221,6 +222,8 @@ def test_mock_provider_model_and_shadow_route_lifecycle(client: TestClient, db: 
     route = route_response.json()
     assert route["execution_stage"] == "SHADOW"
     assert route["failure_policy"] == "FAIL_STOP"
+    assert route["timeout_ms"] == 600000
+    assert route["service_tier"] == "DEFAULT"
     assert route["fallback_model_profile_id"] is None
     validated_route = client.post(f"/api/v1/ai/routes/{route['id']}/validate", headers=headers)
     assert validated_route.status_code == 200, validated_route.text

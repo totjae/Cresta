@@ -41,6 +41,8 @@ class GeminiGenerateContentAdapter(ExternalHttpAdapter):
         if request.seed is not None:
             generation["seed"] = request.seed
         body: dict[str, Any] = {"contents": contents, "generationConfig": generation}
+        if request.service_tier != "DEFAULT":
+            body["service_tier"] = request.service_tier.lower()
         if system_parts:
             body["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
         return (

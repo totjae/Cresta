@@ -437,3 +437,9 @@ Local evidence: route 계약의 기본 `FAIL_STOP`, 서로 다른 검증 모델 
 Local evidence: 외부 Adapter fixture로 4 Scout·Core 유효 응답의 stage 채택, server-owned provenance, strict-schema 필수 필드, request ID·usage 영속화, 계약 오류의 `INVALID_OUTPUT/FAIL_STOP` 및 주문 0건을 검증했다. backend 168개 회귀 시험·Ruff, frontend TypeScript·11개 component 시험·production build가 통과했다. 실제 유료 Provider의 요청·응답은 Ubuntu 서버에서 별도 검증한다.
 
 - `T-AGENT-EXT-005`: Adapter가 정규화한 terminal 상태와 `LLM_*` 오류는 `AGENT_LLM_FAIL_STOP` stage 처리 후에도 그대로 보존되고, 완료되지 않은 invocation만 `AGENT_INVOCATION_OUTCOME_UNKNOWN`으로 격리되는지 검증한다.
+
+# 역할별 timeout·service tier 시험 (2026-08-10)
+
+- `T-LLM-ROUTE-006`: route API가 1–600초 timeout과 `DEFAULT/PRIORITY/FLEX`를 검증·영속화·조회하고 migration이 기존 route를 `DEFAULT`로 보존하는지 검증한다.
+- `T-LLM-ADAPTER-007`: `DEFAULT`는 service tier 필드를 생략하고 명시적 `PRIORITY/FLEX`는 native/compatible Adapter 요청에 소문자로 전달되는지, 완성 응답이라도 전체 제한시간을 넘으면 결과를 폐기하는지 fixture로 검증한다.
+- `T-LLM-UI-008`: 역할별 배정에서 timeout과 tier를 후보에 저장하고 route 요약에서 확인할 수 있으며 `FLEX` 선택 시 600초 권장값이 적용되는지 검증한다.

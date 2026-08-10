@@ -29,6 +29,8 @@ class OpenAICompatibleAdapter(ExternalHttpAdapter):
             body["top_p"] = request.top_p
         if request.seed is not None:
             body["seed"] = request.seed
+        if request.service_tier != "DEFAULT":
+            body["service_tier"] = request.service_tier.lower()
         return (
             f"{self.endpoint}{self.chat_path}",
             {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"},

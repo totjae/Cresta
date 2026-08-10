@@ -32,6 +32,8 @@ class AnthropicMessagesAdapter(ExternalHttpAdapter):
             body["system"] = "\n\n".join(str(item) for item in system_parts)
         if request.top_p is not None:
             body["top_p"] = request.top_p
+        if request.service_tier != "DEFAULT":
+            body["service_tier"] = request.service_tier.lower()
         return (
             f"{self.endpoint}/messages",
             {

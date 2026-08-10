@@ -306,7 +306,7 @@ describe("execution policy settings", () => {
     const roles = ["TECHNICAL_SCOUT", "NEWS_DISCLOSURE_SCOUT", "MARKET_SECTOR_SCOUT", "POSITION_RISK_SCOUT", "CORE"];
     const route = (role: string, index: number, state = "VALIDATED") => ({
       id: `assignment-route-${index}`, role, primary_model_profile_id: "model-shared", primary_model_alias: "shared-model",
-      failure_policy: "FAIL_STOP", fallback_model_profile_id: null, fallback_model_alias: null, execution_stage: "SHADOW", timeout_ms: 10000, max_attempts: 1,
+      failure_policy: "FAIL_STOP", fallback_model_profile_id: null, fallback_model_alias: null, execution_stage: "SHADOW", timeout_ms: 10000, service_tier: "DEFAULT", max_attempts: 1,
       daily_call_limit: 100, daily_cost_limit_krw: "0", prompt_version: `${role}-v1`,
       output_schema_version: role === "CORE" ? "agent-core-v1" : "agent-assessment-v1",
       temperature_override: "0.1", top_p_override: null, max_output_tokens_override: 512,
@@ -343,6 +343,10 @@ describe("execution policy settings", () => {
     await user.click(await screen.findByRole("button", { name: /전략·설정/ }));
     expect(await screen.findByText("역할별 현재 모델")).toBeInTheDocument();
     expect(screen.getByText("0/5 ACTIVE")).toBeInTheDocument();
+    expect(screen.getAllByText(/timeout 10s/)).toHaveLength(5);
+    const timeoutInputs = screen.getAllByLabelText(/^전체 응답 제한\(초\)/);
+    expect(screen.getAllByLabelText("서비스 티어")[0]).toHaveValue("DEFAULT");
+    expect(timeoutInputs[0]).toHaveValue(30);
     await user.click(screen.getByRole("button", { name: "현재 배정 적용" }));
     expect(await screen.findByRole("dialog", { name: "역할별 모델 배정 적용" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "5개 역할 적용" }));
@@ -404,7 +408,7 @@ describe("Agent Worker v2", () => {
     const roles = ["TECHNICAL_SCOUT", "NEWS_DISCLOSURE_SCOUT", "MARKET_SECTOR_SCOUT", "POSITION_RISK_SCOUT", "CORE"];
     const routes = roles.map((role, index) => ({
       id: `route-${index}`, role, primary_model_profile_id: "model-1", primary_model_alias: "agent-runtime-v1",
-      failure_policy: "FAIL_STOP", fallback_model_profile_id: null, fallback_model_alias: null, execution_stage: "SHADOW", timeout_ms: 10000, max_attempts: 1,
+      failure_policy: "FAIL_STOP", fallback_model_profile_id: null, fallback_model_alias: null, execution_stage: "SHADOW", timeout_ms: 10000, service_tier: "DEFAULT", max_attempts: 1,
       daily_call_limit: 100, daily_cost_limit_krw: "0", prompt_version: `${role}-v1`,
       output_schema_version: "agent-assessment-v1", state: "ACTIVE", reason: "fixture",
       validated_at: "2026-08-06T01:00:00Z", version: 2, created_at: "2026-08-06T00:00:00Z",

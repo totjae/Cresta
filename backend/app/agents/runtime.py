@@ -291,6 +291,7 @@ def _invoke_once(
             else AgentScoutModelOutput.model_json_schema()
         ),
         timeout_ms=binding.route.timeout_ms,
+        service_tier=binding.route.service_tier,
         max_output_tokens=binding.route.max_output_tokens_override or model.max_output_tokens,
         temperature=float(
             binding.route.temperature_override
@@ -561,6 +562,8 @@ def create_diagnostic_run(
                 "seed": binding.route.seed_override
                 if binding.route.seed_override is not None
                 else binding.model.seed,
+                "timeout_ms": binding.route.timeout_ms,
+                "service_tier": binding.route.service_tier,
             },
         }
         for role, binding in sorted(bindings.items())
@@ -593,7 +596,13 @@ def create_diagnostic_run(
         route_versions_json=_canonical(route_versions),
         idempotency_key=idempotency_key,
         state="CREATED",
-        valid_until=observed + timedelta(minutes=1),
+        valid_until=observed
+        + timedelta(
+            milliseconds=max(
+                60000,
+                sum(binding.route.timeout_ms for binding in bindings.values()) + 30000,
+            )
+        ),
     )
     db.add(run)
     try:

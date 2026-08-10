@@ -647,7 +647,8 @@ class LlmRouteCreateRequest(StrictModel):
     primary_model_profile_id: str = Field(min_length=36, max_length=36)
     failure_policy: Literal["FAIL_STOP", "FAILOVER"] = "FAIL_STOP"
     fallback_model_profile_id: str | None = Field(default=None, min_length=36, max_length=36)
-    timeout_ms: int = Field(default=10000, ge=1000, le=60000)
+    timeout_ms: int = Field(default=30000, ge=1000, le=600000)
+    service_tier: Literal["DEFAULT", "PRIORITY", "FLEX"] = "DEFAULT"
     daily_call_limit: int = Field(default=100, ge=1, le=100000)
     daily_cost_limit_krw: Decimal = Field(default=Decimal(0), ge=0)
     prompt_profile_id: str | None = Field(default=None, min_length=36, max_length=36)
@@ -684,6 +685,7 @@ class LlmRouteResponse(StrictModel):
     fallback_model_alias: str | None
     execution_stage: Literal["SHADOW"]
     timeout_ms: int
+    service_tier: Literal["DEFAULT", "PRIORITY", "FLEX"]
     max_attempts: int
     daily_call_limit: int
     daily_cost_limit_krw: Decimal
