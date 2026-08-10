@@ -28,13 +28,13 @@
 | 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | 인증·snapshot·worker는 실서버 통과; 주문 Adapter·FIFO polling·UNKNOWN 대조·계좌 event gate·Web MOCK 1주 진단 API 자동시험 통과, 실제 모의주문 미검증 |
 | Guard 리스크·비상정지 | `docs/GUARD_RISK_SPEC.md` | 명세 완료 | BUY·부분/전량매도·고정손절 1차 평가 규칙과 기능 gate 명세 완료; 구현·모의시험 미착수 |
 | 사용자 설정·적용 | `docs/CONFIGURATION_SPEC.md` | 구현 중 | 실행 권한 버전과 Provider/Model/역할별 배정 UI/API 구현; Guard 1차 위험 설정·entry order amount·실행 단계 계약 완료, 위험 설정 UI/API 미구현 |
-| Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, 감시 종목·Paper 조회·Broker 진단·실행 권한, Provider 내부 모델 관리·역할별 모델·프롬프트 배정과 parameter override, scheduler·Scout provenance 구현; 승인 카드·Guard 상세 결과 미구현 |
+| Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, 감시 종목·Paper 조회·Broker 진단·실행 권한, Provider 내부 모델 관리·역할별 모델·프롬프트·단일 FAILOVER 배정, 호출 이력과 scheduler·Scout provenance 구현; 승인 카드·Guard 상세 결과 미구현 |
 | 인증·세션·TOTP | `docs/SECURITY_SPEC.md` | 구현 중 | 로그인 TOTP·세션·CSRF·실패제한 구현; 현재 개발 단계의 로그인 이후 설정·Provider·역할 배정·MOCK 시험 재인증은 제거하고 향후 위험 분석 시 선택적 재도입 예정, 복구·운영 검증 미완료 |
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 감시 종목·키움 `0B`·`0D`, 1분봉과 v2 VWAP·SMA5·상대 거래량·실현 변동성·고점 하락률·spread 영속화 로컬 검증 완료; 체결강도와 v2 실제 장중 수신 미검증 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 구현 중 | 불변 `scout-input-v1`과 `deterministic-mock-v2`, KST 정기 TRADING scheduler·SHADOW 인계 구현; 실제 AI provider와 보유 포지션 판단 미구현 |
-| 다중 에이전트 오케스트레이션 | `docs/MULTI_AGENT_ORCHESTRATION_SPEC.md` | 구현 중 | 비동기 DIAGNOSTIC admission, Intel·Verify·4개 Scout·Core stage queue, claim·lease·fencing·만료 복구, 외부 Provider SHADOW invocation, Core WAIT·주문 0건 구현; 실제 API 호출은 서버 검증 필요 |
-| LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | 40개 Provider template, 35개 단일-key 등록, Native·OpenAI-compatible Adapter, 모델 동기화·역할 후보 검증·TOTP 삭제와 역할별 불변 Prompt Profile 구현; 복합 인증 5종과 실제 API 호출 검증 미완료 |
-| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·Scout 입력, LLM Foundation·Agent Runtime, 역할 배정·Agent lease·Provider tombstone과 Prompt Profile `20260808_0018` 로컬 적용·순환 통과; 실서버 PostgreSQL 적용 미검증 |
+| 다중 에이전트 오케스트레이션 | `docs/MULTI_AGENT_ORCHESTRATION_SPEC.md` | 구현 중 | 비동기 DIAGNOSTIC admission, Intel·Verify·4개 Scout·Core stage queue, claim·lease·fencing·만료 복구, 외부 Provider SHADOW invocation, 역할별 FAIL_STOP·단일 FAILOVER와 Core WAIT·주문 0건 구현; 실제 API 호출은 서버 검증 필요 |
+| LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | 40개 Provider template, 35개 단일-key 등록, Native·OpenAI-compatible Adapter, 모델 동기화·역할 후보·Prompt·FAIL_STOP/단일 FAILOVER와 호출 이력 구현; 복합 인증 5종과 실제 API 호출 검증 미완료 |
+| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·Scout 입력, LLM Foundation·Agent Runtime, 역할 배정·Agent lease·Provider tombstone·Prompt와 실패 정책 `20260808_0019` 로컬 적용·순환 통과; 실서버 PostgreSQL 적용 미검증 |
 | 판단 실행·승인 | `docs/DECISION_EXECUTION_SPEC.md` | 구현 중 | DIAGNOSTIC/TRADING 경계, scheduler 인계, 멱등 SHADOW execution, 불변 Guard 평가와 안전 차단 구현; 승인·주문 생성은 미구현 |
 | 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 부팅 Compose 조정 unit 구현; 2026-08-05 Ubuntu 재부팅 후 9초 내 전체 health·worker READY 복구 통과, 백업·경보·복구훈련 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 명세 완료 | 키움 출구 IP·MOCK 인증·시세 실서버 확인 반영, 계좌·주문 외부 통합 게이트 유지 |
@@ -59,9 +59,9 @@
 
 ## 6. 다음 구현 작업
 
-다음 작업은 역할별 Prompt Profile을 실제 외부 Provider SHADOW 호출로 서버 검증하는 단계다.
+다음 작업은 역할별 Prompt와 실패 정책을 실제 외부 Provider SHADOW 호출로 서버 검증하는 단계다.
 
 - PostgreSQL에 `20260808_0018` 적용 후 역할별 Prompt Profile 생성·검증·후보 연결 확인
 - 외부 Provider 요청에서 system prompt와 구조화 user input 분리, 응답 schema·usage·request ID 확인
-- timeout·ambiguous 시 stage fail-closed 및 프롬프트 원문 비노출 확인
+- timeout·provider 오류 시 FAIL_STOP과 단일 FAILOVER 이력, 프롬프트 원문 비노출 확인
 - 이후 뉴스·공시 source Adapter와 Guard·승인·주문 생성 연결

@@ -67,6 +67,20 @@ export type DecisionData = {
   created_at: string;
 };
 
+export type AgentInvocationData = {
+  invocation_id: string;
+  attempt_number: number;
+  requested_model_profile_id: string | null;
+  state: string;
+  actual_provider: string | null;
+  actual_model: string | null;
+  latency_ms: number;
+  validation_status: string;
+  error_code: string | null;
+  fallback_path: string[];
+  created_at: string;
+};
+
 export type AgentStageData = {
   stage_run_id: string;
   role: string;
@@ -83,15 +97,8 @@ export type AgentStageData = {
   fencing_token: number;
   lease_expires_at: string | null;
   timeout_at: string | null;
-  invocation: null | {
-    invocation_id: string;
-    state: string;
-    actual_provider: string | null;
-    actual_model: string | null;
-    latency_ms: number;
-    validation_status: string;
-    error_code: string | null;
-  };
+  invocation: AgentInvocationData | null;
+  invocations: AgentInvocationData[];
   started_at: string | null;
   completed_at: string | null;
 };
@@ -334,7 +341,9 @@ export type LlmRoleRoute = {
   role: string;
   primary_model_profile_id: string;
   primary_model_alias: string;
-  fallback_policy: "NONE";
+  failure_policy: "FAIL_STOP" | "FAILOVER";
+  fallback_model_profile_id: string | null;
+  fallback_model_alias: string | null;
   execution_stage: "SHADOW";
   timeout_ms: number;
   max_attempts: number;
@@ -694,6 +703,8 @@ export const llmApi = {
     modelProfileId: string,
     promptProfileId: string,
     reason: string,
+    failurePolicy: "FAIL_STOP" | "FAILOVER",
+    fallbackModelProfileId: string | null,
     parameters: {
       temperature?: string | null;
       topP?: string | null;
@@ -709,6 +720,8 @@ export const llmApi = {
         schema_version: "1.0",
         role,
         primary_model_profile_id: modelProfileId,
+        failure_policy: failurePolicy,
+        fallback_model_profile_id: fallbackModelProfileId,
         timeout_ms: 10000,
         daily_call_limit: 100,
         daily_cost_limit_krw: "0",

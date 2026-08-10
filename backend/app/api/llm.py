@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.orm import Session
 
@@ -109,6 +111,10 @@ def _model_response(model: LlmModelProfile) -> LlmModelResponse:
 
 def _route_response(db: Session, owner_id: str, route: LlmRoleRoute) -> LlmRouteResponse:
     model = get_model_for_history(db, owner_id, route.primary_model_profile_id)
+    fallback_ids = json.loads(route.fallback_model_profile_ids_json)
+    fallback_model = (
+        get_model_for_history(db, owner_id, fallback_ids[0]) if fallback_ids else None
+    )
     prompt = (
         get_prompt(db, owner_id=owner_id, prompt_id=route.prompt_profile_id)
         if route.prompt_profile_id
@@ -119,7 +125,9 @@ def _route_response(db: Session, owner_id: str, route: LlmRoleRoute) -> LlmRoute
         role=route.role,
         primary_model_profile_id=route.primary_model_profile_id,
         primary_model_alias=model.alias,
-        fallback_policy=route.fallback_policy,
+        failure_policy=route.fallback_policy,
+        fallback_model_profile_id=fallback_model.id if fallback_model else None,
+        fallback_model_alias=fallback_model.alias if fallback_model else None,
         execution_stage=route.execution_stage,
         timeout_ms=route.timeout_ms,
         max_attempts=route.max_attempts,
@@ -587,6 +595,8 @@ def post_route(
         user=context.user,
         role=payload.role,
         primary_model_profile_id=payload.primary_model_profile_id,
+        failure_policy=payload.failure_policy,
+        fallback_model_profile_id=payload.fallback_model_profile_id,
         timeout_ms=payload.timeout_ms,
         daily_call_limit=payload.daily_call_limit,
         daily_cost_limit_krw=payload.daily_cost_limit_krw,

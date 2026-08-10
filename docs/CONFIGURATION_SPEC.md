@@ -192,10 +192,10 @@ configuration_change:
 
 | ID | 요구사항 |
 | --- | --- |
-| CFG-090 | 사용자는 Web UI에서 agent 역할별 primary model, 승인된 fallback, timeout, 호출·비용 한도와 활성 여부를 조회·설정할 수 있다. |
+| CFG-090 | 사용자는 Web UI에서 agent 역할별 primary model과 `FAIL_STOP` 또는 `FAILOVER`를 설정한다. 기본값은 `FAIL_STOP`이며 `FAILOVER`에는 검증된 예비 모델을 최대 1개만 지정할 수 있다. |
 | CFG-091 | Provider credential은 일반 설정 payload에 포함하지 않고 별도 write-only 보안 흐름으로 관리한다. |
 | CFG-092 | DAG, prompt, model profile과 role route는 버전·적용 범위·활성 상태를 가지며 판단에 사용된 최종 version ID를 저장한다. |
-| CFG-093 | Core fallback 확대, 외부 데이터 전송 확대, provider endpoint 변경과 route 활성화는 영향 미리보기·변경 사유·TOTP 재인증을 요구한다. |
+| CFG-093 | 역할의 `FAILOVER` 활성화, 외부 데이터 전송 확대, provider endpoint 변경과 route 활성화는 영향 미리보기와 변경 사유를 요구한다. 현재 개발 단계의 인증은 CFG-DEV-001~002를 따른다. |
 | CFG-094 | model discovery 결과나 provider 연결 성공은 route 활성화로 간주하지 않으며 schema fixture와 회귀평가를 통과한 `VALIDATED` route만 활성화할 수 있다. |
 | CFG-095 | 새 agent·provider·model·prompt는 SHADOW가 기본이며 실행 권한의 `AUTOMATIC` 설정만으로 활성 판단 경로로 승격되지 않는다. |
 | CFG-096 | 모델 등록과 역할 배정을 분리한다. 등록된 하나의 model profile을 여러 역할에서 선택할 수 있으며 역할마다 같은 model profile을 복제 생성하지 않는다. |

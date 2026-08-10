@@ -71,6 +71,8 @@ class RouteBinding:
     route: LlmRoleRoute
     model: LlmModelProfile
     provider: LlmProviderProfile
+    fallback_model: LlmModelProfile | None = None
+    fallback_provider: LlmProviderProfile | None = None
 
 
 def _canonical(value: object) -> str:
@@ -89,20 +91,34 @@ def _load_routes(
     bindings: dict[str, RouteBinding] = {}
     for role in ROUTE_ROLES:
         route = db.get(LlmRoleRoute, route_ids[role])
+        try:
+            fallback_ids = json.loads(route.fallback_model_profile_ids_json) if route else []
+        except (TypeError, json.JSONDecodeError):
+            fallback_ids = None
         if (
             route is None
             or route.owner_id != owner_id
             or route.role != role
             or route.state not in {"VALIDATED", "ACTIVE"}
             or route.execution_stage != "SHADOW"
-            or route.fallback_policy != "NONE"
+            or route.fallback_policy not in {"FAIL_STOP", "FAILOVER"}
             or route.max_attempts != 1
+            or not isinstance(fallback_ids, list)
+            or len(fallback_ids) > 1
+            or (route.fallback_policy == "FAIL_STOP" and fallback_ids)
+            or (route.fallback_policy == "FAILOVER" and len(fallback_ids) != 1)
             or route.output_schema_version
             != ("agent-core-v1" if role == "CORE" else "agent-assessment-v1")
         ):
             raise AgentRuntimeError("AGENT_ROUTE_NOT_READY")
         model = db.get(LlmModelProfile, route.primary_model_profile_id)
         provider = db.get(LlmProviderProfile, model.provider_profile_id) if model else None
+        fallback_model = db.get(LlmModelProfile, fallback_ids[0]) if fallback_ids else None
+        fallback_provider = (
+            db.get(LlmProviderProfile, fallback_model.provider_profile_id)
+            if fallback_model
+            else None
+        )
         prompt = (
             db.get(LlmPromptProfile, route.prompt_profile_id)
             if route.prompt_profile_id
@@ -117,6 +133,21 @@ def _load_routes(
             or provider.deleted_at is not None
             or (provider.adapter_type != "MOCK" and not provider.credential_secret_ref)
             or (
+                fallback_ids
+                and (
+                    fallback_model is None
+                    or fallback_model.state != "VALIDATED"
+                    or fallback_provider is None
+                    or fallback_provider.owner_id != owner_id
+                    or fallback_provider.state != "VALIDATED"
+                    or fallback_provider.deleted_at is not None
+                    or (
+                        fallback_provider.adapter_type != "MOCK"
+                        and not fallback_provider.credential_secret_ref
+                    )
+                )
+            )
+            or (
                 route.prompt_profile_id is not None
                 and (
                     prompt is None
@@ -128,14 +159,21 @@ def _load_routes(
         ):
             raise AgentRuntimeError("AGENT_ROUTE_NOT_READY")
         try:
-            provider_registry.resolve(
-                provider.adapter_type,
-                endpoint=provider.endpoint,
-                credential=("route-check" if provider.adapter_type != "MOCK" else None),
-            )
+            for checked_provider in (provider, fallback_provider):
+                if checked_provider is None:
+                    continue
+                provider_registry.resolve(
+                    checked_provider.adapter_type,
+                    endpoint=checked_provider.endpoint,
+                    credential=(
+                        "route-check" if checked_provider.adapter_type != "MOCK" else None
+                    ),
+                )
         except AdapterNotImplementedError as exc:
             raise AgentRuntimeError("AGENT_ADAPTER_NOT_ALLOWED") from exc
-        bindings[role] = RouteBinding(route, model, provider)
+        bindings[role] = RouteBinding(
+            route, model, provider, fallback_model, fallback_provider
+        )
     return bindings
 
 
@@ -187,26 +225,29 @@ def _complete_stage(
     stage.completed_at = now
 
 
-def _invoke_mock(
+def _invoke_once(
     db: Session,
     *,
     stage: AgentStageRun,
     binding: RouteBinding,
+    model: LlmModelProfile,
+    provider: LlmProviderProfile,
     role_input: dict[str, object],
     now: datetime,
-) -> None:
+) -> bool:
     stage.state = "RUNNING"
     stage.started_at = now
     invocation = LlmInvocation(
         stage_run_id=stage.id,
-        requested_provider_profile_id=binding.provider.id,
-        requested_model_profile_id=binding.model.id,
+        requested_provider_profile_id=provider.id,
+        requested_model_profile_id=model.id,
         state="RUNNING",
         input_hash=stage.input_hash,
     )
     db.add(invocation)
     db.flush()
-    stage.invocation_id = invocation.id
+    if stage.invocation_id is None:
+        stage.invocation_id = invocation.id
     prompt = (
         db.get(LlmPromptProfile, binding.route.prompt_profile_id)
         if binding.route.prompt_profile_id
@@ -227,53 +268,63 @@ def _invoke_mock(
     request = LlmRequest(
         invocation_id=invocation.id,
         role=stage.role,
-        model_profile_id=binding.model.id,
+        model_profile_id=model.id,
         prompt_version=binding.route.prompt_version,
         input_schema_version="agent-runtime-input-v1",
         input_hash=stage.input_hash,
         messages=messages,
         output_json_schema={"type": "object"},
         timeout_ms=binding.route.timeout_ms,
-        max_output_tokens=binding.route.max_output_tokens_override
-        or binding.model.max_output_tokens,
+        max_output_tokens=binding.route.max_output_tokens_override or model.max_output_tokens,
         temperature=float(
             binding.route.temperature_override
             if binding.route.temperature_override is not None
-            else binding.model.temperature
+            else model.temperature
         ),
         top_p=float(
             binding.route.top_p_override
             if binding.route.top_p_override is not None
-            else binding.model.top_p
+            else model.top_p
         )
-        if (binding.route.top_p_override is not None or binding.model.top_p is not None)
+        if (binding.route.top_p_override is not None or model.top_p is not None)
         else None,
-        reasoning_effort=binding.route.reasoning_effort_override
-        or binding.model.reasoning_effort,
+        reasoning_effort=binding.route.reasoning_effort_override or model.reasoning_effort,
         seed=binding.route.seed_override
         if binding.route.seed_override is not None
-        else binding.model.seed,
+        else model.seed,
     )
     credential = None
-    if binding.provider.adapter_type != "MOCK":
-        if not binding.provider.credential_secret_ref:
-            raise AgentRuntimeError("AGENT_PROVIDER_CREDENTIAL_REQUIRED")
+    if provider.adapter_type != "MOCK":
+        if not provider.credential_secret_ref:
+            invocation.state = "PROVIDER_ERROR"
+            invocation.error_code = "AGENT_PROVIDER_CREDENTIAL_REQUIRED"
+            invocation.completed_at = now
+            return False
         try:
             credential = LlmSecretStore(
                 get_settings().llm_secret_directory
-            ).read(binding.provider.credential_secret_ref)
-        except LlmSecretError as exc:
-            raise AgentRuntimeError("AGENT_PROVIDER_CREDENTIAL_UNREADABLE") from exc
-    result = provider_registry.resolve(
-        binding.provider.adapter_type,
-        endpoint=binding.provider.endpoint,
-        credential=credential,
-        chat_path=(
-            get_template(binding.provider.provider_template_id).chat_path
-            if binding.provider.provider_template_id
-            else None
-        ),
-    ).generate_structured(request, binding.model.provider_model_id)
+            ).read(provider.credential_secret_ref)
+        except LlmSecretError:
+            invocation.state = "PROVIDER_ERROR"
+            invocation.error_code = "AGENT_PROVIDER_CREDENTIAL_UNREADABLE"
+            invocation.completed_at = now
+            return False
+    try:
+        result = provider_registry.resolve(
+            provider.adapter_type,
+            endpoint=provider.endpoint,
+            credential=credential,
+            chat_path=(
+                get_template(provider.provider_template_id).chat_path
+                if provider.provider_template_id
+                else None
+            ),
+        ).generate_structured(request, model.provider_model_id)
+    except AdapterNotImplementedError:
+        invocation.state = "PROVIDER_ERROR"
+        invocation.error_code = "AGENT_ADAPTER_NOT_ALLOWED"
+        invocation.completed_at = now
+        return False
     invocation.state = result.status
     invocation.actual_provider = result.actual_provider
     invocation.actual_model = result.actual_model
@@ -283,11 +334,49 @@ def _invoke_mock(
         {"input_tokens": result.input_tokens, "output_tokens": result.output_tokens}
     )
     invocation.retry_count = result.retry_count
-    invocation.fallback_path_json = _canonical(result.fallback_path)
+    invocation.fallback_path_json = _canonical(
+        [binding.model.id, model.id] if model.id != binding.model.id else result.fallback_path
+    )
     invocation.validation_status = result.schema_validation
     invocation.completed_at = now
     if result.status != "SUCCEEDED" or result.schema_validation != "PASSED":
-        raise AgentRuntimeError("AGENT_LLM_INVOCATION_FAILED")
+        invocation.error_code = f"LLM_{result.status}"
+        return False
+    return True
+
+
+def _invoke_mock(
+    db: Session,
+    *,
+    stage: AgentStageRun,
+    binding: RouteBinding,
+    role_input: dict[str, object],
+    now: datetime,
+) -> None:
+    if _invoke_once(
+        db,
+        stage=stage,
+        binding=binding,
+        model=binding.model,
+        provider=binding.provider,
+        role_input=role_input,
+        now=now,
+    ):
+        return
+    if binding.route.fallback_policy == "FAILOVER":
+        if binding.fallback_model is None or binding.fallback_provider is None:
+            raise AgentRuntimeError("AGENT_ROUTE_SNAPSHOT_MISMATCH")
+        if _invoke_once(
+            db,
+            stage=stage,
+            binding=binding,
+            model=binding.fallback_model,
+            provider=binding.fallback_provider,
+            role_input=role_input,
+            now=now,
+        ):
+            return
+    raise AgentRuntimeError("AGENT_LLM_FAIL_STOP")
 
 
 def _assessment(
@@ -396,6 +485,13 @@ def create_diagnostic_run(
             "route_version": binding.route.version,
             "model_id": binding.model.id,
             "model_version": binding.model.version,
+            "failure_policy": binding.route.fallback_policy,
+            "fallback_model_id": (
+                binding.fallback_model.id if binding.fallback_model else None
+            ),
+            "fallback_model_version": (
+                binding.fallback_model.version if binding.fallback_model else None
+            ),
             "prompt_profile_id": binding.route.prompt_profile_id,
             "prompt_content_hash": (
                 db.get(LlmPromptProfile, binding.route.prompt_profile_id).content_hash

@@ -110,8 +110,15 @@ def recover_expired_stages(db: Session, *, now: datetime) -> int:
             )
             stage.completed_at = now
             if stage.invocation_id:
-                invocation = db.get(LlmInvocation, stage.invocation_id)
-                if invocation is not None and invocation.state == "RUNNING":
+                invocations = list(
+                    db.scalars(
+                        select(LlmInvocation).where(
+                            LlmInvocation.stage_run_id == stage.id,
+                            LlmInvocation.state == "RUNNING",
+                        )
+                    )
+                )
+                for invocation in invocations:
                     invocation.state = "AMBIGUOUS"
                     invocation.error_code = "AGENT_INVOCATION_OUTCOME_UNKNOWN"
                     invocation.completed_at = now
@@ -208,6 +215,16 @@ def _binding(db: Session, run: AgentRun, stage: AgentStageRun) -> RouteBinding:
     model = db.get(LlmModelProfile, route.primary_model_profile_id) if route else None
     provider = db.get(LlmProviderProfile, model.provider_profile_id) if model else None
     versions = json.loads(run.route_versions_json).get(stage.role, {})
+    fallback_model = (
+        db.get(LlmModelProfile, versions.get("fallback_model_id"))
+        if versions.get("fallback_model_id")
+        else None
+    )
+    fallback_provider = (
+        db.get(LlmProviderProfile, fallback_model.provider_profile_id)
+        if fallback_model
+        else None
+    )
     prompt = (
         db.get(LlmPromptProfile, route.prompt_profile_id)
         if route and route.prompt_profile_id
@@ -221,9 +238,28 @@ def _binding(db: Session, run: AgentRun, stage: AgentStageRun) -> RouteBinding:
         or route.version != versions.get("route_version")
         or model.id != versions.get("model_id")
         or model.version != versions.get("model_version")
+        or route.fallback_policy != versions.get("failure_policy")
+        or (fallback_model.id if fallback_model else None)
+        != versions.get("fallback_model_id")
+        or (fallback_model.version if fallback_model else None)
+        != versions.get("fallback_model_version")
         or provider.state != "VALIDATED"
         or provider.deleted_at is not None
         or (provider.adapter_type != "MOCK" and not provider.credential_secret_ref)
+        or (
+            fallback_model is not None
+            and (
+                fallback_provider is None
+                or fallback_provider.owner_id != run.owner_id
+                or fallback_provider.state != "VALIDATED"
+                or fallback_provider.deleted_at is not None
+                or fallback_model.state != "VALIDATED"
+                or (
+                    fallback_provider.adapter_type != "MOCK"
+                    and not fallback_provider.credential_secret_ref
+                )
+            )
+        )
         or route.prompt_profile_id != versions.get("prompt_profile_id")
         or (
             route.prompt_profile_id is not None
@@ -235,7 +271,7 @@ def _binding(db: Session, run: AgentRun, stage: AgentStageRun) -> RouteBinding:
         )
     ):
         raise AgentRuntimeError("AGENT_ROUTE_SNAPSHOT_MISMATCH")
-    return RouteBinding(route, model, provider)
+    return RouteBinding(route, model, provider, fallback_model, fallback_provider)
 
 
 def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: datetime) -> None:
@@ -412,8 +448,15 @@ def execute_claimed_stage(
     except Exception as exc:
         logger.exception("Agent stage failed role=%s stage=%s", stage.role, stage.id)
         if stage.invocation_id:
-            invocation = db.get(LlmInvocation, stage.invocation_id)
-            if invocation and invocation.state == "RUNNING":
+            invocations = list(
+                db.scalars(
+                    select(LlmInvocation).where(
+                        LlmInvocation.stage_run_id == stage.id,
+                        LlmInvocation.state == "RUNNING",
+                    )
+                )
+            )
+            for invocation in invocations:
                 invocation.state = "AMBIGUOUS"
                 invocation.error_code = "AGENT_INVOCATION_OUTCOME_UNKNOWN"
                 invocation.completed_at = now

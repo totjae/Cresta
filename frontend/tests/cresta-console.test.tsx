@@ -306,7 +306,7 @@ describe("execution policy settings", () => {
     const roles = ["TECHNICAL_SCOUT", "NEWS_DISCLOSURE_SCOUT", "MARKET_SECTOR_SCOUT", "POSITION_RISK_SCOUT", "CORE"];
     const route = (role: string, index: number, state = "VALIDATED") => ({
       id: `assignment-route-${index}`, role, primary_model_profile_id: "model-shared", primary_model_alias: "shared-model",
-      fallback_policy: "NONE", execution_stage: "SHADOW", timeout_ms: 10000, max_attempts: 1,
+      failure_policy: "FAIL_STOP", fallback_model_profile_id: null, fallback_model_alias: null, execution_stage: "SHADOW", timeout_ms: 10000, max_attempts: 1,
       daily_call_limit: 100, daily_cost_limit_krw: "0", prompt_version: `${role}-v1`,
       output_schema_version: role === "CORE" ? "agent-core-v1" : "agent-assessment-v1",
       temperature_override: "0.1", top_p_override: null, max_output_tokens_override: 512,
@@ -404,7 +404,7 @@ describe("Agent Worker v2", () => {
     const roles = ["TECHNICAL_SCOUT", "NEWS_DISCLOSURE_SCOUT", "MARKET_SECTOR_SCOUT", "POSITION_RISK_SCOUT", "CORE"];
     const routes = roles.map((role, index) => ({
       id: `route-${index}`, role, primary_model_profile_id: "model-1", primary_model_alias: "agent-runtime-v1",
-      fallback_policy: "NONE", execution_stage: "SHADOW", timeout_ms: 10000, max_attempts: 1,
+      failure_policy: "FAIL_STOP", fallback_model_profile_id: null, fallback_model_alias: null, execution_stage: "SHADOW", timeout_ms: 10000, max_attempts: 1,
       daily_call_limit: 100, daily_cost_limit_krw: "0", prompt_version: `${role}-v1`,
       output_schema_version: "agent-assessment-v1", state: "ACTIVE", reason: "fixture",
       validated_at: "2026-08-06T01:00:00Z", version: 2, created_at: "2026-08-06T00:00:00Z",
@@ -419,7 +419,8 @@ describe("Agent Worker v2", () => {
         state: role === "NEWS_DISCLOSURE_SCOUT" ? "INSUFFICIENT_DATA" : "SUCCEEDED",
         input_hash: "b".repeat(64), output: {}, output_hash: "c".repeat(64), error_code: null,
         attempt_count: 1, max_attempts: 1, fencing_token: 1, lease_expires_at: null, timeout_at: "2026-08-06T01:00:10Z",
-        invocation: { invocation_id: `inv-${index}`, state: "SUCCEEDED", actual_provider: "CRESTA_MOCK", actual_model: "deterministic-mock-v2", latency_ms: 0, validation_status: "PASSED", error_code: null },
+        invocation: { invocation_id: `inv-${index}`, attempt_number: 1, requested_model_profile_id: "model-1", state: "SUCCEEDED", actual_provider: "CRESTA_MOCK", actual_model: "deterministic-mock-v2", latency_ms: 0, validation_status: "PASSED", error_code: null, fallback_path: [], created_at: "2026-08-06T01:00:00Z" },
+        invocations: [{ invocation_id: `inv-${index}`, attempt_number: 1, requested_model_profile_id: "model-1", state: "SUCCEEDED", actual_provider: "CRESTA_MOCK", actual_model: "deterministic-mock-v2", latency_ms: 0, validation_status: "PASSED", error_code: null, fallback_path: [], created_at: "2026-08-06T01:00:00Z" }],
         started_at: "2026-08-06T01:00:00Z", completed_at: "2026-08-06T01:00:00Z",
       })),
       evidence_bundle: { bundle_id: "bundle-1", state: "PARTIAL", policy_version: "fixture-none-v1", evidence_ids: [], reason_codes: ["NO_EXTERNAL_EVIDENCE_FIXTURE"], bundle_hash: "d".repeat(64), as_of: "2026-08-06T01:00:00Z" },

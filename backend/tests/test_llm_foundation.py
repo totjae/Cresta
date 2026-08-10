@@ -220,7 +220,8 @@ def test_mock_provider_model_and_shadow_route_lifecycle(client: TestClient, db: 
     assert route_response.status_code == 201, route_response.text
     route = route_response.json()
     assert route["execution_stage"] == "SHADOW"
-    assert route["fallback_policy"] == "NONE"
+    assert route["failure_policy"] == "FAIL_STOP"
+    assert route["fallback_model_profile_id"] is None
     validated_route = client.post(f"/api/v1/ai/routes/{route['id']}/validate", headers=headers)
     assert validated_route.status_code == 200, validated_route.text
     assert validated_route.json()["state"] == "VALIDATED"

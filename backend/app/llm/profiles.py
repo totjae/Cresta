@@ -426,22 +426,34 @@ def provider_deletion_target(provider: LlmProviderProfile) -> str:
     return hashlib.sha256(f"{provider.id}:{provider.version}".encode()).hexdigest()
 
 
+def _route_uses_models(route: LlmRoleRoute, model_ids: set[str]) -> bool:
+    if route.primary_model_profile_id in model_ids:
+        return True
+    try:
+        fallback_ids = json.loads(route.fallback_model_profile_ids_json)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return isinstance(fallback_ids, list) and any(item in model_ids for item in fallback_ids)
+
+
 def preview_provider_deletion(
     db: Session, *, owner_id: str, provider_id: str
 ) -> tuple[LlmProviderProfile, str]:
     provider = get_provider(db, owner_id, provider_id)
-    active_route = db.scalar(
-        select(LlmRoleRoute.id)
-        .join(
-            LlmModelProfile,
-            LlmRoleRoute.primary_model_profile_id == LlmModelProfile.id,
+    model_ids = set(
+        db.scalars(
+            select(LlmModelProfile.id).where(
+                LlmModelProfile.provider_profile_id == provider.id
+            )
         )
-        .where(
-            LlmModelProfile.provider_profile_id == provider.id,
+    )
+    active_routes = db.scalars(
+        select(LlmRoleRoute).where(
+            LlmRoleRoute.owner_id == owner_id,
             LlmRoleRoute.state == "ACTIVE",
         )
     )
-    if active_route:
+    if any(_route_uses_models(route, model_ids) for route in active_routes):
         raise LlmProfileError("PROVIDER_IN_ACTIVE_ROUTE", 409)
     return provider, provider_deletion_target(provider)
 
@@ -464,20 +476,17 @@ def delete_provider(
             )
         )
     )
-    model_ids = [model.id for model in models]
-    routes = (
-        list(
-            db.scalars(
-                select(LlmRoleRoute).where(
-                    LlmRoleRoute.owner_id == user.id,
-                    LlmRoleRoute.primary_model_profile_id.in_(model_ids),
-                    LlmRoleRoute.state.in_(("DRAFT", "VALIDATED")),
-                )
+    model_ids = {model.id for model in models}
+    routes = [
+        route
+        for route in db.scalars(
+            select(LlmRoleRoute).where(
+                LlmRoleRoute.owner_id == user.id,
+                LlmRoleRoute.state.in_(("DRAFT", "VALIDATED")),
             )
         )
-        if model_ids
-        else []
-    )
+        if _route_uses_models(route, model_ids)
+    ]
     secret_ref = provider.credential_secret_ref
     if secret_ref:
         try:
@@ -694,16 +703,34 @@ def get_model_for_history(
 def route_dependencies_available(
     db: Session, owner_id: str, route: LlmRoleRoute
 ) -> bool:
-    model = db.get(LlmModelProfile, route.primary_model_profile_id)
-    if model is None or model.state != "VALIDATED":
+    try:
+        fallback_ids = _fallback_model_ids(route)
+    except LlmProfileError:
         return False
-    provider = db.get(LlmProviderProfile, model.provider_profile_id)
-    return bool(
-        provider is not None
-        and provider.owner_id == owner_id
-        and provider.deleted_at is None
-        and provider.state == "VALIDATED"
-    )
+    model_ids = [route.primary_model_profile_id, *fallback_ids]
+    for model_id in model_ids:
+        model = db.get(LlmModelProfile, model_id)
+        if model is None or model.state != "VALIDATED":
+            return False
+        provider = db.get(LlmProviderProfile, model.provider_profile_id)
+        if not (
+            provider is not None
+            and provider.owner_id == owner_id
+            and provider.deleted_at is None
+            and provider.state == "VALIDATED"
+        ):
+            return False
+    return True
+
+
+def _fallback_model_ids(route: LlmRoleRoute) -> list[str]:
+    try:
+        value = json.loads(route.fallback_model_profile_ids_json)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise LlmProfileError("ROUTE_FALLBACK_INVALID") from exc
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise LlmProfileError("ROUTE_FALLBACK_INVALID")
+    return value
 
 
 def validate_model(
@@ -768,13 +795,13 @@ def disable_model(
     correlation_id: str,
 ) -> LlmModelProfile:
     model = get_model(db, user.id, model_id)
-    active_route = db.scalar(
-        select(LlmRoleRoute.id).where(
-            LlmRoleRoute.primary_model_profile_id == model.id,
+    active_routes = db.scalars(
+        select(LlmRoleRoute).where(
+            LlmRoleRoute.owner_id == user.id,
             LlmRoleRoute.state == "ACTIVE",
         )
     )
-    if active_route:
+    if any(_route_uses_models(route, {model.id}) for route in active_routes):
         raise LlmProfileError("MODEL_IN_ACTIVE_ROUTE", 409)
     model.state = "DISABLED"
     model.version += 1
@@ -807,6 +834,8 @@ def create_route(
     user: User,
     role: str,
     primary_model_profile_id: str,
+    failure_policy: str,
+    fallback_model_profile_id: str | None,
     timeout_ms: int,
     daily_call_limit: int,
     daily_cost_limit_krw: Decimal,
@@ -824,6 +853,16 @@ def create_route(
     if role not in ROLES:
         raise LlmProfileError("ROLE_UNSUPPORTED")
     get_model(db, user.id, primary_model_profile_id)
+    if failure_policy not in {"FAIL_STOP", "FAILOVER"}:
+        raise LlmProfileError("ROUTE_FAILURE_POLICY_INVALID")
+    if failure_policy == "FAIL_STOP" and fallback_model_profile_id is not None:
+        raise LlmProfileError("ROUTE_FALLBACK_NOT_ALLOWED")
+    if failure_policy == "FAILOVER" and fallback_model_profile_id is None:
+        raise LlmProfileError("ROUTE_FALLBACK_REQUIRED")
+    if fallback_model_profile_id == primary_model_profile_id:
+        raise LlmProfileError("ROUTE_FALLBACK_EQUALS_PRIMARY")
+    if fallback_model_profile_id is not None:
+        get_model(db, user.id, fallback_model_profile_id)
     resolved_prompt_version = prompt_version.strip() if prompt_version else None
     if prompt_profile_id:
         try:
@@ -841,6 +880,11 @@ def create_route(
         owner_id=user.id,
         role=role,
         primary_model_profile_id=primary_model_profile_id,
+        fallback_policy=failure_policy,
+        fallback_model_profile_ids_json=json.dumps(
+            [fallback_model_profile_id] if fallback_model_profile_id else [],
+            separators=(",", ":"),
+        ),
         timeout_ms=timeout_ms,
         daily_call_limit=daily_call_limit,
         daily_cost_limit_krw=daily_cost_limit_krw,
@@ -862,7 +906,12 @@ def create_route(
         action="LLM_ROUTE_CREATED",
         target=route.id,
         correlation_id=correlation_id,
-        metadata={"role": role, "execution_stage": "SHADOW"},
+        metadata={
+            "role": role,
+            "execution_stage": "SHADOW",
+            "failure_policy": failure_policy,
+            "fallback_configured": fallback_model_profile_id is not None,
+        },
     )
     db.commit()
     db.refresh(route)
@@ -888,6 +937,7 @@ def validate_route(
         raise LlmProfileError("ROUTE_STATE_CONFLICT", 409)
     model = get_model(db, user.id, route.primary_model_profile_id)
     provider = get_provider(db, user.id, model.provider_profile_id)
+    fallback_models = [get_model(db, user.id, item) for item in _fallback_model_ids(route)]
     if route.prompt_profile_id:
         try:
             prompt = get_prompt(db, owner_id=user.id, prompt_id=route.prompt_profile_id)
@@ -897,6 +947,22 @@ def validate_route(
             raise LlmProfileError("PROMPT_ROUTE_NOT_READY")
     if provider.state != "VALIDATED" or model.state != "VALIDATED":
         raise LlmProfileError("ROUTE_DEPENDENCY_NOT_VALIDATED")
+    for fallback_model in fallback_models:
+        fallback_provider = get_provider(db, user.id, fallback_model.provider_profile_id)
+        if fallback_model.state != "VALIDATED" or fallback_provider.state != "VALIDATED":
+            raise LlmProfileError("ROUTE_DEPENDENCY_NOT_VALIDATED")
+        if fallback_provider.adapter_type != "MOCK" and not fallback_provider.credential_secret_ref:
+            raise LlmProfileError("PROVIDER_CREDENTIAL_REQUIRED")
+        try:
+            provider_registry.resolve(
+                fallback_provider.adapter_type,
+                endpoint=fallback_provider.endpoint,
+                credential=(
+                    "route-validation" if fallback_provider.adapter_type != "MOCK" else None
+                ),
+            )
+        except AdapterNotImplementedError as exc:
+            raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED") from exc
     if provider.adapter_type != "MOCK" and not provider.credential_secret_ref:
         raise LlmProfileError("PROVIDER_CREDENTIAL_REQUIRED")
     try:
@@ -908,9 +974,15 @@ def validate_route(
     except AdapterNotImplementedError as exc:
         raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED") from exc
     capabilities = ModelCapabilities.model_validate_json(model.capabilities_json)
-    if route.reasoning_effort_override is not None and not capabilities.reasoning:
+    model_capabilities = [
+        capabilities,
+        *(ModelCapabilities.model_validate_json(item.capabilities_json) for item in fallback_models),
+    ]
+    if route.reasoning_effort_override is not None and any(
+        not item.reasoning for item in model_capabilities
+    ):
         raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_REASONING")
-    if route.seed_override is not None and not capabilities.seed:
+    if route.seed_override is not None and any(not item.seed for item in model_capabilities):
         raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_SEED")
     try:
         validate_foundation_route(route, model)
@@ -987,7 +1059,9 @@ def _assignment_routes(
         ):
             raise LlmProfileError("ROLE_ASSIGNMENT_NOT_READY")
         model = get_model(db, owner_id, route.primary_model_profile_id)
-        if model.state != "VALIDATED":
+        if model.state != "VALIDATED" or not route_dependencies_available(
+            db, owner_id, route
+        ):
             raise LlmProfileError("ROLE_ASSIGNMENT_NOT_READY")
         selected.append(route)
     return selected

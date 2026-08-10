@@ -645,6 +645,8 @@ class LlmRouteCreateRequest(StrictModel):
     schema_version: str = Field(pattern=r"^1\.0$")
     role: LlmRole
     primary_model_profile_id: str = Field(min_length=36, max_length=36)
+    failure_policy: Literal["FAIL_STOP", "FAILOVER"] = "FAIL_STOP"
+    fallback_model_profile_id: str | None = Field(default=None, min_length=36, max_length=36)
     timeout_ms: int = Field(default=10000, ge=1000, le=60000)
     daily_call_limit: int = Field(default=100, ge=1, le=100000)
     daily_cost_limit_krw: Decimal = Field(default=Decimal(0), ge=0)
@@ -677,7 +679,9 @@ class LlmRouteResponse(StrictModel):
     role: LlmRole
     primary_model_profile_id: str
     primary_model_alias: str
-    fallback_policy: Literal["NONE"]
+    failure_policy: Literal["FAIL_STOP", "FAILOVER"]
+    fallback_model_profile_id: str | None
+    fallback_model_alias: str | None
     execution_stage: Literal["SHADOW"]
     timeout_ms: int
     max_attempts: int
@@ -761,12 +765,16 @@ class AgentDiagnosticRunRequest(StrictModel):
 
 class AgentInvocationResponse(StrictModel):
     invocation_id: str
+    attempt_number: int
+    requested_model_profile_id: str | None
     state: str
     actual_provider: str | None
     actual_model: str | None
     latency_ms: int
     validation_status: str
     error_code: str | None
+    fallback_path: list[str]
+    created_at: datetime
 
 
 class AgentStageRunResponse(StrictModel):
@@ -786,6 +794,7 @@ class AgentStageRunResponse(StrictModel):
     lease_expires_at: datetime | None
     timeout_at: datetime | None
     invocation: AgentInvocationResponse | None
+    invocations: list[AgentInvocationResponse]
     started_at: datetime | None
     completed_at: datetime | None
 

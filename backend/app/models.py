@@ -1019,7 +1019,8 @@ class LlmRoleRoute(Base):
             "execution_stage = 'SHADOW'", name="ck_llm_role_routes_foundation_stage"
         ),
         CheckConstraint(
-            "fallback_policy = 'NONE'", name="ck_llm_role_routes_foundation_fallback"
+            "fallback_policy IN ('FAIL_STOP','FAILOVER')",
+            name="ck_llm_role_routes_foundation_fallback",
         ),
         CheckConstraint("timeout_ms BETWEEN 1000 AND 60000", name="ck_llm_role_routes_timeout"),
         CheckConstraint("max_attempts = 1", name="ck_llm_role_routes_attempts"),
@@ -1060,7 +1061,9 @@ class LlmRoleRoute(Base):
     fallback_model_profile_ids_json: Mapped[str] = mapped_column(
         Text, nullable=False, default="[]"
     )
-    fallback_policy: Mapped[str] = mapped_column(String(32), nullable=False, default="NONE")
+    fallback_policy: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="FAIL_STOP"
+    )
     execution_stage: Mapped[str] = mapped_column(String(24), nullable=False, default="SHADOW")
     timeout_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=10000)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

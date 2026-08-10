@@ -420,3 +420,14 @@ Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 �
 - `LLM-PROVIDER-112`: Prompt management API may return prompt content only to the authenticated owner. Agent run, invocation, audit metadata, logs, and decision APIs expose only profile ID, version label, and content hash.
 - `LLM-PROVIDER-113`: 현재 개발 단계에서는 Provider 등록·credential 교체·삭제와 역할 배정 활성화에 로그인 세션과 CSRF만 요구하고 TOTP proof는 요구하지 않는다. LLM-013·065·072·077·088·095와 LLM-PROVIDER-107의 TOTP 부분은 서비스 완성 후 선택적으로 재도입할 때까지 보류하며, write-only secret·영향 미리보기·활성 route 삭제 차단·원자 전환은 유지한다.
 - `LLM-PROVIDER-114`: Provider 삭제 시 해당 Provider 모델을 참조하는 비활성 `DRAFT`·`VALIDATED` route는 `SUPERSEDED` 이력으로 전환한다. 삭제된 Provider·비활성 모델은 신규 후보 목록에서 제외하지만 기존 route 이력은 모델 별칭·파라미터·prompt provenance와 함께 조회할 수 있어야 하며, 이력 조회 실패가 전체 LLM 설정 조회를 실패시키면 안 된다.
+
+### 개인 운영용 단순 실패 정책
+
+이 절은 모델 호출 실패 처리에 대해 앞선 일반 재시도·다중 fallback 설계보다 우선한다. `DIAGNOSTIC/SHADOW`에서도 두 정책을 검증할 수 있지만 결과는 승인·주문에 연결하지 않는다.
+
+- `LLM-PROVIDER-115`: 역할별 실패 정책은 `FAIL_STOP` 또는 `FAILOVER` 두 가지만 지원하며 기본값은 `FAIL_STOP`이다.
+- `LLM-PROVIDER-116`: `FAILOVER`는 사용자가 미리 지정하고 검증한 예비 모델 1개만 허용한다. 기본 모델 실패 후 예비 모델을 최대 1회 호출하며 연쇄 fallback과 자동 재시도는 하지 않는다.
+- `LLM-PROVIDER-117`: 지원하지 않는 파라미터, 인증, timeout, rate limit, provider 오류와 출력 schema 오류가 발생해도 Cresta가 파라미터를 제거·보정하거나 모델 설정을 자동 변경하지 않는다.
+- `LLM-PROVIDER-118`: 기본·예비 모델이 모두 실패하거나 정책이 `FAIL_STOP`이면 해당 역할을 실패로 종료하고 AI 판단에 의한 승인·주문을 생성하지 않는다. 신규매수는 `WAIT` 또는 `RISK_BLOCK`으로 제한한다.
+- `LLM-PROVIDER-119`: AI 실패 중에도 고정 손절, 비상정지와 장마감 청산 등 Cresta Guard의 규칙 기반 보호 기능은 독립적으로 계속 동작한다.
+- `LLM-PROVIDER-120`: 각 호출 이력에는 역할, 기본 모델, 예비 모델, 오류 코드, 실패 파라미터(확인 가능한 경우), fallback 시도 여부, 실제 사용 모델과 최종 `SUCCEEDED/FAIL_STOP` 결과를 저장한다. credential과 provider 원문 응답은 저장하지 않는다.

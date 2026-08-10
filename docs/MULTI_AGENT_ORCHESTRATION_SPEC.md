@@ -237,7 +237,7 @@ app/llm/*                     Provider/Gateway 호출 계층
 | ID | 요구사항 |
 | --- | --- |
 | MAO-090 | `POST /ai/agent-runs/diagnostic`은 로그인 사용자, KRX/NXT 종목, 최신 영속 market snapshot, `dag_version=agent-dag-v1`과 명시적인 role별 route ID를 입력으로 받는다. |
-| MAO-091 | route가 필요한 역할은 `TECHNICAL_SCOUT`, `NEWS_DISCLOSURE_SCOUT`, `MARKET_SECTOR_SCOUT`, `POSITION_RISK_SCOUT`, `CORE`이다. 각 route는 요청 사용자 소유, `VALIDATED`, `SHADOW`, `fallback=NONE`, 해당 role 일치, 검증된 Mock model이어야 하며 하나라도 실패하면 run을 만들지 않는다. |
+| MAO-091 | route가 필요한 역할은 `TECHNICAL_SCOUT`, `NEWS_DISCLOSURE_SCOUT`, `MARKET_SECTOR_SCOUT`, `POSITION_RISK_SCOUT`, `CORE`이다. 각 route는 요청 사용자 소유, `VALIDATED`, `SHADOW`, 해당 role 일치, 검증된 model이어야 한다. 실패 정책은 MAO-110~113의 `FAIL_STOP` 또는 단일 `FAILOVER`만 허용하며 하나라도 준비되지 않으면 run을 만들지 않는다. |
 | MAO-092 | `INTEL_COLLECTOR`는 외부 네트워크 없이 빈 fixture를 만들고 `EVIDENCE_VERIFIER`는 이를 `PARTIAL` 빈 bundle로 고정한다. 외부 정보 없음은 긍정 신호로 해석하지 않는다. |
 | MAO-093 | 실행 순서는 Intel → Verify → 4개 Scout → Core로 고정한다. v1은 한 DB 작업 단위에서 순차 실행하지만 stage dependency를 저장해 이후 병렬 worker가 동일 DAG를 재현할 수 있어야 한다. |
 | MAO-094 | 각 route stage는 Mock Adapter 호출 전 `RUNNING` invocation을 저장하고 완료 후 실제 provider/model, 입력·응답 hash, latency와 schema 검증 결과를 기록한다. 외부 Adapter나 도구 사용은 거부한다. |
@@ -258,6 +258,15 @@ app/llm/*                     Provider/Gateway 호출 계층
 | MAO-105 | route·model version과 유효 generation parameter는 admission 시 `route_versions_json`에 고정한다. 실행 중 현재 ACTIVE route가 변경되어도 이미 등록된 run의 snapshot은 바뀌지 않는다. |
 | MAO-106 | Agent Worker v2는 Mock Adapter만 허용하고 DIAGNOSTIC·SHADOW 경계를 유지한다. worker가 완료한 run에서도 `Decision`, `Approval`, `TradingOrder`는 생성하지 않는다. |
 | MAO-107 | Console은 `CREATED/RUNNING` run이 존재하는 동안 목록을 주기적으로 갱신하고 현재 stage 상태를 표시한다. 버튼은 admission 응답 후 해제하며 전체 DAG 완료까지 HTTP 요청을 붙잡지 않는다. |
+
+### 12.3 운영 단계 단순 실패 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-110 | 역할별 기본 실패 정책은 `FAIL_STOP`이다. 사용자가 `FAILOVER`를 선택한 역할만 검증된 예비 모델 1개를 최대 1회 호출한다. SHADOW에서는 두 정책을 시험할 수 있지만 승인·주문을 만들지 않는다. |
+| MAO-111 | 기본 모델 실패 시 파라미터를 자동 제거·보정하거나 같은 모델을 자동 재호출하지 않는다. 예비 모델은 자신의 저장된 설정과 동일 입력·prompt·출력 schema를 사용한다. |
+| MAO-112 | 최종 실패 역할과 그 하위 stage는 실패로 종료한다. Core 실패 또는 필수 Scout 실패에서는 AI 기반 승인·주문을 만들지 않고 신규매수는 `WAIT` 또는 `RISK_BLOCK`으로 제한한다. |
+| MAO-113 | 실패·fallback 이력은 모델, 오류 코드, 시도 순서와 최종 결과를 조회할 수 있어야 한다. AI run 실패와 무관하게 Guard의 손절·비상정지·장마감 청산은 계속 동작한다. |
 
 ## 13. 검증·인수 조건
 

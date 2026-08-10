@@ -328,6 +328,7 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-142 | 역할 배정 일괄 활성화 preview는 선택 route map의 canonical hash를 TOTP `target_id`로 반환한다. activate 요청은 같은 map·hash에 결합된 proof를 소비하고 전 역할 변경을 한 transaction으로 처리한다. |
 | API-143 | `POST /api/v1/ai/agent-runs/diagnostic`은 비동기 admission API다. 신규 run은 `CREATED`와 7개 `PENDING` stage를 반환하며 동일 멱등 입력은 기존 run을 반환한다. |
 | API-144 | Agent run 조회 응답은 stage별 `attempt_count`, `max_attempts`, `fencing_token`, `lease_expires_at`, `timeout_at`을 포함하되 worker owner 식별자는 노출하지 않는다. |
+| API-145 | role route 생성은 `failure_policy=FAIL_STOP|FAILOVER`와 선택적 `fallback_model_profile_id`를 받는다. `FAILOVER`는 기본 모델과 다른 검증 모델 하나를 요구하며 run 조회는 stage의 기본·예비 invocation을 시도 순서, 실제 모델, 상태와 안전한 오류 코드로 반환한다. |
 
 Foundation v1의 기존 수동 profile API와 역할 배정 API는 호환을 위해 유지한다. 간편 등록 단계에서는 공식 OpenAI·Anthropic·Gemini 카탈로그, TOTP 결합 등록, 실제 모델 발견·재동기화와 모델 사용/사용 안 함 API를 추가했다. 일반 단일 route `/activate`와 외부 Agent runtime 활성화는 아직 제공하지 않는다.
 

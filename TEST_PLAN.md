@@ -418,3 +418,11 @@ Local evidence: backend 전체 164개 시험과 Ruff, frontend TypeScript 및 11
 
 - `T-LLM-DELETE-001`: 비활성 route가 있는 Provider를 삭제하면 관련 route가 `SUPERSEDED`로 전환되고 Provider·활성 모델·역할 후보 목록에서 제외되는지 검증한다.
 - `T-LLM-DELETE-002`: 삭제 후 `/ai/routes`, `/ai/role-assignments`와 Console 재조회가 성공하고 보존 route 이력의 모델 별칭·파라미터 provenance를 표시할 수 있는지 검증한다.
+
+# 단순 LLM 실패 정책 시험 (2026-08-08)
+
+- `T-LLM-FAIL-001`: 기본값 `FAIL_STOP`에서 미지원 파라미터·인증·timeout·provider·schema 오류가 발생하면 자동 보정·재호출·주문 없이 실패 이력이 남는지 검증한다.
+- `T-LLM-FAIL-002`: `FAILOVER` 역할은 지정한 예비 모델을 최대 1회만 호출하고 성공 모델 또는 최종 `FAIL_STOP` 결과와 시도 순서를 기록하는지 검증한다.
+- `T-LLM-FAIL-003`: Core 또는 필수 Scout의 최종 실패 중 신규매수와 AI 주문은 차단되지만 Guard의 손절·비상정지·장마감 청산은 계속 동작하는지 검증한다.
+
+Local evidence: route 계약의 기본 `FAIL_STOP`, 서로 다른 검증 모델 하나만 허용하는 `FAILOVER`, 기본 호출 실패 후 예비 모델 1회 성공과 두 invocation 이력, FAIL_STOP 최종 실패 및 주문 0건을 자동 검증했다. backend 166개 시험·Ruff, frontend TypeScript·11개 component 시험·production build와 SQLite `0019` upgrade→downgrade→upgrade가 통과했다. 실제 외부 Provider 실패와 Guard 독립 동작은 서버·Guard 구현 후 검증한다.

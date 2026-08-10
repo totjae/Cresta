@@ -34,20 +34,29 @@ def _response(
     )
     stage_responses: list[AgentStageRunResponse] = []
     for stage in stages:
-        invocation = db.get(LlmInvocation, stage.invocation_id) if stage.invocation_id else None
-        invocation_response = (
+        invocations = list(
+            db.scalars(
+                select(LlmInvocation)
+                .where(LlmInvocation.stage_run_id == stage.id)
+                .order_by(LlmInvocation.created_at, LlmInvocation.id)
+            )
+        )
+        invocation_responses = [
             AgentInvocationResponse(
                 invocation_id=invocation.id,
+                attempt_number=index,
+                requested_model_profile_id=invocation.requested_model_profile_id,
                 state=invocation.state,
                 actual_provider=invocation.actual_provider,
                 actual_model=invocation.actual_model,
                 latency_ms=invocation.latency_ms,
                 validation_status=invocation.validation_status,
                 error_code=invocation.error_code,
+                fallback_path=json.loads(invocation.fallback_path_json),
+                created_at=invocation.created_at,
             )
-            if invocation
-            else None
-        )
+            for index, invocation in enumerate(invocations, start=1)
+        ]
         stage_responses.append(
             AgentStageRunResponse(
                 stage_run_id=stage.id,
@@ -65,7 +74,8 @@ def _response(
                 fencing_token=stage.fencing_token,
                 lease_expires_at=stage.lease_expires_at,
                 timeout_at=stage.timeout_at,
-                invocation=invocation_response,
+                invocation=invocation_responses[0] if invocation_responses else None,
+                invocations=invocation_responses,
                 started_at=stage.started_at,
                 completed_at=stage.completed_at,
             )

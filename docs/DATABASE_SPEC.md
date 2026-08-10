@@ -259,7 +259,7 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-124 | Agent Runtime v1의 `agent_runs`는 owner, purpose, market·symbol, market snapshot·input hash, DAG·route map, 상태·Core action, valid_until과 unique idempotency key를 저장한다. |
 | DB-125 | `agent_stage_runs`는 run+role unique, dependency·route·invocation 참조, 불변 input/output JSON·hash, 상태·오류·시각을 저장하며 완료 stage를 API로 수정하지 않는다. |
 | DB-126 | `evidence_items`는 출처·시각·facts·content hash를 저장하고 `evidence_bundles`는 owner·run·상태·evidence ID·canonical hash를 저장한다. v1은 외부 수집 없이 `PARTIAL` 빈 bundle 하나만 생성한다. |
-| DB-127 | `agent_stage_runs.invocation_id`는 `llm_invocations`를 unique FK로 참조해 stage당 invocation을 최대 하나로 제한하고 invocation의 `stage_run_id`와 같은 식별자를 기록한다. |
+| DB-127 | `agent_stage_runs.invocation_id`는 stage의 첫 invocation을 참조한다. `llm_invocations.stage_run_id`는 같은 stage의 기본·예비 호출을 각각 보존하며 API는 생성 순서로 반환한다. |
 | DB-132 | `agent_stage_runs`는 `lease_owner_id`, `lease_expires_at`, `fencing_token`, `attempt_count`, `max_attempts`, `timeout_at`, `heartbeat_at`을 저장한다. fencing과 attempt는 음수가 아니며 max attempt는 1 이상이어야 한다. |
 | DB-133 | worker claim 조회는 `state, available_at, lease_expires_at, created_at, sequence` 인덱스를 사용하고 PostgreSQL에서는 잠금된 행을 건너뛰어 복수 worker가 같은 stage를 claim하지 않게 한다. |
 | DB-134 | 완료 stage의 output JSON·hash와 invocation 참조는 수정하지 않는다. 만료 복구도 완료 상태를 `PENDING` 또는 `RUNNING`으로 되돌리지 않는다. |
@@ -281,3 +281,9 @@ market_snapshots(symbol, market, observed_at desc)
 - Migration `20260808_0018` creates `llm_prompt_profiles` and adds nullable `prompt_profile_id` to `llm_role_routes` for legacy compatibility.
 - Prompt rows are immutable after creation except for the `DRAFT → VALIDATED → DISABLED` lifecycle. `(owner_id, role, version_number)` and `(owner_id, role, version_label)` are unique.
 - Routes reference a concrete prompt row; superseding a role route never rewrites or deletes its prompt.
+
+## 단순 LLM 실패 정책 migration (2026-08-08)
+
+- Migration `20260808_0019` converts legacy `fallback_policy=NONE` to `FAIL_STOP` and permits only `FAIL_STOP` or `FAILOVER`.
+- `fallback_model_profile_ids_json` remains the existing storage field but application validation permits zero models for `FAIL_STOP` and exactly one different validated model for `FAILOVER`.
+- A fallback attempt creates a second `llm_invocations` row for the same stage; invocation rows and safe error codes remain queryable after the run finishes.

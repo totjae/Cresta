@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Approval, LlmRoleRoute, TradingOrder
+from app.models import Approval, LlmModelProfile, LlmRoleRoute, TradingOrder
 from tests.conftest import TEST_PASSWORD, TEST_TOTP_SECRET
 
 ROLES = (
@@ -180,3 +180,85 @@ def test_role_candidate_rejects_unsupported_reasoning_parameter(client: TestClie
     response = client.post(f"/api/v1/ai/routes/{route['id']}/validate", headers=headers)
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "MODEL_PARAMETER_UNSUPPORTED_REASONING"
+
+
+def test_role_candidate_accepts_one_explicit_fallback_model(
+    client: TestClient, db: Session
+) -> None:
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    primary_id = _foundation(client, headers)
+    primary = db.get(LlmModelProfile, primary_id)
+    assert primary is not None
+    fallback_response = client.post(
+        "/api/v1/ai/models",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "provider_profile_id": primary.provider_profile_id,
+            "alias": "fallback-model",
+            "provider_model_id": "deterministic-mock-fallback-v1",
+            "capabilities": {
+                "structured_output": True,
+                "tool_calling": False,
+                "web_search": False,
+                "streaming": False,
+                "reasoning": False,
+                "seed": True,
+                "usage_reporting": True,
+                "local_execution": True,
+            },
+            "max_context_tokens": 4096,
+            "max_output_tokens": 1024,
+            "temperature": "0",
+            "seed": 7,
+        },
+    )
+    assert fallback_response.status_code == 201, fallback_response.text
+    fallback = fallback_response.json()
+    assert (
+        client.post(
+            f"/api/v1/ai/models/{fallback['id']}/validate", headers=headers
+        ).status_code
+        == 200
+    )
+    route_response = client.post(
+        "/api/v1/ai/routes",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "role": "CORE",
+            "primary_model_profile_id": primary_id,
+            "failure_policy": "FAILOVER",
+            "fallback_model_profile_id": fallback["id"],
+            "prompt_version": "core-failover-v1",
+            "output_schema_version": "agent-core-v1",
+            "reason": "단일 fallback 검증",
+        },
+    )
+    assert route_response.status_code == 201, route_response.text
+    route = route_response.json()
+    assert route["failure_policy"] == "FAILOVER"
+    assert route["fallback_model_profile_id"] == fallback["id"]
+    assert route["fallback_model_alias"] == "fallback-model"
+    assert (
+        client.post(f"/api/v1/ai/routes/{route['id']}/validate", headers=headers).status_code
+        == 200
+    )
+
+    invalid = client.post(
+        "/api/v1/ai/routes",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "role": "CORE",
+            "primary_model_profile_id": primary_id,
+            "failure_policy": "FAILOVER",
+            "fallback_model_profile_id": primary_id,
+            "prompt_version": "core-invalid-fallback-v1",
+            "output_schema_version": "agent-core-v1",
+            "reason": "동일 모델 fallback 거부",
+        },
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "ROUTE_FALLBACK_EQUALS_PRIMARY"
