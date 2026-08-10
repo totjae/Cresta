@@ -332,6 +332,7 @@ Docker Compose에서 API 또는 Frontend 컨테이너만 재생성하면 고정 
 | OPS-073 | Ollama는 외부 포트로 공개하지 않고 Cresta 내부 network 또는 loopback에서만 접근한다. N100/16GB에서 메모리 여유 20% 경고·10% 신규 호출 차단과 동시 호출 1개를 기본으로 한다. |
 | OPS-074 | provider profile·route·prompt·schema 변경 배포는 SHADOW rollback 경로와 이전 ACTIVE version을 보존하고 진행 중 Core run의 model을 중간에 변경하지 않는다. |
 | OPS-075 | LLM 장애 대응은 신규 AI 매수 판단을 중지하되 Broker worker·재동기화·실시간 Guard를 재시작하거나 중단시키지 않는다. |
+| OPS-076 | `backend/app/agents`, 공통 LLM Adapter 또는 Agent migration 변경 배포는 `api`, `scheduler`뿐 아니라 Compose `agent` 이미지를 반드시 build·recreate한다. 배포 후 `agent` 컨테이너의 source marker와 신규 DAG stage 수를 확인한다. |
 
 ## 5. 검증·인수 조건
 

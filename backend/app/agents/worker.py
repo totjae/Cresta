@@ -34,6 +34,7 @@ from app.models import (
     AgentRun,
     AgentStageRun,
     EvidenceBundle,
+    EvidenceItem,
     IndicatorSnapshot,
     LlmInvocation,
     LlmModelProfile,
@@ -50,6 +51,7 @@ TERMINAL = DEPENDENCY_OK | {"TIMED_OUT", "FAILED", "INVALID_OUTPUT"}
 DEFAULT_TIMEOUT_SECONDS = {
     "INTEL_COLLECTOR": 20,
     "EVIDENCE_VERIFIER": 15,
+    "EVIDENCE_CANDIDATE_AUDITOR": 15,
     "CORE": 15,
 }
 
@@ -76,6 +78,7 @@ def _finalize_run(db: Session, run: AgentRun, now: datetime) -> None:
         return
     core = next(stage for stage in stages if stage.role == "CORE")
     run.core_action = "WAIT" if core.state == "SUCCEEDED" else None
+    bundle = db.scalar(select(EvidenceBundle).where(EvidenceBundle.run_id == run.id))
     if core.state != "SUCCEEDED" or any(
         stage.state in {"FAILED", "TIMED_OUT", "INVALID_OUTPUT"} for stage in stages
     ):
@@ -83,7 +86,11 @@ def _finalize_run(db: Session, run: AgentRun, now: datetime) -> None:
         run.error_code = core.error_code or "AGENT_STAGE_FAILED"
     else:
         run.state = (
-            "PARTIAL" if any(stage.state != "SUCCEEDED" for stage in stages) else "SUCCEEDED"
+            "PARTIAL"
+            if any(stage.state != "SUCCEEDED" for stage in stages)
+            or bundle is None
+            or bundle.state != "VERIFIED"
+            else "SUCCEEDED"
         )
     run.completed_at = now
 
@@ -414,6 +421,47 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
     bundle = db.scalar(select(EvidenceBundle).where(EvidenceBundle.run_id == run.id))
     if bundle is None:
         raise AgentRuntimeError("AGENT_EVIDENCE_BUNDLE_NOT_FOUND")
+    if stage.role == "EVIDENCE_CANDIDATE_AUDITOR":
+        candidates = list(
+            db.scalars(
+                select(EvidenceItem)
+                .where(
+                    EvidenceItem.run_id == run.id,
+                    EvidenceItem.source_tier == "UNRATED",
+                )
+                .order_by(EvidenceItem.created_at, EvidenceItem.id)
+            )
+        )
+        provider_counts: dict[str, int] = {}
+        for candidate in candidates:
+            provider_counts[candidate.source_name] = (
+                provider_counts.get(candidate.source_name, 0) + 1
+            )
+        reason_codes = [
+            "UNRATED_SOURCE_CANDIDATES_PRESENT"
+            if candidates
+            else "NO_PROVIDER_SOURCE_CANDIDATES"
+        ]
+        _complete_stage(
+            stage,
+            state="SUCCEEDED",
+            output={
+                "schema_version": "evidence-candidate-audit-v1",
+                "status": "SUCCEEDED",
+                "candidate_count": len(candidates),
+                "candidate_ids": [candidate.id for candidate in candidates],
+                "provider_counts": {
+                    provider: provider_counts[provider]
+                    for provider in sorted(provider_counts)
+                },
+                "reason_codes": reason_codes,
+                "evidence_bundle_ref": bundle.id,
+                "evidence_bundle_hash": bundle.bundle_hash,
+                "bundle_mutated": False,
+            },
+            now=now,
+        )
+        return
     binding = _binding(db, run, stage)
     if stage.role in ROUTE_ROLES[:-1]:
         indicator = db.scalar(
@@ -488,6 +536,25 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
     incomplete = sorted(
         role for role, assessment in assessments.items() if assessment.status != "SUCCEEDED"
     )
+    candidate_audit_stage = db.scalar(
+        select(AgentStageRun).where(
+            AgentStageRun.run_id == run.id,
+            AgentStageRun.role == "EVIDENCE_CANDIDATE_AUDITOR",
+        )
+    )
+    if candidate_audit_stage is None:
+        if run.dag_version != "agent-dag-v1":
+            raise AgentRuntimeError("AGENT_EVIDENCE_CANDIDATE_AUDIT_NOT_FOUND")
+        candidate_audit = {
+            "candidate_count": 0,
+            "reason_codes": ["LEGACY_DAG_NO_CANDIDATE_AUDIT"],
+        }
+        candidate_audit_ref = None
+    else:
+        if candidate_audit_stage.output_json is None:
+            raise AgentRuntimeError("AGENT_EVIDENCE_CANDIDATE_AUDIT_NOT_FOUND")
+        candidate_audit = json.loads(candidate_audit_stage.output_json)
+        candidate_audit_ref = candidate_audit_stage.id
     outcome = _invoke_model(
         db,
         stage=stage,
@@ -504,6 +571,12 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
                 item.role: item.output_hash for item in scout_stages
             },
             "required_incomplete_roles": incomplete,
+            "evidence_candidate_audit": {
+                "ref": candidate_audit_ref,
+                "candidate_count": candidate_audit["candidate_count"],
+                "reason_codes": candidate_audit["reason_codes"],
+                "verified_evidence_count": len(json.loads(bundle.evidence_ids_json)),
+            },
         },
         now=now,
     )

@@ -326,7 +326,7 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-140 | 역할 배정 활성화는 대상 route·role·version에 결합된 TOTP proof를 요구하고 기존 활성 배정의 `SUPERSEDED` 전환과 새 배정의 `ACTIVE` 전환을 원자 수행한다. |
 | API-141 | model capability가 지원하지 않는 generation parameter, 범위 밖 값과 중복 활성 배정은 안정된 4xx 오류로 거부하며 Adapter 호출을 수행하지 않는다. |
 | API-142 | 역할 배정 일괄 활성화 preview는 선택 route map의 canonical hash를 TOTP `target_id`로 반환한다. activate 요청은 같은 map·hash에 결합된 proof를 소비하고 전 역할 변경을 한 transaction으로 처리한다. |
-| API-143 | `POST /api/v1/ai/agent-runs/diagnostic`은 비동기 admission API다. 신규 run은 `CREATED`와 7개 `PENDING` stage를 반환하며 동일 멱등 입력은 기존 run을 반환한다. |
+| API-143 | `POST /api/v1/ai/agent-runs/diagnostic`은 비동기 admission API다. 신규 run은 `CREATED`와 8개 `PENDING` stage를 반환하며 동일 멱등 입력은 기존 run을 반환한다. 내부 `EVIDENCE_CANDIDATE_AUDITOR`는 외부 invocation 없이 Scout 이후 Core 전에 실행한다. |
 | API-144 | Agent run 조회 응답은 stage별 `attempt_count`, `max_attempts`, `fencing_token`, `lease_expires_at`, `timeout_at`을 포함하되 worker owner 식별자는 노출하지 않는다. |
 | API-145 | role route 생성은 `failure_policy=FAIL_STOP|FAILOVER`와 선택적 `fallback_model_profile_id`를 받는다. `FAILOVER`는 기본 모델과 다른 검증 모델 하나를 요구하며 run 조회는 stage의 기본·예비 invocation을 시도 순서, 실제 모델, 상태와 안전한 오류 코드로 반환한다. |
 

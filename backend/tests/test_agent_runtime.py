@@ -201,18 +201,30 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     assert body["created"] is True
     assert body["purpose"] == "DIAGNOSTIC"
     assert body["execution_stage"] == "SHADOW"
+    assert body["dag_version"] == "agent-dag-v2"
     assert body["state"] == "CREATED"
     assert body["core_action"] is None
     assert body["evidence_bundle"] is None
-    assert len(body["stages"]) == 7
+    assert len(body["stages"]) == 8
     assert all(stage["state"] == "PENDING" for stage in body["stages"])
     assert all(stage["attempt_count"] == 0 for stage in body["stages"])
+    pending_auditor = next(
+        stage for stage in body["stages"] if stage["role"] == "EVIDENCE_CANDIDATE_AUDITOR"
+    )
+    pending_core = next(stage for stage in body["stages"] if stage["role"] == "CORE")
+    assert set(pending_auditor["dependencies"]) == {
+        "TECHNICAL_SCOUT",
+        "NEWS_DISCLOSURE_SCOUT",
+        "MARKET_SECTOR_SCOUT",
+        "POSITION_RISK_SCOUT",
+    }
+    assert "EVIDENCE_CANDIDATE_AUDITOR" in pending_core["dependencies"]
 
     second = client.post("/api/v1/ai/agent-runs/diagnostic", headers=headers, json=request)
     assert second.status_code == 201
     assert second.json()["created"] is False
     assert second.json()["run_id"] == body["run_id"]
-    for _ in range(7):
+    for _ in range(8):
         assert process_agent_work_once(
             db,
             worker_id="agent-test-worker",
@@ -225,6 +237,20 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     assert completed_body["state"] == "PARTIAL"
     assert completed_body["core_action"] == "WAIT"
     assert completed_body["evidence_bundle"]["state"] == "PARTIAL"
+    auditor = next(
+        stage
+        for stage in completed_body["stages"]
+        if stage["role"] == "EVIDENCE_CANDIDATE_AUDITOR"
+    )
+    assert auditor["state"] == "SUCCEEDED"
+    assert auditor["invocation"] is None
+    assert auditor["output"]["candidate_count"] == 0
+    assert auditor["output"]["reason_codes"] == ["NO_PROVIDER_SOURCE_CANDIDATES"]
+    assert auditor["output"]["bundle_mutated"] is False
+    assert (
+        auditor["output"]["evidence_bundle_hash"]
+        == completed_body["evidence_bundle"]["bundle_hash"]
+    )
     assert sum(stage["invocation"] is not None for stage in completed_body["stages"]) == 5
     news = next(
         stage
@@ -234,7 +260,7 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     assert news["state"] == "INSUFFICIENT_DATA"
     assert news["invocation"]["actual_provider"] == "CRESTA_MOCK"
     assert db.scalar(select(func.count()).select_from(AgentRun)) == 1
-    assert db.scalar(select(func.count()).select_from(AgentStageRun)) == 7
+    assert db.scalar(select(func.count()).select_from(AgentStageRun)) == 8
     assert db.scalar(select(func.count()).select_from(EvidenceBundle)) == 1
     assert db.scalar(select(func.count()).select_from(LlmInvocation)) == 5
     assert db.scalar(select(func.count()).select_from(Decision)) == 0

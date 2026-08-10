@@ -98,3 +98,10 @@
 - 공개 HTTPS URL만 run별 중복 없이 `UNRATED EvidenceItem`으로 저장하며 원문 응답, private·loopback URL과 credential은 저장하지 않는다.
 - Scout의 일반 `allowed_input_refs`와 검증 근거 전용 `allowed_evidence_refs`를 분리했다. 검증된 근거가 없으면 모델은 빈 `evidence_refs`를 반환해야 하며 URL이나 임의 ID를 반환하면 fail-closed 처리한다.
 - schema, evidence reference와 Core incomplete-role 계약 오류를 구분된 안전 코드로 기록한다. 집중 시험 25개, backend 전체 188개 시험 및 Ruff를 통과했다.
+
+## 2026-08-11 Evidence Candidate Auditor
+
+- `agent-dag-v2` 고정 DAG를 8개 stage로 확장하고 네 Scout 이후 Core 전에 내부 `EVIDENCE_CANDIDATE_AUDITOR`를 배치했다. 신규 버전은 기존 v1 멱등 run과 분리되며 진행 중 v1은 감사 없음으로 안전하게 마무리한다.
+- Auditor는 외부 호출 없이 현재 run의 `UNRATED EvidenceItem`을 중복 제거된 내부 ID와 Provider별 개수로 집계한다. URL·Provider 원문 응답은 Core에 전달하지 않는다.
+- 기존 EvidenceBundle은 수정하지 않으며 Core에는 감사 stage ref, 후보 개수, reason code와 검증 근거 개수만 전달한다. Bundle이 `VERIFIED`가 아니면 run은 계속 `PARTIAL`이다.
+- `20260811_0022` migration의 upgrade→downgrade→upgrade, backend 전체 188개 시험과 Ruff를 통과했다. 실제 출처를 `PRIMARY/SECONDARY`로 승격하는 정책은 DART·거래소·뉴스 수집 방식 확정 후 구현한다.

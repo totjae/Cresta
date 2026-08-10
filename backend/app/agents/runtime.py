@@ -37,7 +37,7 @@ from app.models import (
     User,
 )
 
-DAG_VERSION = "agent-dag-v1"
+DAG_VERSION = "agent-dag-v2"
 EVIDENCE_POLICY_VERSION = "fixture-none-v1"
 ROUTE_ROLES = (
     "TECHNICAL_SCOUT",
@@ -54,6 +54,16 @@ STAGES = (
     ("MARKET_SECTOR_SCOUT", 50, ("EVIDENCE_VERIFIER",)),
     ("POSITION_RISK_SCOUT", 60, ("EVIDENCE_VERIFIER",)),
     (
+        "EVIDENCE_CANDIDATE_AUDITOR",
+        65,
+        (
+            "TECHNICAL_SCOUT",
+            "NEWS_DISCLOSURE_SCOUT",
+            "MARKET_SECTOR_SCOUT",
+            "POSITION_RISK_SCOUT",
+        ),
+    ),
+    (
         "CORE",
         70,
         (
@@ -61,6 +71,7 @@ STAGES = (
             "NEWS_DISCLOSURE_SCOUT",
             "MARKET_SECTOR_SCOUT",
             "POSITION_RISK_SCOUT",
+            "EVIDENCE_CANDIDATE_AUDITOR",
         ),
     ),
 )
@@ -450,13 +461,14 @@ def _invoke_once(
     )
     invocation.validation_status = result.schema_validation
     invocation.completed_at = datetime.now(UTC)
-    _persist_source_candidates(
-        db,
-        stage=stage,
-        provider_name=result.actual_provider or provider.name,
-        candidates=list(result.source_candidates),
-        now=invocation.completed_at,
-    )
+    if binding.route.web_search_enabled:
+        _persist_source_candidates(
+            db,
+            stage=stage,
+            provider_name=result.actual_provider or provider.name,
+            candidates=list(result.source_candidates),
+            now=invocation.completed_at,
+        )
     if result.status != "SUCCEEDED" or result.schema_validation != "PASSED":
         invocation.error_code = f"LLM_{result.status}"
         return None

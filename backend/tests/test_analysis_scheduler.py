@@ -164,7 +164,7 @@ def test_tick_admits_shadow_agent_run_when_all_active_routes_exist(
     run_analysis_tick(db, slot=slot, settings=settings, now=now)
     run = db.scalar(select(AgentRun))
     assert run is not None and run.state == "CREATED"
-    assert db.scalar(select(func.count()).select_from(AgentStageRun)) == 7
+    assert db.scalar(select(func.count()).select_from(AgentStageRun)) == 8
 
 
 def test_scheduler_lease_fences_duplicate_owner_and_reports_stale(db: Session) -> None:

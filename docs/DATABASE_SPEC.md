@@ -267,6 +267,7 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-136 | 발견 모델은 `DRAFT`로 저장하고 사용자가 활성화한 모델만 `VALIDATED`가 된다. 등록·동기화가 기존 ACTIVE route를 자동 변경하지 않는다. |
 | DB-137 | 모델 재동기화는 기존 `provider_model_id`를 중복 생성하지 않고 새 모델만 추가하며 기존 검증 모델과 route 이력을 자동 삭제하지 않는다. |
 | DB-138 | Provider citation에서 정규화한 source candidate는 기존 `evidence_items`에 run별 중복 URL 없이 `source_tier=UNRATED`, `extraction_method=RULE`로 저장한다. 후보 저장은 불변 `evidence_bundles`를 수정하지 않는다. |
+| DB-139 | `agent_stage_runs.role`은 내부 `EVIDENCE_CANDIDATE_AUDITOR`를 허용한다. 감사 결과는 stage `output_json`에 저장하고 별도 LLM invocation이나 EvidenceBundle 수정은 생성하지 않는다. |
 | DB-128 | `llm_model_profiles`는 Provider에 속한 재사용 가능한 모델 카탈로그이며 model 기본 생성 파라미터와 capability 검증 결과를 저장한다. 역할 이름을 model alias나 provider model ID로 강제하지 않는다. |
 | DB-129 | `llm_role_routes`는 역할 배정 version으로 사용하고 generation override와 계산 가능한 상속 출처를 저장한다. 같은 owner·scope·role의 `ACTIVE`는 부분 unique 하나만 허용한다. |
 | DB-130 | 역할 배정 활성화 transaction은 새 route를 `ACTIVE`, 기존 활성 route를 `SUPERSEDED`로 원자 전환한다. 여러 `VALIDATED` 행은 후보 이력일 뿐 runtime 기본값이 아니다. |

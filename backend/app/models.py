@@ -1186,7 +1186,8 @@ class AgentStageRun(Base):
         UniqueConstraint("run_id", "role", name="uq_agent_stage_runs_run_role"),
         CheckConstraint(
             "role IN ('INTEL_COLLECTOR','EVIDENCE_VERIFIER','TECHNICAL_SCOUT',"
-            "'NEWS_DISCLOSURE_SCOUT','MARKET_SECTOR_SCOUT','POSITION_RISK_SCOUT','CORE')",
+            "'NEWS_DISCLOSURE_SCOUT','MARKET_SECTOR_SCOUT','POSITION_RISK_SCOUT',"
+            "'EVIDENCE_CANDIDATE_AUDITOR','CORE')",
             name="ck_agent_stage_runs_role",
         ),
         CheckConstraint(

@@ -94,7 +94,7 @@ def test_expired_internal_claim_is_recovered_and_old_fence_cannot_complete(
         now=now,
     )
 
-    for _ in range(6):
+    for _ in range(7):
         assert process_agent_work_once(
             db,
             worker_id="worker-new",
@@ -219,7 +219,7 @@ def test_failed_primary_uses_one_fallback_and_preserves_both_invocations(
         },
     )
     assert admitted.status_code == 201, admitted.text
-    for _ in range(7):
+    for _ in range(8):
         assert process_agent_work_once(db, worker_id="fallback-worker", lease_seconds=30)
 
     completed = client.get(f"/api/v1/ai/agent-runs/{admitted.json()['run_id']}")

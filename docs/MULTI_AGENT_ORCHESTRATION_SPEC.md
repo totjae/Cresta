@@ -25,6 +25,7 @@ Cresta의 정보 수집, 증거 검증, 기술·뉴스·시장·포지션 평가
 | --- | --- | --- | --- | --- |
 | `INTEL_COLLECTOR` | Cresta Intel | 소스 조회 작업 | `EvidenceItem[]` | 없음 |
 | `EVIDENCE_VERIFIER` | Cresta Verify | 수집 증거 | `EvidenceBundle` | 없음 |
+| `EVIDENCE_CANDIDATE_AUDITOR` | Cresta Evidence Audit | Provider 출처 후보 | 후보 감사 보고서 | 없음 |
 | `TECHNICAL_SCOUT` | 기술 Scout | `scout-input-v1` | `AgentAssessment` | 없음 |
 | `NEWS_DISCLOSURE_SCOUT` | 뉴스·공시 Scout | 검증된 증거 묶음 | `AgentAssessment` | 없음 |
 | `MARKET_SECTOR_SCOUT` | 시장·업종 Scout | 시장 snapshot·검증 증거 | `AgentAssessment` | 없음 |
@@ -236,10 +237,10 @@ app/llm/*                     Provider/Gateway 호출 계층
 
 | ID | 요구사항 |
 | --- | --- |
-| MAO-090 | `POST /ai/agent-runs/diagnostic`은 로그인 사용자, KRX/NXT 종목, 최신 영속 market snapshot, `dag_version=agent-dag-v1`과 명시적인 role별 route ID를 입력으로 받는다. |
+| MAO-090 | `POST /ai/agent-runs/diagnostic`은 로그인 사용자, KRX/NXT 종목, 최신 영속 market snapshot, `dag_version=agent-dag-v2`와 명시적인 role별 route ID를 입력으로 받는다. v1 진행 run은 Candidate Audit 없음으로 안전하게 마무리하되 신규 admission에는 재사용하지 않는다. |
 | MAO-091 | route가 필요한 역할은 `TECHNICAL_SCOUT`, `NEWS_DISCLOSURE_SCOUT`, `MARKET_SECTOR_SCOUT`, `POSITION_RISK_SCOUT`, `CORE`이다. 각 route는 요청 사용자 소유, `VALIDATED`, `SHADOW`, 해당 role 일치, 검증된 model이어야 한다. 실패 정책은 MAO-110~113의 `FAIL_STOP` 또는 단일 `FAILOVER`만 허용하며 하나라도 준비되지 않으면 run을 만들지 않는다. |
 | MAO-092 | `INTEL_COLLECTOR`는 외부 네트워크 없이 빈 fixture를 만들고 `EVIDENCE_VERIFIER`는 이를 `PARTIAL` 빈 bundle로 고정한다. 외부 정보 없음은 긍정 신호로 해석하지 않는다. |
-| MAO-093 | 실행 순서는 Intel → Verify → 4개 Scout → Core로 고정한다. v1은 한 DB 작업 단위에서 순차 실행하지만 stage dependency를 저장해 이후 병렬 worker가 동일 DAG를 재현할 수 있어야 한다. |
+| MAO-093 | 실행 순서는 Intel → Verify → 4개 Scout → Candidate Audit → Core로 고정한다. 각 Scout는 Verify 이후 실행하고 Candidate Audit은 네 Scout 이후, Core는 Audit 이후 실행한다. stage dependency를 저장해 worker가 동일 DAG를 재현할 수 있어야 한다. |
 | MAO-094 | 각 route stage는 Provider 호출 전 `RUNNING` invocation을 저장하고 완료 후 실제 provider/model, 입력·응답 hash, latency와 서버 측 schema 검증 결과를 기록한다. 외부 Adapter는 `DIAGNOSTIC/SHADOW`에서만 허용하고 도구 사용은 거부한다. |
 | MAO-095 | Technical은 최신 Watch 지표가 없으면, News는 검증된 외부 증거가 없으면, Position Risk는 열린 position이 없으면 `INSUFFICIENT_DATA`를 출력한다. Market은 정상·최신 snapshot만 평가한다. |
 | MAO-096 | Core는 필수 Scout 중 하나라도 `SUCCEEDED`가 아니면 `WAIT`만 출력한다. v1 Core는 `BUY`, 승인, 판단 실행, 주문을 생성할 수 없다. |
@@ -250,7 +251,7 @@ app/llm/*                     Provider/Gateway 호출 계층
 
 | ID | 요구사항 |
 | --- | --- |
-| MAO-100 | `POST /ai/agent-runs/diagnostic`은 run과 고정 DAG의 7개 `PENDING` stage를 하나의 트랜잭션으로 등록하고 즉시 반환한다. HTTP 요청 프로세스는 stage 또는 LLM 호출을 직접 실행하지 않는다. |
+| MAO-100 | `POST /ai/agent-runs/diagnostic`은 run과 고정 DAG의 8개 `PENDING` stage를 하나의 트랜잭션으로 등록하고 즉시 반환한다. HTTP 요청 프로세스는 stage 또는 LLM 호출을 직접 실행하지 않는다. |
 | MAO-101 | 별도 `agent` worker는 의존 stage가 허용된 종료 상태에 도달한 `PENDING` stage만 claim하며, claim 시 `lease_owner_id`, `lease_expires_at`, 증가하는 `fencing_token`, `attempt_count`, `timeout_at`을 원자적으로 기록한다. |
 | MAO-102 | stage 완료 쓰기는 현재 `lease_owner_id`와 `fencing_token`이 모두 일치할 때만 허용한다. lease를 잃은 worker의 늦은 결과는 저장하지 않는다. |
 | MAO-103 | worker 재시작 또는 lease 만료 시 외부 호출이 시작되지 않은 내부 fixture stage만 다시 `PENDING`으로 돌릴 수 있다. invocation이 생성된 stage는 자동 재전송하지 않고 `TIMED_OUT` 또는 `FAILED`로 격리한다. |
@@ -302,7 +303,11 @@ app/llm/*                     Provider/Gateway 호출 계층
 
 ### 역할 비종속 Provider 출처 수집 경계 (2026-08-11)
 
-- `MAO-078`: 웹 검색을 실행한 역할과 관계없이 Provider가 반환한 citation/source metadata는 canonical `EvidenceSourceCandidate`로 정규화한다. 후보에는 HTTPS URL, 제목, 선택적 게시시각과 Provider provenance만 허용하며 원문 응답은 저장하지 않는다.
+- `MAO-078`: 웹 검색이 허용되어 실제 요청에 검색 도구가 포함된 invocation은 역할과 관계없이 Provider가 반환한 citation/source metadata를 canonical `EvidenceSourceCandidate`로 정규화한다. 검색 비활성 invocation의 citation 필드는 후보로 저장하지 않는다. 후보에는 HTTPS URL, 제목, 선택적 게시시각과 Provider provenance만 허용하며 원문 응답은 저장하지 않는다.
 - `MAO-079`: 정규화된 후보는 해당 run의 `EvidenceItem(source_tier=UNRATED)`으로 보존하되 현재 불변 EvidenceBundle에 자동 추가하지 않는다. Verify를 통과하지 않은 후보는 Scout·Core의 `evidence_refs`나 주문·승인 근거가 될 수 없다.
 - `MAO-084`: Scout 입력의 `input_refs`와 `allowed_evidence_refs`를 분리한다. 모델은 `evidence_refs`에 `allowed_evidence_refs`의 부분집합만 반환하며 목록이 비어 있으면 반드시 빈 배열을 반환한다. Provider URL·citation 문자열은 내부 evidence ID가 아니다.
 - `MAO-085`: 출력 계약 실패는 원문 없이 `LLM_SCHEMA_VALIDATION_FAILED`, `LLM_EVIDENCE_REF_NOT_ALLOWED`, `LLM_CORE_INCOMPLETE_ROLES_MISMATCH`로 구분해 invocation에 기록한다.
+- `MAO-086`: 고정 DAG는 네 Scout 종료 후 Core 전에 내부 `EVIDENCE_CANDIDATE_AUDITOR`를 실행한다. 이 단계는 외부 모델이나 네트워크를 호출하지 않고 현재 run의 `UNRATED EvidenceItem`만 집계한다.
+- `MAO-087`: 후보 감사 출력은 후보 ID, 총개수, Provider별 개수와 `NO_PROVIDER_SOURCE_CANDIDATES` 또는 `UNRATED_SOURCE_CANDIDATES_PRESENT` reason code만 포함한다. URL 원문과 모델 응답 원문은 Core 입력에 전달하지 않는다.
+- `MAO-088`: Candidate Auditor는 기존 불변 EvidenceBundle을 수정하거나 후보를 `PRIMARY`, `SECONDARY`, `VERIFIED`로 승격하지 않는다. Core에는 후보 감사 ref·개수·reason code만 전달하며 후보 ID는 `evidence_refs`로 취급하지 않는다.
+- `MAO-089`: EvidenceBundle이 `VERIFIED`가 아닌 run은 모든 stage가 기술적으로 성공해도 최종 상태를 `PARTIAL`로 유지한다. 출처별 수집·검증 정책이 구현되기 전에는 후보 존재만으로 완전한 판단이 되지 않는다.

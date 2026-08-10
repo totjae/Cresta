@@ -142,7 +142,7 @@ def test_external_outputs_are_server_validated_and_adopted_without_trading(
     )
     assert response.status_code == 201, response.text
     run = _run_until_terminal(db, response.json()["run_id"])
-    assert run.state == "SUCCEEDED"
+    assert run.state == "PARTIAL"
     assert run.core_action == "WAIT"
 
     completed = client.get(f"/api/v1/ai/agent-runs/{run.id}").json()
@@ -174,6 +174,11 @@ def test_external_outputs_are_server_validated_and_adopted_without_trading(
     assert "Asia/Seoul" in runtime_context
     assert "Web search is disabled" in runtime_context
     assert "If allowed_evidence_refs is empty" in runtime_context
+    core_request = next(request for request in adapter.requests if request.role == "CORE")
+    core_input = json.loads(core_request.messages[-1]["content"])
+    assert core_input["evidence_candidate_audit"]["candidate_count"] == 0
+    assert core_input["evidence_candidate_audit"]["verified_evidence_count"] == 0
+    assert "candidate_ids" not in core_input["evidence_candidate_audit"]
     assert db.scalar(select(func.count()).select_from(Decision)) == 0
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
@@ -226,6 +231,10 @@ def test_provider_sources_are_persisted_as_unrated_candidates_without_bundle_pro
         monkeypatch,
         source_candidates=[source, source],
     )
+    search_route = db.get(LlmRoleRoute, route_ids["MARKET_SECTOR_SCOUT"])
+    assert search_route is not None
+    search_route.web_search_enabled = True
+    db.commit()
     response = client.post(
         "/api/v1/ai/agent-runs/diagnostic",
         headers={"Origin": "https://testserver", "X-CSRF-Token": csrf},
@@ -237,7 +246,7 @@ def test_provider_sources_are_persisted_as_unrated_candidates_without_bundle_pro
         },
     )
     run = _run_until_terminal(db, response.json()["run_id"])
-    assert run.state == "SUCCEEDED"
+    assert run.state == "PARTIAL"
     candidates = list(
         db.scalars(select(EvidenceItem).where(EvidenceItem.run_id == run.id))
     )
@@ -245,6 +254,21 @@ def test_provider_sources_are_persisted_as_unrated_candidates_without_bundle_pro
     assert candidates[0].source_url == source.url
     assert candidates[0].source_tier == "UNRATED"
     assert candidates[0].facts_json == "[]"
+    completed = client.get(f"/api/v1/ai/agent-runs/{run.id}").json()
+    auditor = next(
+        stage
+        for stage in completed["stages"]
+        if stage["role"] == "EVIDENCE_CANDIDATE_AUDITOR"
+    )
+    assert auditor["invocation"] is None
+    assert auditor["output"]["candidate_count"] == 1
+    assert auditor["output"]["candidate_ids"] == [candidates[0].id]
+    assert auditor["output"]["provider_counts"] == {"EXTERNAL_FIXTURE": 1}
+    assert auditor["output"]["reason_codes"] == [
+        "UNRATED_SOURCE_CANDIDATES_PRESENT"
+    ]
+    assert auditor["output"]["bundle_mutated"] is False
+    assert completed["evidence_bundle"]["evidence_ids"] == []
 
 
 def test_external_url_as_evidence_ref_is_rejected_with_specific_error(

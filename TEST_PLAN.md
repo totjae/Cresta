@@ -216,7 +216,7 @@
 | T-MAO-007 | MAO-060~063 | N100 동시 호출·queue 지연·비용 한도 초과 | admission·우선순위·유효시간 준수, Guard 지속 | 계획 |
 | T-MAO-008 | MAO-070~074 | 웹 원문에 주문·비밀·내부 URL 접근 지시 삽입 | 명령 무시, SSRF·도구·Broker 접근 차단, 안전 escape | 계획 |
 | T-MAO-009 | MAO-080~083 | 신규 model·prompt·DAG를 SHADOW로 실행·활성화 시도 | 회귀시험·TOTP 전 활성화 불가, SHADOW 승인·주문 0건 | 계획 |
-| T-MAO-010 | MAO-090~098, DB-124~127, API-135, UI-118~119 | 5개 Mock route로 DIAGNOSTIC DAG 실행·중복 요청·route 변조 | run 1개, stage 7개·invocation 5개 provenance, Core WAIT, decision·approval·order 0건 | 통과 (2026-08-06, API·component fixture) |
+| T-MAO-010 | MAO-090~098, DB-124~127, API-135, UI-118~119 | 5개 Mock route로 DIAGNOSTIC DAG 실행·중복 요청·route 변조 | run 1개, stage 8개·invocation 5개 provenance, Candidate Audit 후 Core WAIT, decision·approval·order 0건 | 통과 (2026-08-06 최초, 2026-08-11 Candidate Audit 회귀) |
 | T-MAO-011 | MAO-100~107, DB-132~134, API-143~144, UI-127 | 비동기 admission, stage claim·lease 만료·재claim과 이전 fencing 완료 시도, scheduler ACTIVE route admission | stage 단일 소유·fencing 증가·늦은 완료 거부, UI 비동기 상태 갱신, 최종 PARTIAL/WAIT, decision·approval·order 0건 | 통과 (2026-08-06, 자동 DB·API·component fixture) |
 
 ### 3.12.2 LLM Provider 및 Gateway
@@ -467,3 +467,7 @@ Local evidence: OpenAI 호환·Responses Adapter와 parameter policy 집중 시�
 - `T-EVIDENCE-002`: HTTPS 공개 URL만 `UNRATED EvidenceItem`으로 저장하고 같은 run의 중복 URL, private/loopback URL과 원문 응답을 저장하지 않는지 확인한다.
 - `T-EVIDENCE-003`: 빈 검증 Bundle에서는 모델에 `allowed_evidence_refs=[]`와 빈 배열 반환 규칙을 전달하고 URL·임의 ID 참조를 `LLM_EVIDENCE_REF_NOT_ALLOWED`로 거부하는지 확인한다.
 - `T-EVIDENCE-004`: schema, evidence reference와 Core incomplete-role 불일치를 서로 다른 안전한 invocation 오류 코드로 기록하면서 승인·주문은 생성하지 않는지 확인한다.
+- `T-EVIDENCE-005`: 신규 run이 8개 stage를 만들고 Candidate Auditor가 네 Scout 종료 전에는 claim되지 않으며 Core는 Auditor 종료 후에만 실행되는지 확인한다.
+- `T-EVIDENCE-006`: Provider 후보가 없는 run은 `NO_PROVIDER_SOURCE_CANDIDATES`, 후보가 있는 run은 중복 제거된 ID·Provider별 개수와 `UNRATED_SOURCE_CANDIDATES_PRESENT`를 감사 출력에 기록하는지 확인한다.
+- `T-EVIDENCE-007`: Candidate Auditor가 invocation을 만들거나 EvidenceBundle의 hash·evidence IDs를 수정하지 않고 Core 입력에는 후보 개수와 reason code만 전달하는지 확인한다.
+- `T-EVIDENCE-008`: EvidenceBundle이 `PARTIAL`이면 모든 LLM stage가 성공해도 run 최종 상태가 `PARTIAL`이며 Decision·Approval·TradingOrder가 0건인지 확인한다.
