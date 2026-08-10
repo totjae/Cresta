@@ -14,7 +14,10 @@ from app.llm.contracts import LlmRequest
 
 
 def _request(
-    service_tier: str = "DEFAULT", *, web_search: bool = False
+    service_tier: str = "DEFAULT",
+    *,
+    web_search: bool = False,
+    reasoning_effort: str | None = None,
 ) -> LlmRequest:
     return LlmRequest(
         invocation_id=uuid7(),
@@ -38,6 +41,7 @@ def _request(
         max_output_tokens=256,
         temperature=0,
         top_p=0.9,
+        reasoning_effort=reasoning_effort,
         tool_policy="ALLOWLIST" if web_search else "NONE",
         allowed_tools=["WEB_SEARCH"] if web_search else [],
     )
@@ -215,6 +219,65 @@ def test_llm_gateway_compatible_request_uses_provider_web_search_switch() -> Non
     )
     adapter.generate_structured(_request(web_search=True), "gateway-model")
     assert captured["body"]["web_search"] is True
+
+
+def test_compatible_reasoning_model_uses_apichat_parameter_policy() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(503, json={"error": "fixture"})
+
+    adapter = OpenAICompatibleAdapter(
+        endpoint="https://api.llmgateway.example/v1",
+        api_key="secret",
+        chat_path="/chat/completions",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    result = adapter.generate_structured(
+        _request(reasoning_effort="MEDIUM"), "gpt-5-mini-2025-08-07"
+    )
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["max_completion_tokens"] == 256
+    assert body["reasoning_effort"] == "medium"
+    assert "max_tokens" not in body
+    assert "temperature" not in body
+    assert "top_p" not in body
+    assert body["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "cresta_agent_output",
+            "strict": True,
+            "schema": _request().output_json_schema,
+        },
+    }
+    assert result.status == "PROVIDER_ERROR"
+    assert result.retry_count == 0
+
+
+def test_compatible_non_reasoning_model_keeps_sampling_and_strict_schema() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(503, json={"error": "fixture"})
+
+    adapter = OpenAICompatibleAdapter(
+        endpoint="https://api.llmgateway.example/v1",
+        api_key="secret",
+        chat_path="/chat/completions",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    adapter.generate_structured(_request(), "google-vertex/gemini-3.1-flash-lite")
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["max_tokens"] == 256
+    assert body["temperature"] == 0
+    assert body["top_p"] == 0.9
+    assert "max_completion_tokens" not in body
+    assert body["response_format"]["type"] == "json_schema"
+    assert "Return exactly one JSON object" in body["messages"][0]["content"]
 
 
 @pytest.mark.parametrize(

@@ -450,3 +450,12 @@ Local evidence: 외부 Adapter fixture로 4 Scout·Core 유효 응답의 stage �
 - `T-LLM-WEB-010`: Core와 capability 미지원 모델의 웹 검색 route 검증이 fail-closed인지 확인한다.
 - `T-LLM-TIME-011`: 모든 invocation system context에 UTC와 Asia/Seoul 실행 시각이 있고 DB 이력에 같은 시각과 검색 여부가 저장되는지 검증한다.
 - `T-LLM-WEB-012`: Provider 검색 실패가 자동 보정 없이 `FAIL_STOP/FAILOVER`와 오류 이력으로만 처리되는지 확인한다.
+
+# OpenAI 호환 Adapter 정규화 시험 (2026-08-11)
+
+- `T-LLM-ADAPTER-013`: `gpt-5/o1/o3/o4` 모델 요청은 `max_completion_tokens`와 명시된 `reasoning_effort`를 사용하고 `max_tokens`, `temperature`, `top_p`를 전송하지 않는지 확인한다.
+- `T-LLM-ADAPTER-014`: 일반 OpenAI 호환 및 Gateway 경유 Gemini 모델은 `max_tokens`, 허용된 sampling 파라미터, strict JSON Schema response format과 server-owned schema instruction을 받는지 확인한다.
+- `T-LLM-ADAPTER-015`: LLM Gateway 모델 동기화 시 reasoning 계열 모델 capability가 추가되고 기존 capability를 하향 변경하지 않는지 확인한다.
+- `T-LLM-ADAPTER-016`: Provider가 정규화된 요청이나 strict schema를 거부하면 요청을 변경해 재호출하지 않고 기존 오류 상태와 0회 retry를 유지하는지 확인한다.
+
+Local evidence: OpenAI 호환 Adapter와 parameter policy 집중 시험 19개, backend 전체 182개 시험 및 Ruff가 통과했다. 실제 LLM Gateway와 외부 모델의 SHADOW 호출은 Ubuntu 서버 검증 항목이다.

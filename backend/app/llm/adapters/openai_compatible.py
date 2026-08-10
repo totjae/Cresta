@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.llm.adapters.http_base import ExternalHttpAdapter, parse_json_text, safe_model_id
 from app.llm.contracts import LlmRequest, ModelCapabilities
+from app.llm.parameter_policy import (
+    is_openai_reasoning_model,
+    uses_completion_token_parameter,
+)
 
 
 class OpenAICompatibleAdapter(ExternalHttpAdapter):
@@ -20,15 +25,37 @@ class OpenAICompatibleAdapter(ExternalHttpAdapter):
     def _request_parts(
         self, request: LlmRequest, model_id: str
     ) -> tuple[str, dict[str, str], dict[str, Any]]:
+        normalized_model_id = safe_model_id(model_id)
+        schema_instruction = (
+            "Return exactly one JSON object matching this JSON Schema. "
+            "Do not use Markdown or add fields outside the schema: "
+            + json.dumps(request.output_json_schema, ensure_ascii=False, separators=(",", ":"))
+        )
         body: dict[str, Any] = {
-            "model": safe_model_id(model_id),
-            "messages": request.messages,
-            "max_tokens": request.max_output_tokens,
-            "temperature": request.temperature,
-            "response_format": {"type": "json_object"},
+            "model": normalized_model_id,
+            "messages": [
+                {"role": "system", "content": schema_instruction},
+                *request.messages,
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "cresta_agent_output",
+                    "strict": True,
+                    "schema": request.output_json_schema,
+                },
+            },
         }
-        if request.top_p is not None:
-            body["top_p"] = request.top_p
+        if uses_completion_token_parameter(normalized_model_id):
+            body["max_completion_tokens"] = request.max_output_tokens
+        else:
+            body["max_tokens"] = request.max_output_tokens
+        if not is_openai_reasoning_model(normalized_model_id):
+            body["temperature"] = request.temperature
+            if request.top_p is not None:
+                body["top_p"] = request.top_p
+        if request.reasoning_effort is not None:
+            body["reasoning_effort"] = request.reasoning_effort.lower()
         if request.seed is not None:
             body["seed"] = request.seed
         if request.service_tier != "DEFAULT":

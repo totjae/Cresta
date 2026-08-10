@@ -79,3 +79,9 @@
 - 역할 route에 versioned 웹 검색 권한을 추가하고 뉴스·공시/시장·업종 Scout만 SHADOW에서 허용하도록 fail-closed 검증을 적용했다.
 - 모든 LLM 호출에 UTC와 Asia/Seoul 현재 시각 및 최신성 지침을 주입하고 invocation 감사 이력에 실행 시각과 검색 사용 여부를 저장한다.
 - Provider 검색 결과를 검증된 EvidenceBundle로 승격하는 수집 Adapter는 아직 구현되지 않았으므로 검색 결과는 주문·승인 경계 밖에 있다.
+
+## 2026-08-11 APIchat-compatible request normalization
+
+- APIchat의 실제 Provider parameter policy와 OpenAI-compatible request builder를 읽기 전용으로 대조했다.
+- GPT-5/o계열 토큰 한도 필드, reasoning sampling 억제, reasoning effort 전달, strict schema 요청과 모델별 capability 동기화를 구현했다.
+- 로컬 전체 backend 시험은 통과했으며 실제 LLM Gateway 계정의 GPT-5와 Gateway 경유 Gemini SHADOW 호출은 Ubuntu 서버 배포 후 검증한다.

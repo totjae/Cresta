@@ -21,6 +21,7 @@ from app.llm.discovery import (
     get_template,
     resolve_endpoint,
 )
+from app.llm.parameter_policy import is_openai_reasoning_model
 from app.llm.prompts import LlmPromptError, get_prompt
 from app.llm.registry import AdapterNotImplementedError, provider_registry
 from app.llm.router import RouteBoundaryError, validate_foundation_route
@@ -201,7 +202,9 @@ def _discovered_alias(model_id: str, used: set[str]) -> str:
 
 
 def _discovered_capabilities(
-    adapter_type: str, provider_template_id: str | None = None
+    adapter_type: str,
+    provider_template_id: str | None = None,
+    model_id: str = "",
 ) -> ModelCapabilities:
     return ModelCapabilities(
         structured_output=True,
@@ -213,7 +216,13 @@ def _discovered_capabilities(
             }
             or provider_template_id == "llm-gateway"
         ),
-        reasoning=adapter_type in {"OPENAI_RESPONSES", "GEMINI_GENERATE_CONTENT"},
+        reasoning=(
+            adapter_type in {"OPENAI_RESPONSES", "GEMINI_GENERATE_CONTENT"}
+            or (
+                adapter_type == "OPENAI_COMPATIBLE"
+                and is_openai_reasoning_model(model_id)
+            )
+        ),
         seed=adapter_type == "GEMINI_GENERATE_CONTENT",
         usage_reporting=True,
     )
@@ -233,18 +242,25 @@ def _add_discovered_models(
     by_provider_id = {item.provider_model_id: item for item in existing}
     used_aliases = {item.alias for item in existing}
     created: list[LlmModelProfile] = []
-    capabilities = _discovered_capabilities(
-        provider.adapter_type, provider.provider_template_id
-    )
     for item in discovered:
+        capabilities = _discovered_capabilities(
+            provider.adapter_type,
+            provider.provider_template_id,
+            item.provider_model_id,
+        )
         if item.provider_model_id in by_provider_id:
             existing_model = by_provider_id[item.provider_model_id]
             declared = ModelCapabilities.model_validate_json(
                 existing_model.capabilities_json
             )
-            if capabilities.web_search and not declared.web_search:
+            capability_upgrades = {
+                field: True
+                for field in ("web_search", "reasoning", "seed")
+                if getattr(capabilities, field) and not getattr(declared, field)
+            }
+            if capability_upgrades:
                 existing_model.capabilities_json = declared.model_copy(
-                    update={"web_search": True}
+                    update=capability_upgrades
                 ).model_dump_json()
                 existing_model.version += 1
             continue
