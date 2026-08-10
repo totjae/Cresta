@@ -5,11 +5,16 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.agents.contracts import AgentAssessment
+from app.agents.contracts import (
+    AgentAssessment,
+    AgentCoreModelOutput,
+    AgentScoutModelOutput,
+)
 from app.config import get_settings
 from app.llm.contracts import LlmRequest
 from app.llm.discovery import get_template
@@ -73,6 +78,13 @@ class RouteBinding:
     provider: LlmProviderProfile
     fallback_model: LlmModelProfile | None = None
     fallback_provider: LlmProviderProfile | None = None
+
+
+@dataclass(frozen=True)
+class InvocationOutcome:
+    model: LlmModelProfile
+    provider: LlmProviderProfile
+    output_json: dict[str, object] | None
 
 
 def _canonical(value: object) -> str:
@@ -234,7 +246,7 @@ def _invoke_once(
     provider: LlmProviderProfile,
     role_input: dict[str, object],
     now: datetime,
-) -> bool:
+) -> InvocationOutcome | None:
     stage.state = "RUNNING"
     stage.started_at = now
     invocation = LlmInvocation(
@@ -273,7 +285,11 @@ def _invoke_once(
         input_schema_version="agent-runtime-input-v1",
         input_hash=stage.input_hash,
         messages=messages,
-        output_json_schema={"type": "object"},
+        output_json_schema=(
+            AgentCoreModelOutput.model_json_schema()
+            if stage.role == "CORE"
+            else AgentScoutModelOutput.model_json_schema()
+        ),
         timeout_ms=binding.route.timeout_ms,
         max_output_tokens=binding.route.max_output_tokens_override or model.max_output_tokens,
         temperature=float(
@@ -299,7 +315,7 @@ def _invoke_once(
             invocation.state = "PROVIDER_ERROR"
             invocation.error_code = "AGENT_PROVIDER_CREDENTIAL_REQUIRED"
             invocation.completed_at = now
-            return False
+            return None
         try:
             credential = LlmSecretStore(
                 get_settings().llm_secret_directory
@@ -308,7 +324,7 @@ def _invoke_once(
             invocation.state = "PROVIDER_ERROR"
             invocation.error_code = "AGENT_PROVIDER_CREDENTIAL_UNREADABLE"
             invocation.completed_at = now
-            return False
+            return None
     try:
         result = provider_registry.resolve(
             provider.adapter_type,
@@ -324,10 +340,12 @@ def _invoke_once(
         invocation.state = "PROVIDER_ERROR"
         invocation.error_code = "AGENT_ADAPTER_NOT_ALLOWED"
         invocation.completed_at = now
-        return False
+        return None
     invocation.state = result.status
     invocation.actual_provider = result.actual_provider
     invocation.actual_model = result.actual_model
+    invocation.provider_request_id = result.provider_request_id
+    invocation.gateway_request_id = result.gateway_request_id
     invocation.raw_response_hash = result.raw_response_hash
     invocation.latency_ms = result.latency_ms
     invocation.usage_json = _canonical(
@@ -338,22 +356,45 @@ def _invoke_once(
         [binding.model.id, model.id] if model.id != binding.model.id else result.fallback_path
     )
     invocation.validation_status = result.schema_validation
-    invocation.completed_at = now
+    invocation.completed_at = datetime.now(UTC)
     if result.status != "SUCCEEDED" or result.schema_validation != "PASSED":
         invocation.error_code = f"LLM_{result.status}"
-        return False
-    return True
+        return None
+    if provider.adapter_type != "MOCK":
+        try:
+            if stage.role == "CORE":
+                output = AgentCoreModelOutput.model_validate(result.output_json)
+                expected_incomplete = sorted(
+                    str(item)
+                    for item in role_input.get("required_incomplete_roles", [])
+                )
+                if sorted(output.incomplete_roles) != expected_incomplete:
+                    raise ValueError("incomplete role set does not match server state")
+            else:
+                output = AgentScoutModelOutput.model_validate(result.output_json)
+                allowed_refs = {
+                    str(item) for item in role_input.get("allowed_input_refs", [])
+                }
+                if not set(output.evidence_refs).issubset(allowed_refs):
+                    raise ValueError("evidence reference is outside the role input")
+        except (ValidationError, ValueError, TypeError):
+            invocation.state = "INVALID_OUTPUT"
+            invocation.validation_status = "FAILED"
+            invocation.error_code = "LLM_INVALID_OUTPUT"
+            return None
+    invocation.validation_status = "PASSED"
+    return InvocationOutcome(model=model, provider=provider, output_json=result.output_json)
 
 
-def _invoke_mock(
+def _invoke_model(
     db: Session,
     *,
     stage: AgentStageRun,
     binding: RouteBinding,
     role_input: dict[str, object],
     now: datetime,
-) -> None:
-    if _invoke_once(
+) -> InvocationOutcome:
+    outcome = _invoke_once(
         db,
         stage=stage,
         binding=binding,
@@ -361,12 +402,13 @@ def _invoke_mock(
         provider=binding.provider,
         role_input=role_input,
         now=now,
-    ):
-        return
+    )
+    if outcome is not None:
+        return outcome
     if binding.route.fallback_policy == "FAILOVER":
         if binding.fallback_model is None or binding.fallback_provider is None:
             raise AgentRuntimeError("AGENT_ROUTE_SNAPSHOT_MISMATCH")
-        if _invoke_once(
+        outcome = _invoke_once(
             db,
             stage=stage,
             binding=binding,
@@ -374,8 +416,9 @@ def _invoke_mock(
             provider=binding.fallback_provider,
             role_input=role_input,
             now=now,
-        ):
-            return
+        )
+        if outcome is not None:
+            return outcome
     raise AgentRuntimeError("AGENT_LLM_FAIL_STOP")
 
 

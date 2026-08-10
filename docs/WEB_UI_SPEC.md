@@ -410,6 +410,7 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 | UI-126 | 선행조건 미충족으로 비활성화된 버튼은 `not-allowed` cursor와 구체적인 누락 사유를 표시한다. 실제 요청 처리 중에만 spinner와 `wait` cursor를 사용한다. |
 | UI-127 | DIAGNOSTIC DAG 버튼은 run admission 완료 즉시 다시 활성화한다. `CREATED/RUNNING` run이 있으면 1~2초 간격으로 목록을 갱신하고 stage 상태·attempt를 표시하되 HTTP 요청을 DAG 완료까지 유지하지 않는다. |
 | UI-130 | 역할별 배정은 기본 `FAIL_STOP`과 선택적 `FAILOVER`를 제공한다. `FAILOVER`일 때만 기본 모델과 다른 예비 모델 하나를 요구하고, route 이력과 Agent run 카드에 기본·예비 모델의 시도 순서·상태·오류 코드를 표시한다. |
+| UI-131 | Agent run 카드는 stage별 채택 결과(action/stance/status와 reason code), 실제 provider/model, schema 검증 상태, latency와 오류 코드를 표시한다. raw provider 응답·prompt·credential은 표시하지 않는다. |
 # Provider management revision (2026-08-07)
 
 - Provider registration selects one of 40 server catalog entries, shows unavailable authentication types as disabled, and renders template-specific configuration fields.

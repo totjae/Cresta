@@ -426,3 +426,12 @@ Local evidence: backend 전체 164개 시험과 Ruff, frontend TypeScript 및 11
 - `T-LLM-FAIL-003`: Core 또는 필수 Scout의 최종 실패 중 신규매수와 AI 주문은 차단되지만 Guard의 손절·비상정지·장마감 청산은 계속 동작하는지 검증한다.
 
 Local evidence: route 계약의 기본 `FAIL_STOP`, 서로 다른 검증 모델 하나만 허용하는 `FAILOVER`, 기본 호출 실패 후 예비 모델 1회 성공과 두 invocation 이력, FAIL_STOP 최종 실패 및 주문 0건을 자동 검증했다. backend 166개 시험·Ruff, frontend TypeScript·11개 component 시험·production build와 SQLite `0019` upgrade→downgrade→upgrade가 통과했다. 실제 외부 Provider 실패와 Guard 독립 동작은 서버·Guard 구현 후 검증한다.
+
+# 외부 LLM SHADOW 출력 채택 시험 (2026-08-10)
+
+- `T-AGENT-EXT-001`: 유효한 외부 Scout JSON을 역할별 계약으로 재검증하고 server-owned provenance를 덧붙여 stage output으로 저장하는지 검증한다.
+- `T-AGENT-EXT-002`: 필드 누락·추가, 범위 오류, 허용되지 않은 evidence reference를 `INVALID_OUTPUT`으로 종료하고 FAIL_STOP 또는 단일 fallback만 적용하는지 검증한다.
+- `T-AGENT-EXT-003`: Core는 유효한 `WAIT` 응답만 stage에 채택하며 외부 응답을 사용한 전체 DIAGNOSTIC run에서 `Decision`, `Approval`, `TradingOrder`가 0건인지 검증한다.
+- `T-AGENT-EXT-004`: Adapter request에 역할별 JSON Schema와 정규화된 market·indicator·position·evidence 입력이 전달되고 credential·주문 도구·원문은 포함되지 않는지 검증한다.
+
+Local evidence: 외부 Adapter fixture로 4 Scout·Core 유효 응답의 stage 채택, server-owned provenance, strict-schema 필수 필드, request ID·usage 영속화, 계약 오류의 `INVALID_OUTPUT/FAIL_STOP` 및 주문 0건을 검증했다. backend 168개 회귀 시험·Ruff, frontend TypeScript·11개 component 시험·production build가 통과했다. 실제 유료 Provider의 요청·응답은 Ubuntu 서버에서 별도 검증한다.

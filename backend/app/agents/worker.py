@@ -10,7 +10,12 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agents.contracts import AgentAssessment, AgentCoreOutput
+from app.agents.contracts import (
+    AgentAssessment,
+    AgentCoreModelOutput,
+    AgentCoreOutput,
+    AgentScoutModelOutput,
+)
 from app.agents.runtime import (
     EVIDENCE_POLICY_VERSION,
     ROUTE_ROLES,
@@ -20,7 +25,7 @@ from app.agents.runtime import (
     _canonical,
     _complete_stage,
     _hash,
-    _invoke_mock,
+    _invoke_model,
 )
 from app.config import Settings
 from app.db import SessionLocal
@@ -274,6 +279,84 @@ def _binding(db: Session, run: AgentRun, stage: AgentStageRun) -> RouteBinding:
     return RouteBinding(route, model, provider, fallback_model, fallback_provider)
 
 
+def _decimal_text(value: object | None) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _scout_role_input(
+    *,
+    run: AgentRun,
+    snapshot: MarketSnapshot,
+    bundle: EvidenceBundle,
+    indicator: IndicatorSnapshot | None,
+    position: Position | None,
+) -> tuple[dict[str, object], list[str]]:
+    input_refs = [
+        snapshot.id,
+        bundle.id,
+        *([indicator.id] if indicator else []),
+        *([position.id] if position else []),
+    ]
+    role_input: dict[str, object] = {
+        "market": run.market,
+        "symbol": run.symbol,
+        "observed_at": snapshot.event_at.isoformat(),
+        "valid_until": run.valid_until.isoformat(),
+        "market_snapshot": {
+            "ref": snapshot.id,
+            "last_price": _decimal_text(snapshot.last_price),
+            "open_price": _decimal_text(snapshot.open_price),
+            "high_price": _decimal_text(snapshot.high_price),
+            "low_price": _decimal_text(snapshot.low_price),
+            "cumulative_volume": snapshot.cumulative_volume,
+            "best_bid_price": _decimal_text(snapshot.best_bid_price),
+            "best_ask_price": _decimal_text(snapshot.best_ask_price),
+            "trading_status": snapshot.trading_status,
+            "quality": snapshot.quality,
+        },
+        "evidence_bundle": {
+            "ref": bundle.id,
+            "state": bundle.state,
+            "evidence_refs": json.loads(bundle.evidence_ids_json),
+            "reason_codes": json.loads(bundle.reason_codes_json),
+        },
+        "indicator_snapshot": (
+            {
+                "ref": indicator.id,
+                "calculator_version": indicator.calculator_version,
+                "vwap": _decimal_text(indicator.vwap),
+                "sma5": _decimal_text(indicator.sma5),
+                "drawdown_from_high_pct": _decimal_text(
+                    indicator.drawdown_from_high_pct
+                ),
+                "spread_pct": _decimal_text(indicator.spread_pct),
+                "price_vs_vwap_pct": _decimal_text(indicator.price_vs_vwap_pct),
+                "sma5_slope_pct": _decimal_text(indicator.sma5_slope_pct),
+                "relative_volume_5": _decimal_text(indicator.relative_volume_5),
+                "realized_volatility_pct": _decimal_text(
+                    indicator.realized_volatility_pct
+                ),
+                "minute_bar_count": indicator.minute_bar_count,
+            }
+            if indicator
+            else None
+        ),
+        "position": (
+            {
+                "ref": position.id,
+                "quantity": position.quantity,
+                "average_price": _decimal_text(position.average_price),
+                "state": position.state,
+                "version": position.version,
+            }
+            if position
+            else None
+        ),
+        "allowed_input_refs": input_refs,
+    }
+    return role_input, input_refs
+
+
 def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: datetime) -> None:
     snapshot = db.get(MarketSnapshot, run.market_snapshot_id)
     if snapshot is None:
@@ -343,34 +426,43 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
                 Position.quantity > 0,
             )
         )
-        _invoke_mock(
+        role_input, input_refs = _scout_role_input(
+            run=run,
+            snapshot=snapshot,
+            bundle=bundle,
+            indicator=indicator,
+            position=position,
+        )
+        outcome = _invoke_model(
             db,
             stage=stage,
             binding=binding,
-            role_input={
-                "market_snapshot_id": snapshot.id,
-                "evidence_bundle_id": bundle.id,
-                "indicator_snapshot_id": indicator.id if indicator else None,
-                "position_id": position.id if position else None,
-            },
+            role_input=role_input,
             now=now,
         )
-        assessment = _assessment(
-            stage.role,
-            stage_run_id=stage.id,
-            symbol=run.symbol,
-            input_refs=[
-                snapshot.id,
-                bundle.id,
-                *([indicator.id] if indicator else []),
-                *([position.id] if position else []),
-            ],
-            indicator=indicator,
-            snapshot=snapshot,
-            position=position,
-            observed_at=now,
-            valid_until=run.valid_until,
-        )
+        if outcome.provider.adapter_type == "MOCK":
+            assessment = _assessment(
+                stage.role,
+                stage_run_id=stage.id,
+                symbol=run.symbol,
+                input_refs=input_refs,
+                indicator=indicator,
+                snapshot=snapshot,
+                position=position,
+                observed_at=now,
+                valid_until=run.valid_until,
+            )
+        else:
+            model_output = AgentScoutModelOutput.model_validate(outcome.output_json)
+            assessment = AgentAssessment(
+                stage_run_id=stage.id,
+                role=stage.role,
+                symbol=run.symbol,
+                input_refs=input_refs,
+                observed_at=now,
+                valid_until=run.valid_until,
+                **model_output.model_dump(),
+            )
         _complete_stage(
             stage,
             state=assessment.status,
@@ -391,28 +483,42 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
         item.role: AgentAssessment.model_validate(json.loads(item.output_json or "{}"))
         for item in scout_stages
     }
-    _invoke_mock(
+    incomplete = sorted(
+        role for role, assessment in assessments.items() if assessment.status != "SUCCEEDED"
+    )
+    outcome = _invoke_model(
         db,
         stage=stage,
         binding=binding,
         role_input={
-            "market_snapshot_id": snapshot.id,
-            "evidence_bundle_id": bundle.id,
-            "assessment_hashes": {item.role: item.output_hash for item in scout_stages},
+            "market": run.market,
+            "symbol": run.symbol,
+            "market_snapshot_ref": snapshot.id,
+            "evidence_bundle_ref": bundle.id,
+            "assessments": {
+                item.role: json.loads(item.output_json or "{}") for item in scout_stages
+            },
+            "assessment_hashes": {
+                item.role: item.output_hash for item in scout_stages
+            },
+            "required_incomplete_roles": incomplete,
         },
         now=now,
     )
-    incomplete = sorted(
-        role for role, assessment in assessments.items() if assessment.status != "SUCCEEDED"
-    )
-    core = AgentCoreOutput(
-        confidence=0 if incomplete else 0.5,
-        risk_level="HIGH" if incomplete else "MEDIUM",
-        reason_codes=[
-            "AGENT_RUNTIME_SHADOW_ONLY",
-            "REQUIRED_SCOUT_INCOMPLETE" if incomplete else "DIAGNOSTIC_WAIT_ONLY",
-        ],
-        incomplete_roles=incomplete,
+    core = (
+        AgentCoreOutput(
+            confidence=0 if incomplete else 0.5,
+            risk_level="HIGH" if incomplete else "MEDIUM",
+            reason_codes=[
+                "AGENT_RUNTIME_SHADOW_ONLY",
+                "REQUIRED_SCOUT_INCOMPLETE" if incomplete else "DIAGNOSTIC_WAIT_ONLY",
+            ],
+            incomplete_roles=incomplete,
+        )
+        if outcome.provider.adapter_type == "MOCK"
+        else AgentCoreOutput(
+            **AgentCoreModelOutput.model_validate(outcome.output_json).model_dump()
+        )
     )
     _complete_stage(stage, state="SUCCEEDED", output=core.model_dump(mode="json"), now=now)
 

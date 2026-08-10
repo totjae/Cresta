@@ -31,6 +31,7 @@ import {
   ApiError,
   agentApi,
   AgentRunData,
+  AgentStageData,
   authApi,
   BrokerStatus,
   decisionApi,
@@ -56,6 +57,16 @@ import {
   watchlistApi,
   WatchlistData,
 } from "../lib/api";
+
+function agentStageOutputSummary(stage: AgentStageData) {
+  if (!stage.output) return `${stage.role}: 결과 없음`;
+  const verdict = [stage.output.action, stage.output.stance, stage.output.status]
+    .find((value) => typeof value === "string") as string | undefined;
+  const reasons = Array.isArray(stage.output.reason_codes)
+    ? stage.output.reason_codes.filter((value): value is string => typeof value === "string")
+    : [];
+  return `${stage.role}: ${verdict ?? stage.state}${reasons.length ? ` · ${reasons.join(", ")}` : ""}`;
+}
 
 type Screen = "boot" | "credentials" | "totp" | "console";
 type ConsolePage = "dashboard" | "watchlist" | "positions" | "orders" | "decisions" | "settings" | "system";
@@ -864,7 +875,7 @@ function AgentRuntimePanel({
 
   return <section className="panel execution-policy-panel" aria-labelledby="agent-runtime-title">
     <div className="panel-head"><div><Bot size={18} /><span id="agent-runtime-title">Agent Worker v2</span></div><span className="status-pill neutral">비동기 · SHADOW · 주문 없음</span></div>
-    <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> Intel → Verify → 4 Scout → Core 고정 DAG를 영속 queue에서 실행합니다. claim·lease·fencing으로 중복 실행을 차단하며 외부 웹·LLM·승인·주문은 연결되지 않습니다.</div>
+    <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> Intel → Verify → 4 Scout → Core 고정 DAG를 영속 queue에서 실행합니다. 검증된 외부 LLM 응답도 역할별 계약을 통과한 경우에만 SHADOW 결과로 저장하며 승인·주문은 생성하지 않습니다.</div>
     <form className="diagnostic-form" onSubmit={runDiagnostic}>
       <label htmlFor="agent-symbol">Agent 종목코드</label><input id="agent-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required />
       <label htmlFor="agent-market">Agent 시장</label><select id="agent-market" value={market} onChange={(event) => setMarket(event.target.value as "KRX" | "NXT")}><option value="KRX">KRX</option><option value="NXT">NXT</option></select>
@@ -877,7 +888,8 @@ function AgentRuntimePanel({
       <div className="decision-action"><strong>{run.core_action ?? "-"}</strong><span>{run.dag_version}</span></div>
       <dl><div><dt>목적</dt><dd>{run.purpose}</dd></div><div><dt>실행 경계</dt><dd>{run.execution_stage} · 주문 없음</dd></div><div><dt>증거</dt><dd>{run.evidence_bundle?.state ?? "없음"}</dd></div><div><dt>Stage</dt><dd>{run.stages.length}개</dd></div><div><dt>LLM 호출</dt><dd>{run.stages.reduce((count, stage) => count + stage.invocations.length, 0)}개</dd></div><div><dt>입력 hash</dt><dd className="mono">{run.input_hash.slice(0, 12)}</dd></div></dl>
       <p className="reason-codes">{run.stages.map((stage) => `${stage.role}: ${stage.state}${stage.attempt_count ? ` (${stage.attempt_count}/${stage.max_attempts})` : ""}`).join(" · ")}</p>
-      <p className="reason-codes">{run.stages.flatMap((stage) => stage.invocations.map((invocation) => `${stage.role} #${invocation.attempt_number}: ${invocation.actual_model ?? invocation.requested_model_profile_id ?? "모델 미확인"} · ${invocation.state}${invocation.error_code ? ` · ${invocation.error_code}` : ""}`)).join(" · ") || "LLM 호출 이력 없음"}</p>
+      <p className="reason-codes">{run.stages.filter((stage) => stage.output).map(agentStageOutputSummary).join(" · ") || "Stage 결과 없음"}</p>
+      <p className="reason-codes">{run.stages.flatMap((stage) => stage.invocations.map((invocation) => `${stage.role} #${invocation.attempt_number}: ${invocation.actual_provider ?? "Provider 미확인"} / ${invocation.actual_model ?? invocation.requested_model_profile_id ?? "모델 미확인"} · ${invocation.state} · schema ${invocation.validation_status} · ${invocation.latency_ms}ms${invocation.error_code ? ` · ${invocation.error_code}` : ""}`)).join(" · ") || "LLM 호출 이력 없음"}</p>
       <small>{formatDateTime(run.created_at)} · {run.run_id}</small>
     </article>)}</div>
   </section>;

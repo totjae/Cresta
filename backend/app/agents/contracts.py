@@ -40,6 +40,27 @@ class AgentAssessment(AgentContract):
     valid_until: datetime
 
 
+class AgentScoutModelOutput(AgentContract):
+    """Model-owned fields; runtime provenance is stamped by the server."""
+
+    status: Literal["SUCCEEDED", "INSUFFICIENT_DATA", "CONFLICTED"]
+    stance: Literal["SUPPORTIVE", "NEUTRAL", "CAUTION", "RISK", "UNKNOWN"]
+    entry_score: int | None = Field(ge=0, le=100)
+    exit_risk_score: int | None = Field(ge=0, le=100)
+    confidence: float = Field(ge=0, le=1)
+    uncertainty: float = Field(ge=0, le=1)
+    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    evidence_refs: list[str] = Field(max_length=50)
+
+
+class AgentCoreModelOutput(AgentContract):
+    action: Literal["WAIT"]
+    confidence: float = Field(ge=0, le=1)
+    risk_level: Literal["LOW", "MEDIUM", "HIGH"]
+    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    incomplete_roles: list[str] = Field(max_length=4)
+
+
 class AgentCoreOutput(AgentContract):
     schema_version: Literal["agent-core-v1"] = "agent-core-v1"
     action: Literal["WAIT"] = "WAIT"
