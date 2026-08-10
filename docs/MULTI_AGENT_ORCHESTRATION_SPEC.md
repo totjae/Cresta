@@ -299,3 +299,10 @@ app/llm/*                     Provider/Gateway 호출 계층
 - `MAO-075`: 현재 SHADOW 구현에서 Provider 내장 web search는 `NEWS_DISCLOSURE_SCOUT`와 `MARKET_SECTOR_SCOUT`의 명시적 role route에만 허용하며 Core에는 계속 제공하지 않는다.
 - `MAO-076`: Provider 검색 결과는 `UNTRUSTED_EXTERNAL_DATA`이며 검증된 EvidenceBundle로 자동 승격하지 않는다. Evidence 수집 Adapter가 구현되기 전에는 주문·승인 근거가 될 수 없다.
 - `MAO-077`: 각 LLM invocation은 UTC와 Asia/Seoul 현재 시각을 서버 소유 runtime context로 받으며 해당 시각은 invocation 이력에 저장한다.
+
+### 역할 비종속 Provider 출처 수집 경계 (2026-08-11)
+
+- `MAO-078`: 웹 검색을 실행한 역할과 관계없이 Provider가 반환한 citation/source metadata는 canonical `EvidenceSourceCandidate`로 정규화한다. 후보에는 HTTPS URL, 제목, 선택적 게시시각과 Provider provenance만 허용하며 원문 응답은 저장하지 않는다.
+- `MAO-079`: 정규화된 후보는 해당 run의 `EvidenceItem(source_tier=UNRATED)`으로 보존하되 현재 불변 EvidenceBundle에 자동 추가하지 않는다. Verify를 통과하지 않은 후보는 Scout·Core의 `evidence_refs`나 주문·승인 근거가 될 수 없다.
+- `MAO-084`: Scout 입력의 `input_refs`와 `allowed_evidence_refs`를 분리한다. 모델은 `evidence_refs`에 `allowed_evidence_refs`의 부분집합만 반환하며 목록이 비어 있으면 반드시 빈 배열을 반환한다. Provider URL·citation 문자열은 내부 evidence ID가 아니다.
+- `MAO-085`: 출력 계약 실패는 원문 없이 `LLM_SCHEMA_VALIDATION_FAILED`, `LLM_EVIDENCE_REF_NOT_ALLOWED`, `LLM_CORE_INCOMPLETE_ROLES_MISMATCH`로 구분해 invocation에 기록한다.

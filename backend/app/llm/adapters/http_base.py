@@ -8,7 +8,13 @@ from typing import Any
 
 import httpx
 
-from app.llm.contracts import LlmRequest, LlmResult, ModelCapabilities, ProviderHealth
+from app.llm.contracts import (
+    EvidenceSourceCandidate,
+    LlmRequest,
+    LlmResult,
+    ModelCapabilities,
+    ProviderHealth,
+)
 
 
 class ExternalHttpAdapter(ABC):
@@ -45,6 +51,11 @@ class ExternalHttpAdapter(ABC):
     def _parse_success(
         self, payload: dict[str, Any]
     ) -> tuple[dict[str, Any], str | None, int | None, int | None]: ...
+
+    def _extract_source_candidates(
+        self, payload: dict[str, Any]
+    ) -> list[EvidenceSourceCandidate]:
+        return []
 
     def generate_structured(self, request: LlmRequest, model_id: str) -> LlmResult:
         url, headers, body = self._request_parts(request, model_id)
@@ -105,8 +116,7 @@ class ExternalHttpAdapter(ABC):
             )
         try:
             payload = response.json()
-            output, actual_model, input_tokens, output_tokens = self._parse_success(payload)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError, json.JSONDecodeError):
             return self._failure(
                 request,
                 "INVALID_OUTPUT",
@@ -114,6 +124,22 @@ class ExternalHttpAdapter(ABC):
                 provider_request_id=provider_request_id,
                 gateway_request_id=gateway_request_id,
                 response_content=response.content,
+            )
+        try:
+            source_candidates = self._extract_source_candidates(payload)
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+            source_candidates = []
+        try:
+            output, actual_model, input_tokens, output_tokens = self._parse_success(payload)
+        except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return self._failure(
+                request,
+                "INVALID_OUTPUT",
+                started,
+                provider_request_id=provider_request_id,
+                gateway_request_id=gateway_request_id,
+                response_content=response.content,
+                source_candidates=source_candidates,
             )
         return LlmResult(
             invocation_id=request.invocation_id,
@@ -129,6 +155,7 @@ class ExternalHttpAdapter(ABC):
             output_tokens=output_tokens,
             retry_count=0,
             schema_validation="PASSED",
+            source_candidates=source_candidates,
         )
 
     def _failure(
@@ -140,6 +167,7 @@ class ExternalHttpAdapter(ABC):
         provider_request_id: str | None = None,
         gateway_request_id: str | None = None,
         response_content: bytes | None = None,
+        source_candidates: list[EvidenceSourceCandidate] | None = None,
     ) -> LlmResult:
         return LlmResult(
             invocation_id=request.invocation_id,
@@ -153,6 +181,7 @@ class ExternalHttpAdapter(ABC):
             latency_ms=max(0, int((time.monotonic() - started) * 1000)),
             retry_count=0,
             schema_validation="NOT_RUN",
+            source_candidates=source_candidates or [],
         )
 
 

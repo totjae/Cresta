@@ -297,6 +297,7 @@ def _scout_role_input(
         *([indicator.id] if indicator else []),
         *([position.id] if position else []),
     ]
+    allowed_evidence_refs = [str(item) for item in json.loads(bundle.evidence_ids_json)]
     role_input: dict[str, object] = {
         "market": run.market,
         "symbol": run.symbol,
@@ -353,6 +354,7 @@ def _scout_role_input(
             else None
         ),
         "allowed_input_refs": input_refs,
+        "allowed_evidence_refs": allowed_evidence_refs,
     }
     return role_input, input_refs
 

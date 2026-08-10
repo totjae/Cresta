@@ -7,12 +7,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.agents.worker import process_agent_work_once
-from app.llm.contracts import LlmRequest, LlmResult
+from app.llm.contracts import EvidenceSourceCandidate, LlmRequest, LlmResult
 from app.llm.registry import provider_registry
 from app.models import (
     AgentRun,
     Approval,
     Decision,
+    EvidenceItem,
     LlmModelProfile,
     LlmProviderProfile,
     LlmRoleRoute,
@@ -22,8 +23,16 @@ from tests.test_agent_runtime import _login, _market_fixture, _routes
 
 
 class ExternalFixtureAdapter:
-    def __init__(self, *, invalid_role: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        invalid_role: str | None = None,
+        invalid_evidence_role: str | None = None,
+        source_candidates: list[EvidenceSourceCandidate] | None = None,
+    ) -> None:
         self.invalid_role = invalid_role
+        self.invalid_evidence_role = invalid_evidence_role
+        self.source_candidates = source_candidates or []
         self.requests: list[LlmRequest] = []
 
     def generate_structured(self, request: LlmRequest, model_id: str) -> LlmResult:
@@ -48,7 +57,11 @@ class ExternalFixtureAdapter:
                 "confidence": 0.6,
                 "uncertainty": 0.4,
                 "reason_codes": ["EXTERNAL_SHADOW_ASSESSMENT"],
-                "evidence_refs": [],
+                "evidence_refs": (
+                    ["https://example.com/not-an-evidence-id"]
+                    if request.role == self.invalid_evidence_role
+                    else []
+                ),
             }
         return LlmResult(
             invocation_id=request.invocation_id,
@@ -62,6 +75,7 @@ class ExternalFixtureAdapter:
             input_tokens=10,
             output_tokens=5,
             schema_validation="PASSED",
+            source_candidates=self.source_candidates,
         )
 
 
@@ -71,6 +85,8 @@ def _external_routes(
     monkeypatch,
     *,
     invalid_role: str | None = None,
+    invalid_evidence_role: str | None = None,
+    source_candidates: list[EvidenceSourceCandidate] | None = None,
 ) -> tuple[dict[str, str], ExternalFixtureAdapter, str]:
     csrf = _login(client)
     headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
@@ -86,7 +102,11 @@ def _external_routes(
     provider.credential_secret_ref = "external-fixture.secret"
     db.commit()
 
-    adapter = ExternalFixtureAdapter(invalid_role=invalid_role)
+    adapter = ExternalFixtureAdapter(
+        invalid_role=invalid_role,
+        invalid_evidence_role=invalid_evidence_role,
+        source_candidates=source_candidates,
+    )
     monkeypatch.setattr(provider_registry, "resolve", lambda *args, **kwargs: adapter)
     monkeypatch.setattr(
         "app.agents.runtime.LlmSecretStore.read", lambda *args, **kwargs: "test-secret"
@@ -146,12 +166,14 @@ def test_external_outputs_are_server_validated_and_adopted_without_trading(
     assert scout_input["market_snapshot"]["last_price"] == "70000.0000"
     assert scout_input["indicator_snapshot"]["price_vs_vwap_pct"] == "0.143062"
     assert "credential" not in scout_input
+    assert scout_input["allowed_evidence_refs"] == []
     assert scout_request.tool_policy == "NONE"
     runtime_context = scout_request.messages[-2]["content"]
     assert "[Cresta runtime context v1]" in runtime_context
     assert "Current time:" in runtime_context
     assert "Asia/Seoul" in runtime_context
     assert "Web search is disabled" in runtime_context
+    assert "If allowed_evidence_refs is empty" in runtime_context
     assert db.scalar(select(func.count()).select_from(Decision)) == 0
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
@@ -185,5 +207,71 @@ def test_external_invalid_scout_output_fails_closed(
     assert technical["error_code"] == "AGENT_LLM_FAIL_STOP"
     assert technical["invocation"]["state"] == "INVALID_OUTPUT"
     assert technical["invocation"]["validation_status"] == "FAILED"
-    assert technical["invocation"]["error_code"] == "LLM_INVALID_OUTPUT"
+    assert technical["invocation"]["error_code"] == "LLM_SCHEMA_VALIDATION_FAILED"
+    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
+
+
+def test_provider_sources_are_persisted_as_unrated_candidates_without_bundle_promotion(
+    client: TestClient, db: Session, monkeypatch
+) -> None:
+    _market_fixture(db)
+    source = EvidenceSourceCandidate(
+        url="https://example.com/market-report",
+        title="Market report",
+        published_at="2026-08-10T08:30:00+09:00",
+    )
+    route_ids, _, csrf = _external_routes(
+        client,
+        db,
+        monkeypatch,
+        source_candidates=[source, source],
+    )
+    response = client.post(
+        "/api/v1/ai/agent-runs/diagnostic",
+        headers={"Origin": "https://testserver", "X-CSRF-Token": csrf},
+        json={
+            "schema_version": "1.0",
+            "market": "KRX",
+            "symbol": "005930",
+            "route_ids": route_ids,
+        },
+    )
+    run = _run_until_terminal(db, response.json()["run_id"])
+    assert run.state == "SUCCEEDED"
+    candidates = list(
+        db.scalars(select(EvidenceItem).where(EvidenceItem.run_id == run.id))
+    )
+    assert len(candidates) == 1
+    assert candidates[0].source_url == source.url
+    assert candidates[0].source_tier == "UNRATED"
+    assert candidates[0].facts_json == "[]"
+
+
+def test_external_url_as_evidence_ref_is_rejected_with_specific_error(
+    client: TestClient, db: Session, monkeypatch
+) -> None:
+    _market_fixture(db)
+    route_ids, _, csrf = _external_routes(
+        client,
+        db,
+        monkeypatch,
+        invalid_evidence_role="NEWS_DISCLOSURE_SCOUT",
+    )
+    response = client.post(
+        "/api/v1/ai/agent-runs/diagnostic",
+        headers={"Origin": "https://testserver", "X-CSRF-Token": csrf},
+        json={
+            "schema_version": "1.0",
+            "market": "KRX",
+            "symbol": "005930",
+            "route_ids": route_ids,
+        },
+    )
+    run = _run_until_terminal(db, response.json()["run_id"])
+    assert run.state == "FAILED"
+    completed = client.get(f"/api/v1/ai/agent-runs/{run.id}").json()
+    news = next(
+        stage for stage in completed["stages"] if stage["role"] == "NEWS_DISCLOSURE_SCOUT"
+    )
+    assert news["invocation"]["error_code"] == "LLM_EVIDENCE_REF_NOT_ALLOWED"
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0

@@ -20,6 +20,12 @@ class ModelCapabilities(ContractModel):
     local_execution: bool = False
 
 
+class EvidenceSourceCandidate(ContractModel):
+    url: str = Field(min_length=1, max_length=1000)
+    title: str = Field(default="", max_length=500)
+    published_at: str | None = Field(default=None, max_length=64)
+
+
 class LlmRequest(ContractModel):
     schema_version: Literal["llm-request-v1"] = "llm-request-v1"
     invocation_id: str
@@ -65,6 +71,7 @@ class LlmResult(ContractModel):
     retry_count: int = Field(default=0, ge=0)
     fallback_path: list[str] = Field(default_factory=list)
     schema_validation: Literal["PASSED", "FAILED", "NOT_RUN"] = "NOT_RUN"
+    source_candidates: list[EvidenceSourceCandidate] = Field(default_factory=list)
 
 
 class ProviderHealth(ContractModel):

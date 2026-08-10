@@ -24,6 +24,7 @@ from app.llm.secrets import LlmSecretError, LlmSecretStore
 from app.models import (
     AgentRun,
     AgentStageRun,
+    EvidenceItem,
     IndicatorSnapshot,
     LlmInvocation,
     LlmModelProfile,
@@ -94,6 +95,63 @@ def _canonical(value: object) -> str:
 
 def _hash(value: object) -> str:
     return hashlib.sha256(_canonical(value).encode()).hexdigest()
+
+
+def _candidate_timestamp(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+
+def _persist_source_candidates(
+    db: Session,
+    *,
+    stage: AgentStageRun,
+    provider_name: str,
+    candidates: list[object],
+    now: datetime,
+) -> None:
+    run = db.get(AgentRun, stage.run_id)
+    if run is None or not candidates:
+        return
+    existing_urls = set(
+        db.scalars(select(EvidenceItem.source_url).where(EvidenceItem.run_id == run.id))
+    )
+    for candidate in candidates:
+        url = str(getattr(candidate, "url", ""))
+        if not url or url in existing_urls:
+            continue
+        title = str(getattr(candidate, "title", ""))[:500]
+        published_at = _candidate_timestamp(getattr(candidate, "published_at", None))
+        record = {
+            "url": url,
+            "title": title,
+            "published_at": published_at.isoformat() if published_at else None,
+            "provider": provider_name,
+        }
+        db.add(
+            EvidenceItem(
+                run_id=run.id,
+                market=run.market,
+                symbol=run.symbol,
+                source_type="WEB",
+                source_tier="UNRATED",
+                source_name=provider_name[:128],
+                source_url=url,
+                title=title,
+                facts_json="[]",
+                content_hash=_hash(record),
+                extraction_method="RULE",
+                published_at=published_at,
+                event_at=published_at,
+                received_at=now,
+            )
+        )
+        existing_urls.add(url)
 
 
 def _load_routes(
@@ -297,6 +355,13 @@ def _invoke_once(
                         if binding.route.web_search_enabled
                         else "Web search is disabled. Report missing current evidence instead of guessing."
                     ),
+                    (
+                        "Only copy evidence IDs from allowed_evidence_refs into evidence_refs. "
+                        "Provider citations and URLs are unverified source candidates, not evidence IDs. "
+                        "If allowed_evidence_refs is empty, return evidence_refs as an empty array."
+                        if stage.role != "CORE"
+                        else "Use only the supplied Scout results and verified evidence references."
+                    ),
                 ]
             ),
         }
@@ -385,6 +450,13 @@ def _invoke_once(
     )
     invocation.validation_status = result.schema_validation
     invocation.completed_at = datetime.now(UTC)
+    _persist_source_candidates(
+        db,
+        stage=stage,
+        provider_name=result.actual_provider or provider.name,
+        candidates=list(result.source_candidates),
+        now=invocation.completed_at,
+    )
     if result.status != "SUCCEEDED" or result.schema_validation != "PASSED":
         invocation.error_code = f"LLM_{result.status}"
         return None
@@ -397,18 +469,24 @@ def _invoke_once(
                     for item in role_input.get("required_incomplete_roles", [])
                 )
                 if sorted(output.incomplete_roles) != expected_incomplete:
-                    raise ValueError("incomplete role set does not match server state")
+                    invocation.state = "INVALID_OUTPUT"
+                    invocation.validation_status = "FAILED"
+                    invocation.error_code = "LLM_CORE_INCOMPLETE_ROLES_MISMATCH"
+                    return None
             else:
                 output = AgentScoutModelOutput.model_validate(result.output_json)
                 allowed_refs = {
-                    str(item) for item in role_input.get("allowed_input_refs", [])
+                    str(item) for item in role_input.get("allowed_evidence_refs", [])
                 }
                 if not set(output.evidence_refs).issubset(allowed_refs):
-                    raise ValueError("evidence reference is outside the role input")
-        except (ValidationError, ValueError, TypeError):
+                    invocation.state = "INVALID_OUTPUT"
+                    invocation.validation_status = "FAILED"
+                    invocation.error_code = "LLM_EVIDENCE_REF_NOT_ALLOWED"
+                    return None
+        except (ValidationError, TypeError):
             invocation.state = "INVALID_OUTPUT"
             invocation.validation_status = "FAILED"
-            invocation.error_code = "LLM_INVALID_OUTPUT"
+            invocation.error_code = "LLM_SCHEMA_VALIDATION_FAILED"
             return None
     invocation.validation_status = "PASSED"
     return InvocationOutcome(model=model, provider=provider, output_json=result.output_json)

@@ -460,3 +460,10 @@ Local evidence: 외부 Adapter fixture로 4 Scout·Core 유효 응답의 stage �
 - `T-LLM-ADAPTER-017`: OpenAI Responses Adapter의 GPT-5/o계열 요청은 reasoning 기본값에서도 `temperature/top_p`를 생략하고, 명시한 reasoning effort만 `reasoning.effort`로 전달하는지 확인한다.
 
 Local evidence: OpenAI 호환·Responses Adapter와 parameter policy 집중 시험 20개, backend 전체 183개 시험 및 Ruff가 통과했다. 실제 OpenAI와 LLM Gateway 외부 모델의 SHADOW 호출은 Ubuntu 서버 검증 항목이다.
+
+# Provider 출처 후보와 evidence reference 경계 시험 (2026-08-11)
+
+- `T-EVIDENCE-001`: OpenAI Responses, Anthropic, Gemini와 OpenAI-compatible 응답의 알려진 citation 위치가 동일한 canonical 후보로 정규화되는지 확인한다.
+- `T-EVIDENCE-002`: HTTPS 공개 URL만 `UNRATED EvidenceItem`으로 저장하고 같은 run의 중복 URL, private/loopback URL과 원문 응답을 저장하지 않는지 확인한다.
+- `T-EVIDENCE-003`: 빈 검증 Bundle에서는 모델에 `allowed_evidence_refs=[]`와 빈 배열 반환 규칙을 전달하고 URL·임의 ID 참조를 `LLM_EVIDENCE_REF_NOT_ALLOWED`로 거부하는지 확인한다.
+- `T-EVIDENCE-004`: schema, evidence reference와 Core incomplete-role 불일치를 서로 다른 안전한 invocation 오류 코드로 기록하면서 승인·주문은 생성하지 않는지 확인한다.

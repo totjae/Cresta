@@ -5,6 +5,7 @@ from typing import Any
 from app.llm.adapters.http_base import ExternalHttpAdapter, parse_json_text, safe_model_id
 from app.llm.contracts import LlmRequest, ModelCapabilities
 from app.llm.parameter_policy import is_openai_reasoning_model
+from app.llm.source_candidates import candidates_from_values
 
 
 class OpenAIResponsesAdapter(ExternalHttpAdapter):
@@ -71,3 +72,16 @@ class OpenAIResponsesAdapter(ExternalHttpAdapter):
                         usage.get("output_tokens"),
                     )
         raise ValueError("missing output text")
+
+    def _extract_source_candidates(self, payload: dict[str, Any]):
+        values: list[object] = []
+        for item in payload.get("output", []):
+            if not isinstance(item, dict):
+                continue
+            action = item.get("action")
+            if isinstance(action, dict):
+                values.extend(action.get("sources") or [])
+            for content in item.get("content", []):
+                if isinstance(content, dict):
+                    values.extend(content.get("annotations") or [])
+        return candidates_from_values(values)

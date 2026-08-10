@@ -78,7 +78,7 @@
 - APIchat Adapter 동작을 읽기 전용으로 분석해 OpenAI Responses, Anthropic Messages, Gemini generateContent 및 LLM Gateway 호환 웹 검색 변환을 추가했다.
 - 역할 route에 versioned 웹 검색 권한을 추가하고 뉴스·공시/시장·업종 Scout만 SHADOW에서 허용하도록 fail-closed 검증을 적용했다.
 - 모든 LLM 호출에 UTC와 Asia/Seoul 현재 시각 및 최신성 지침을 주입하고 invocation 감사 이력에 실행 시각과 검색 사용 여부를 저장한다.
-- Provider 검색 결과를 검증된 EvidenceBundle로 승격하는 수집 Adapter는 아직 구현되지 않았으므로 검색 결과는 주문·승인 경계 밖에 있다.
+- Provider 검색 결과의 citation/source metadata를 공통 후보로 수집하는 경계는 구현했지만 검증된 EvidenceBundle로 승격하는 Verifier는 아직 구현되지 않았으므로 검색 결과는 주문·승인 경계 밖에 있다.
 
 ## 2026-08-11 APIchat-compatible request normalization
 
@@ -91,3 +91,10 @@
 - 서버 SHADOW 결과에서 OpenAI 공식 `gpt-5-mini`가 DEFAULT tier에서도 즉시 거부되는 경로를 분리했다.
 - Responses Adapter가 GPT-5/o계열의 `temperature/top_p`를 reasoning 기본값에서도 제거하도록 APIchat 모델 정책을 공통 적용했다.
 - 집중 시험 20개와 backend 전체 183개 시험 및 Ruff를 통과했으며 Ubuntu 서버의 Technical Scout 재검증은 남아 있다.
+
+## 2026-08-11 역할 비종속 Provider 출처 후보 수집
+
+- OpenAI Responses, Anthropic Messages, Gemini generateContent와 OpenAI-compatible 응답의 알려진 citation 위치를 공통 `EvidenceSourceCandidate`로 정규화한다.
+- 공개 HTTPS URL만 run별 중복 없이 `UNRATED EvidenceItem`으로 저장하며 원문 응답, private·loopback URL과 credential은 저장하지 않는다.
+- Scout의 일반 `allowed_input_refs`와 검증 근거 전용 `allowed_evidence_refs`를 분리했다. 검증된 근거가 없으면 모델은 빈 `evidence_refs`를 반환해야 하며 URL이나 임의 ID를 반환하면 fail-closed 처리한다.
+- schema, evidence reference와 Core incomplete-role 계약 오류를 구분된 안전 코드로 기록한다. 집중 시험 25개, backend 전체 188개 시험 및 Ruff를 통과했다.

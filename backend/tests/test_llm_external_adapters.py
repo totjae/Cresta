@@ -11,6 +11,7 @@ from app.llm.adapters.gemini import GeminiGenerateContentAdapter
 from app.llm.adapters.openai import OpenAIResponsesAdapter
 from app.llm.adapters.openai_compatible import OpenAICompatibleAdapter
 from app.llm.contracts import LlmRequest
+from app.llm.source_candidates import candidates_from_values
 
 
 def _request(
@@ -86,6 +87,135 @@ def test_openai_responses_contract_and_usage_normalization() -> None:
     assert result.provider_request_id == "req_openai_1"
     assert (result.input_tokens, result.output_tokens) == (12, 4)
     assert "openai-secret" not in result.model_dump_json()
+
+
+def test_provider_citations_are_normalized_as_safe_source_candidates() -> None:
+    fixtures = [
+        (
+            OpenAIResponsesAdapter,
+            "https://api.openai.com/v1",
+            {
+                "model": "gpt-test",
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "action": {
+                            "sources": [
+                                {"url": "https://example.com/news#fragment", "title": "News"},
+                                {"url": "http://example.com/unsafe", "title": "Unsafe"},
+                            ]
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": '{"status":"OK"}',
+                                "annotations": [
+                                    {
+                                        "type": "url_citation",
+                                        "url": "https://example.com/news#other",
+                                        "title": "Duplicate",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ),
+        (
+            GeminiGenerateContentAdapter,
+            "https://generativelanguage.googleapis.com/v1beta",
+            {
+                "modelVersion": "gemini-test",
+                "candidates": [
+                    {
+                        "content": {"parts": [{"text": '{"status":"OK"}'}]},
+                        "groundingMetadata": {
+                            "groundingChunks": [
+                                {
+                                    "web": {
+                                        "uri": "https://example.org/disclosure",
+                                        "title": "Disclosure",
+                                    }
+                                }
+                            ]
+                        },
+                    }
+                ],
+            },
+        ),
+        (
+            AnthropicMessagesAdapter,
+            "https://api.anthropic.com/v1",
+            {
+                "model": "claude-test",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": '{"status":"OK"}',
+                        "citations": [
+                            {
+                                "url": "https://example.edu/research",
+                                "title": "Research",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ),
+    ]
+    for adapter_type, endpoint, payload in fixtures:
+        adapter = adapter_type(
+            endpoint=endpoint,
+            api_key="secret",
+            client=httpx.Client(
+                transport=httpx.MockTransport(
+                    lambda _, fixture=payload: httpx.Response(200, json=fixture)
+                )
+            ),
+        )
+        result = adapter.generate_structured(_request(web_search=True), "fixture-model")
+        assert result.status == "SUCCEEDED"
+        assert len(result.source_candidates) == 1
+        assert result.source_candidates[0].url.startswith("https://example.")
+
+
+def test_compatible_citations_and_private_urls_are_normalized_fail_closed() -> None:
+    adapter = OpenAICompatibleAdapter(
+        endpoint="https://api.llmgateway.example/v1",
+        api_key="secret",
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(
+                    200,
+                    json={
+                        "model": "gateway-model",
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": '{"status":"OK"}',
+                                    "citations": [
+                                        "https://example.net/article",
+                                        "https://127.0.0.1/private",
+                                    ],
+                                }
+                            }
+                        ],
+                    },
+                )
+            )
+        ),
+    )
+    result = adapter.generate_structured(_request(web_search=True), "gateway-model")
+    assert [candidate.url for candidate in result.source_candidates] == [
+        "https://example.net/article"
+    ]
+    assert candidates_from_values(
+        ["https://localhost/a", "https://10.0.0.1/a", "ftp://example.com/a"]
+    ) == []
 
 
 def test_openai_responses_reasoning_model_omits_sampling_by_model_id() -> None:
@@ -404,6 +534,44 @@ def test_external_adapter_timeout_and_invalid_json_are_normalized() -> None:
     result = invalid_adapter.generate_structured(_request(), "gpt-test")
     assert result.status == "INVALID_OUTPUT"
     assert result.raw_response_hash is not None
+
+
+def test_source_candidates_survive_invalid_structured_model_output() -> None:
+    adapter = OpenAIResponsesAdapter(
+        endpoint="https://api.openai.com/v1",
+        api_key="secret",
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(
+                    200,
+                    json={
+                        "output": [
+                            {
+                                "type": "web_search_call",
+                                "action": {
+                                    "sources": [
+                                        {
+                                            "url": "https://example.com/source",
+                                            "title": "Source",
+                                        }
+                                    ]
+                                },
+                            },
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "not-json"}],
+                            },
+                        ]
+                    },
+                )
+            )
+        ),
+    )
+    result = adapter.generate_structured(_request(web_search=True), "gpt-test")
+    assert result.status == "INVALID_OUTPUT"
+    assert [candidate.url for candidate in result.source_candidates] == [
+        "https://example.com/source"
+    ]
 
 
 def test_completed_http_response_past_total_deadline_is_discarded(monkeypatch) -> None:

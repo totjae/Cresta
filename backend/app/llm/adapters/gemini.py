@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 from app.llm.adapters.http_base import ExternalHttpAdapter, parse_json_text, safe_model_id
 from app.llm.contracts import LlmRequest, ModelCapabilities
+from app.llm.source_candidates import candidates_from_values
 
 
 class GeminiGenerateContentAdapter(ExternalHttpAdapter):
@@ -65,3 +66,16 @@ class GeminiGenerateContentAdapter(ExternalHttpAdapter):
             usage.get("promptTokenCount"),
             usage.get("candidatesTokenCount"),
         )
+
+    def _extract_source_candidates(self, payload: dict[str, Any]):
+        values: list[object] = []
+        for candidate in payload.get("candidates", []):
+            if not isinstance(candidate, dict):
+                continue
+            grounding = candidate.get("groundingMetadata") or {}
+            if not isinstance(grounding, dict):
+                continue
+            for chunk in grounding.get("groundingChunks", []):
+                if isinstance(chunk, dict):
+                    values.append(chunk.get("web") or chunk)
+        return candidates_from_values(values)

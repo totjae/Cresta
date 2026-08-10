@@ -4,6 +4,7 @@ from typing import Any
 
 from app.llm.adapters.http_base import ExternalHttpAdapter, parse_json_text, safe_model_id
 from app.llm.contracts import LlmRequest, ModelCapabilities
+from app.llm.source_candidates import candidates_from_values
 
 
 class AnthropicMessagesAdapter(ExternalHttpAdapter):
@@ -65,3 +66,13 @@ class AnthropicMessagesAdapter(ExternalHttpAdapter):
             usage.get("input_tokens"),
             usage.get("output_tokens"),
         )
+
+    def _extract_source_candidates(self, payload: dict[str, Any]):
+        values: list[object] = []
+        for item in payload.get("content", []):
+            if not isinstance(item, dict):
+                continue
+            values.extend(item.get("citations") or [])
+            if item.get("type") == "web_search_tool_result":
+                values.extend(item.get("content") or [])
+        return candidates_from_values(values)

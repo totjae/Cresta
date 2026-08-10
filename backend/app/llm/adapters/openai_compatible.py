@@ -9,6 +9,7 @@ from app.llm.parameter_policy import (
     is_openai_reasoning_model,
     uses_completion_token_parameter,
 )
+from app.llm.source_candidates import candidates_from_values
 
 
 class OpenAICompatibleAdapter(ExternalHttpAdapter):
@@ -79,3 +80,13 @@ class OpenAICompatibleAdapter(ExternalHttpAdapter):
             usage.get("prompt_tokens"),
             usage.get("completion_tokens"),
         )
+
+    def _extract_source_candidates(self, payload: dict[str, Any]):
+        values: list[object] = []
+        message = payload.get("choices", [{}])[0].get("message", {})
+        if isinstance(message, dict):
+            for key in ("annotations", "citations", "sources"):
+                values.extend(message.get(key) or [])
+        for key in ("citations", "sources"):
+            values.extend(payload.get(key) or [])
+        return candidates_from_values(values)

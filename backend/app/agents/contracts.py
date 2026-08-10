@@ -50,7 +50,13 @@ class AgentScoutModelOutput(AgentContract):
     confidence: float = Field(ge=0, le=1)
     uncertainty: float = Field(ge=0, le=1)
     reason_codes: list[str] = Field(min_length=1, max_length=20)
-    evidence_refs: list[str] = Field(max_length=50)
+    evidence_refs: list[str] = Field(
+        max_length=50,
+        description=(
+            "Internal evidence IDs copied only from allowed_evidence_refs; "
+            "never URLs or provider citation strings."
+        ),
+    )
 
 
 class AgentCoreModelOutput(AgentContract):
