@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -9,10 +11,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.agents.worker import process_agent_work_once
+from app.market_context import MarketContextInput, ingest_market_context
 from app.models import (
     AgentRun,
     AgentStageRun,
     Approval,
+    ConfigurationVersion,
     Decision,
     EvidenceBundle,
     IndicatorSnapshot,
@@ -21,7 +25,10 @@ from app.models import (
     LlmRoleRoute,
     MarketSnapshot,
     MarketStreamState,
+    OrderIntent,
+    Position,
     TradingOrder,
+    User,
 )
 from tests.conftest import TEST_PASSWORD, TEST_TOTP_SECRET
 
@@ -109,6 +116,33 @@ def _market_fixture(db: Session) -> MarketSnapshot:
     )
     db.commit()
     return snapshot
+
+
+def _market_context_fixture(db: Session, *, source_ref: str = "context-1") -> str:
+    now = datetime.now(UTC)
+    context, _ = ingest_market_context(
+        db,
+        MarketContextInput(
+            market="KRX",
+            symbol="005930",
+            source="TEST_CONTRACTED_FEED",
+            source_ref=source_ref,
+            source_tier="CONTRACTED",
+            quality="NORMAL",
+            index_code="KOSPI",
+            index_change_pct=Decimal("0.5"),
+            sector_code="G25",
+            sector_change_pct=Decimal("0.4"),
+            advancers=600,
+            decliners=300,
+            unchanged=100,
+            observed_at=now - timedelta(seconds=1),
+            received_at=now,
+            valid_until=now + timedelta(minutes=5),
+        ),
+    )
+    db.commit()
+    return context.id
 
 
 def _routes(client: TestClient, headers: dict[str, str]) -> dict[str, str]:
@@ -203,13 +237,34 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     assert body["created"] is True
     assert body["purpose"] == "DIAGNOSTIC"
     assert body["execution_stage"] == "SHADOW"
-    assert body["dag_version"] == "agent-dag-v3"
+    assert body["dag_version"] == "agent-dag-v5"
+    assert body["analysis_context"] == "ENTRY"
+    assert len(body["position_snapshot_hash"]) == 64
+    assert body["server_input_policy_version"] == "agent-server-input-v1"
+    assert body["market_context_snapshot_id"] is None
+    assert body["market_context_snapshot_hash"] is None
+    assert body["assessment_schema_version"] == "agent-assessment-v2"
+    assert body["core_schema_version"] == "agent-core-v2"
+    assert body["score_policy_version"] == "score-policy-v1"
     assert body["state"] == "CREATED"
     assert body["core_action"] is None
     assert body["evidence_bundle"] is None
     assert len(body["stages"]) == 8
     assert all(stage["state"] == "PENDING" for stage in body["stages"])
     assert all(stage["attempt_count"] == 0 for stage in body["stages"])
+    stored_run = db.get(AgentRun, body["run_id"])
+    assert stored_run is not None
+    stored_routes = json.loads(stored_run.route_versions_json)
+    assert stored_routes["CORE"]["declared_output_schema_version"] == "agent-core-v1"
+    assert stored_routes["CORE"]["effective_output_schema_version"] == "agent-core-v2"
+    assert (
+        stored_routes["TECHNICAL_SCOUT"]["declared_output_schema_version"]
+        == "agent-assessment-v1"
+    )
+    assert (
+        stored_routes["TECHNICAL_SCOUT"]["effective_output_schema_version"]
+        == "agent-assessment-v2"
+    )
     pending_auditor = next(
         stage for stage in body["stages"] if stage["role"] == "EVIDENCE_CANDIDATE_AUDITOR"
     )
@@ -238,6 +293,7 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     completed_body = completed.json()
     assert completed_body["state"] == "PARTIAL"
     assert completed_body["core_action"] == "WAIT"
+    assert completed_body["shadow_assessment"] == "UNKNOWN"
     assert completed_body["evidence_bundle"]["state"] == "PARTIAL"
     auditor = next(
         stage
@@ -253,7 +309,7 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
         auditor["output"]["evidence_bundle_hash"]
         == completed_body["evidence_bundle"]["bundle_hash"]
     )
-    assert sum(stage["invocation"] is not None for stage in completed_body["stages"]) == 5
+    assert sum(stage["invocation"] is not None for stage in completed_body["stages"]) == 3
     news = next(
         stage
         for stage in completed_body["stages"]
@@ -261,17 +317,395 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     )
     assert news["state"] == "INSUFFICIENT_DATA"
     assert news["invocation"]["actual_provider"] == "CRESTA_MOCK"
+    position_risk = next(
+        stage
+        for stage in completed_body["stages"]
+        if stage["role"] == "POSITION_RISK_SCOUT"
+    )
+    assert position_risk["state"] == "NOT_APPLICABLE"
+    assert position_risk["output"]["stance"] == "UNKNOWN"
+    assert position_risk["output"]["entry_score"] is None
+    assert position_risk["output"]["exit_risk_score"] is None
+    assert position_risk["invocation"] is None
+    market_sector = next(
+        stage
+        for stage in completed_body["stages"]
+        if stage["role"] == "MARKET_SECTOR_SCOUT"
+    )
+    assert market_sector["state"] == "INSUFFICIENT_DATA"
+    assert market_sector["invocation"] is None
+    assert "MARKET_DATA_INSUFFICIENT" in market_sector["output"]["reason_codes"]
     assert db.scalar(select(func.count()).select_from(AgentRun)) == 1
     assert db.scalar(select(func.count()).select_from(AgentStageRun)) == 8
     assert db.scalar(select(func.count()).select_from(EvidenceBundle)) == 1
-    assert db.scalar(select(func.count()).select_from(LlmInvocation)) == 5
+    assert db.scalar(select(func.count()).select_from(LlmInvocation)) == 3
     assert db.scalar(select(func.count()).select_from(Decision)) == 0
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
+    assert db.scalar(select(func.count()).select_from(OrderIntent)) == 0
 
     listed = client.get("/api/v1/ai/agent-runs")
     assert listed.status_code == 200
     assert listed.json()["items"][0]["run_id"] == body["run_id"]
+
+
+def test_agent_context_and_position_snapshot_change_idempotency_key(
+    client: TestClient, db: Session
+) -> None:
+    _market_fixture(db)
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    route_ids = _routes(client, headers)
+    request = {
+        "schema_version": "1.0",
+        "market": "KRX",
+        "symbol": "005930",
+        "route_ids": route_ids,
+    }
+
+    entry = client.post("/api/v1/ai/agent-runs/diagnostic", headers=headers, json=request)
+    assert entry.status_code == 201
+    assert entry.json()["analysis_context"] == "ENTRY"
+    for _ in range(8):
+        assert process_agent_work_once(db, worker_id="entry-worker", lease_seconds=30)
+
+    position = Position(
+        account_alias="KIWOOM_MOCK_PRIMARY",
+        symbol="005930",
+        quantity=3,
+        average_price=Decimal(69500),
+        state="OPEN",
+    )
+    db.add(position)
+    db.commit()
+
+    holding = client.post("/api/v1/ai/agent-runs/diagnostic", headers=headers, json=request)
+    assert holding.status_code == 201
+    assert holding.json()["created"] is True
+    assert holding.json()["analysis_context"] == "POSITION"
+    assert holding.json()["run_id"] != entry.json()["run_id"]
+    assert holding.json()["position_snapshot_hash"] != entry.json()["position_snapshot_hash"]
+    stored = db.get(AgentRun, holding.json()["run_id"])
+    assert stored is not None
+    position_input = json.loads(stored.position_snapshot_json or "{}")
+    assert position_input["calculation_version"] == "position-risk-input-v1"
+    assert position_input["cost_basis_amount"] == "208500.0000"
+    assert position_input["market_value_amount"] == "210000.0000"
+    assert position_input["unrealized_pnl_amount"] == "1500.0000"
+    assert position_input["unrealized_return_pct"] == "0.719424"
+    assert position_input["drawdown_from_session_high_pct"] == "-0.709220"
+    assert position_input["fixed_stop_price"] == "68110.0000"
+    assert position_input["distance_to_fixed_stop_pct"] == "2.700000"
+    assert position_input["freshness"]["status"] == "FRESH"
+    assert position_input["risk_policy"]["source"] == "SAFE_DEFAULT"
+    assert len(position_input["risk_policy"]["payload_hash"]) == 64
+
+    for _ in range(8):
+        assert process_agent_work_once(db, worker_id="position-worker", lease_seconds=30)
+    completed = client.get(f"/api/v1/ai/agent-runs/{holding.json()['run_id']}").json()
+    position_stage = next(
+        stage for stage in completed["stages"] if stage["role"] == "POSITION_RISK_SCOUT"
+    )
+    assert position_stage["state"] == "SUCCEEDED"
+    assert position_stage["invocation"] is not None
+
+
+def test_agent_run_freezes_valid_market_context_and_invokes_market_scout(
+    client: TestClient, db: Session
+) -> None:
+    _market_fixture(db)
+    context_id = _market_context_fixture(db)
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    route_ids = _routes(client, headers)
+
+    response = client.post(
+        "/api/v1/ai/agent-runs/diagnostic",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "market": "KRX",
+            "symbol": "005930",
+            "route_ids": route_ids,
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["market_context_snapshot_id"] == context_id
+    assert len(body["market_context_snapshot_hash"]) == 64
+    for _ in range(8):
+        assert process_agent_work_once(db, worker_id="context-worker", lease_seconds=30)
+    completed = client.get(f"/api/v1/ai/agent-runs/{body['run_id']}").json()
+    market_stage = next(
+        stage for stage in completed["stages"] if stage["role"] == "MARKET_SECTOR_SCOUT"
+    )
+    assert market_stage["state"] == "SUCCEEDED"
+    assert market_stage["invocation"] is not None
+    assert market_stage["output"]["stance"] == "SUPPORTIVE"
+    assert "MARKET_TREND_SUPPORTIVE" in market_stage["output"]["reason_codes"]
+
+
+def test_stale_position_input_is_insufficient_without_provider_call(
+    client: TestClient, db: Session
+) -> None:
+    snapshot = _market_fixture(db)
+    stale_at = snapshot.event_at - timedelta(minutes=5)
+    db.add(
+        Position(
+            account_alias="KIWOOM_MOCK_PRIMARY",
+            symbol="005930",
+            quantity=3,
+            average_price=Decimal(69500),
+            state="OPEN",
+            created_at=stale_at,
+            updated_at=stale_at,
+        )
+    )
+    db.commit()
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    route_ids = _routes(client, headers)
+    response = client.post(
+        "/api/v1/ai/agent-runs/diagnostic",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "market": "KRX",
+            "symbol": "005930",
+            "route_ids": route_ids,
+        },
+    )
+    assert response.status_code == 201
+
+    for _ in range(8):
+        assert process_agent_work_once(db, worker_id="stale-position-worker", lease_seconds=30)
+    completed = client.get(f"/api/v1/ai/agent-runs/{response.json()['run_id']}").json()
+    position_stage = next(
+        stage for stage in completed["stages"] if stage["role"] == "POSITION_RISK_SCOUT"
+    )
+    assert position_stage["state"] == "INSUFFICIENT_DATA"
+    assert position_stage["invocation"] is None
+    assert "POSITION_DATA_STALE" in position_stage["output"]["reason_codes"]
+
+
+def test_active_risk_policy_provenance_is_frozen_at_admission(
+    client: TestClient, db: Session, admin: User
+) -> None:
+    _market_fixture(db)
+    db.add(
+        Position(
+            account_alias="KIWOOM_MOCK_PRIMARY",
+            symbol="005930",
+            quantity=3,
+            average_price=Decimal(69500),
+            state="OPEN",
+        )
+    )
+    policy = {
+        "entry_order_amount": None,
+        "max_single_order_amount": 1_000_000,
+        "max_position_amount_per_symbol": 1_000_000,
+        "max_total_position_amount": 3_000_000,
+        "max_open_positions": 3,
+        "max_daily_entries": 5,
+        "fixed_stop_loss_pct": "-3.0",
+        "quote_stale_seconds": 2,
+        "max_spread_pct": "0.30",
+        "max_price_deviation_pct": "0.50",
+    }
+    policy_json = json.dumps(policy, separators=(",", ":"), sort_keys=True)
+    active = ConfigurationVersion(
+        scope="USER_DEFAULT",
+        target_id=admin.id,
+        category="RISK_POLICY",
+        sequence=1,
+        state="ACTIVE",
+        payload_json=policy_json,
+        payload_hash=hashlib.sha256(policy_json.encode()).hexdigest(),
+        reason="active fixture",
+        created_by=admin.id,
+        activated_at=datetime.now(UTC),
+    )
+    db.add(active)
+    db.commit()
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    route_ids = _routes(client, headers)
+    response = client.post(
+        "/api/v1/ai/agent-runs/diagnostic",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "market": "KRX",
+            "symbol": "005930",
+            "route_ids": route_ids,
+        },
+    )
+    assert response.status_code == 201
+    run = db.get(AgentRun, response.json()["run_id"])
+    assert run is not None
+    frozen = json.loads(run.position_snapshot_json or "{}")
+    assert frozen["fixed_stop_loss_pct"] == "-3.000000"
+    assert frozen["fixed_stop_price"] == "67415.0000"
+    assert frozen["risk_policy"] == {
+        "source": "ACTIVE",
+        "version_id": active.id,
+        "payload_hash": active.payload_hash,
+    }
+
+    active.state = "SUPERSEDED"
+    changed_policy = {**policy, "fixed_stop_loss_pct": "-5.0"}
+    changed_json = json.dumps(changed_policy, separators=(",", ":"), sort_keys=True)
+    db.add(
+        ConfigurationVersion(
+            scope="USER_DEFAULT",
+            target_id=admin.id,
+            category="RISK_POLICY",
+            sequence=2,
+            state="ACTIVE",
+            payload_json=changed_json,
+            payload_hash=hashlib.sha256(changed_json.encode()).hexdigest(),
+            reason="replacement fixture",
+            created_by=admin.id,
+            base_active_version_id=active.id,
+            activated_at=datetime.now(UTC),
+        )
+    )
+    db.commit()
+    db.refresh(run)
+    assert json.loads(run.position_snapshot_json or "{}") == frozen
+
+
+def test_legacy_agent_run_remains_readable_without_v4_contract_fields(
+    client: TestClient, db: Session, admin: User
+) -> None:
+    snapshot = _market_fixture(db)
+    legacy = AgentRun(
+        owner_id=admin.id,
+        market="KRX",
+        symbol="005930",
+        market_snapshot_id=snapshot.id,
+        input_hash="b" * 64,
+        dag_version="agent-dag-v3",
+        route_versions_json="{}",
+        idempotency_key="c" * 64,
+        state="SUCCEEDED",
+        core_action="WAIT",
+        valid_until=datetime.now(UTC) + timedelta(minutes=5),
+        completed_at=datetime.now(UTC),
+    )
+    db.add(legacy)
+    db.commit()
+
+    _login(client)
+    response = client.get(f"/api/v1/ai/agent-runs/{legacy.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dag_version"] == "agent-dag-v3"
+    assert body["analysis_context"] is None
+    assert body["position_snapshot_hash"] is None
+    assert body["assessment_schema_version"] is None
+    assert body["core_schema_version"] is None
+    assert body["score_policy_version"] is None
+    assert body["server_input_policy_version"] is None
+    assert body["market_context_snapshot_id"] is None
+    assert body["market_context_snapshot_hash"] is None
+    assert body["shadow_assessment"] is None
+
+
+def test_corrupted_position_snapshot_is_conflicted_and_core_is_unknown(
+    client: TestClient, db: Session
+) -> None:
+    _market_fixture(db)
+    db.add(
+        Position(
+            account_alias="KIWOOM_MOCK_PRIMARY",
+            symbol="005930",
+            quantity=3,
+            average_price=Decimal(69500),
+            state="OPEN",
+        )
+    )
+    db.commit()
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    route_ids = _routes(client, headers)
+    response = client.post(
+        "/api/v1/ai/agent-runs/diagnostic",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "market": "KRX",
+            "symbol": "005930",
+            "route_ids": route_ids,
+        },
+    )
+    assert response.status_code == 201
+    run = db.get(AgentRun, response.json()["run_id"])
+    assert run is not None
+    run.position_snapshot_json = '{"marker":"NO_OPEN_POSITION"}'
+    db.commit()
+
+    for _ in range(8):
+        assert process_agent_work_once(db, worker_id="corrupt-position-worker", lease_seconds=30)
+
+    completed = client.get(f"/api/v1/ai/agent-runs/{run.id}").json()
+    assert completed["core_action"] == "WAIT"
+    assert completed["shadow_assessment"] == "UNKNOWN"
+    position_stage = next(
+        stage for stage in completed["stages"] if stage["role"] == "POSITION_RISK_SCOUT"
+    )
+    assert position_stage["state"] == "CONFLICTED"
+    assert position_stage["output"]["entry_score"] is None
+    assert position_stage["output"]["exit_risk_score"] is None
+    assert "POSITION_DATA_CONFLICTED" in position_stage["output"]["reason_codes"]
+
+
+def test_failed_scout_output_is_reduced_to_unknown_core_assessment(
+    client: TestClient, db: Session
+) -> None:
+    _market_fixture(db)
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    route_ids = _routes(client, headers)
+    response = client.post(
+        "/api/v1/ai/agent-runs/diagnostic",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "market": "KRX",
+            "symbol": "005930",
+            "route_ids": route_ids,
+        },
+    )
+    assert response.status_code == 201
+    run_id = response.json()["run_id"]
+    failed_scout = db.scalar(
+        select(AgentStageRun).where(
+            AgentStageRun.run_id == run_id,
+            AgentStageRun.role == "TECHNICAL_SCOUT",
+        )
+    )
+    assert failed_scout is not None
+    failed_scout.state = "INVALID_OUTPUT"
+    failed_scout.error_code = "LLM_INVALID_OUTPUT"
+    failed_scout.completed_at = datetime.now(UTC)
+    db.commit()
+
+    while process_agent_work_once(db, worker_id="invalid-output-worker", lease_seconds=30):
+        pass
+
+    completed = client.get(f"/api/v1/ai/agent-runs/{run_id}").json()
+    core = next(stage for stage in completed["stages"] if stage["role"] == "CORE")
+    assert core["state"] == "SUCCEEDED"
+    assert core["invocation"] is None
+    assert core["output"]["shadow_assessment"] == "UNKNOWN"
+    assert "TECHNICAL_SCOUT" in core["output"]["incomplete_roles"]
+    assert completed["core_action"] == "WAIT"
+    assert completed["shadow_assessment"] == "UNKNOWN"
+    assert completed["state"] == "FAILED"
 
 
 def test_agent_runtime_rejects_incomplete_route_set_without_creating_run(

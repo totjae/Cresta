@@ -905,9 +905,27 @@ class AgentRunResponse(StrictModel):
     market_snapshot_id: str
     input_hash: str
     dag_version: str
+    analysis_context: Literal["ENTRY", "POSITION"] | None
+    position_snapshot_hash: str | None
+    server_input_policy_version: str | None
+    market_context_snapshot_id: str | None
+    market_context_snapshot_hash: str | None
+    assessment_schema_version: str | None
+    core_schema_version: str | None
+    score_policy_version: str | None
     route_versions: dict[str, object]
     state: str
     core_action: Literal["WAIT"] | None
+    shadow_assessment: Literal[
+        "ENTRY_STRONG",
+        "ENTRY_SUPPORTIVE",
+        "NEUTRAL",
+        "ENTRY_ADVERSE",
+        "HOLD_SUPPORTIVE",
+        "EXIT_RISK_ELEVATED",
+        "EXIT_RISK_HIGH",
+        "UNKNOWN",
+    ] | None
     valid_until: datetime
     stages: list[AgentStageRunResponse]
     evidence_bundle: AgentEvidenceBundleResponse | None

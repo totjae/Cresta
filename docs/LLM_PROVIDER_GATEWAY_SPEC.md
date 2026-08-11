@@ -351,7 +351,7 @@ Invocation: CREATED | RUNNING | SUCCEEDED | REFUSED | TIMED_OUT |
 - 추정 비용과 비용 미확정 건수
 - agent run 대비 provider 실패 영향
 
-## 13. 구현 순서
+## 13. 구현 이력과 현행 경계
 
 1. `contracts`, DB profile/invocation schema와 redaction 시험
 2. Provider registry, secret reference와 `OPENAI_COMPATIBLE`이 아닌 Mock Adapter
@@ -362,11 +362,13 @@ Invocation: CREATED | RUNNING | SUCCEEDED | REFUSED | TIMED_OUT |
 7. 다중 에이전트 SHADOW stage 연결
 8. 회귀평가 후 선택한 Scout만 활성화
 
-첫 구현 PR은 1~3과 deterministic Mock Adapter까지만 포함하며 외부 모델 응답으로 Core 판단이나 주문을 생성하지 않는다.
+위 순서는 구현 이력이다. 현재는 외부 credential, Native/OpenAI-compatible Adapter, 역할 배정, 단일 failover, 서비스 티어, 제한된 Provider 웹 검색과 Agent Runtime v4 SHADOW 호출까지 구현됐다. 외부 모델 결과를 승인·주문으로 연결하지 않는 경계는 계속 유효하다.
 
-Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 단계에서 Provider 카탈로그, Model 카탈로그, 역할별 현재 배정과 이력으로 분리했다. v1은 Mock Adapter와 5개 Scout·Core SHADOW 배정만 지원하며 외부 credential과 실제 Adapter는 계속 차단한다.
+Provider·Model·Route 화면은 Provider 카탈로그, Provider 내부 Model 카탈로그, 역할별 현재 배정과 이력으로 분리한다.
 
-### 13.1 LLM Foundation v1 고정 계약
+### 13.1 역사적 LLM Foundation v1 계약
+
+LLM-080~085는 최초 Foundation migration의 회귀·감사 기준이며 현행 기능 제한이 아니다. 현행 기능은 13.2 이후와 LLM-PROVIDER-100 이후 요구사항을 따른다.
 
 | ID | 요구사항 |
 | --- | --- |
@@ -377,9 +379,9 @@ Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 �
 | LLM-084 | Foundation v1 route는 `SHADOW` execution stage와 `fallback_policy=NONE`만 허용하고 `CORE`를 포함한 어떤 role에서도 판단·승인·주문을 생성하지 않는다. |
 | LLM-085 | 첫 UI는 profile·model·route metadata와 검증 상태를 관리하며 API key·token·secret 입력 필드를 제공하지 않는다. |
 
-### 13.2 Native Adapter Foundation v2
+### 13.2 역사적 Native Adapter Foundation v2와 현재 유지되는 안전 경계
 
-이 절은 외부 credential을 계속 금지하던 LLM-081·082·085의 Foundation v1 제한을 다음 단계에서 대체한다. 역할 route 실행과 주문 연결은 대체하지 않는다.
+LLM-086·092·093의 기능 제한은 이후 외부 SHADOW runtime 구현으로 대체됐다. LLM-087·089~091의 secret·단일 전송·오류 정규화·감사 경계는 현재도 유지한다.
 
 | ID | 요구사항 |
 | --- | --- |
@@ -401,7 +403,7 @@ Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 �
 | LLM-096 | 모델 발견 요청은 15초 timeout, redirect 금지, 최대 5 MiB 응답, 최대 10,000개 모델 제한을 적용하고 credential·Authorization header·Provider 원문 오류를 응답이나 로그에 노출하지 않는다. |
 | LLM-097 | 발견 모델은 기본적으로 `DRAFT`이며 사용자가 `사용`으로 전환한 모델만 `VALIDATED`가 되어 역할 배정 선택지에 나타난다. 같은 모델은 여러 역할에 재사용할 수 있다. |
 | LLM-098 | 등록된 Provider의 모델 동기화는 저장된 write-only credential로 모델 목록을 다시 조회하여 새 모델을 추가한다. 기존 활성 모델과 역할 이력은 자동 삭제하거나 재배정하지 않는다. |
-| LLM-099 | 외부 모델은 등록·활성화·역할 변경 후보 선택까지 가능하지만 Agent 외부 호출 runtime이 검증되기 전 route 활성화와 주문 영향은 `EXTERNAL_RUNTIME_NOT_IMPLEMENTED`로 차단한다. |
+| LLM-099 | 외부 모델은 검증·역할 배정 후 Agent Runtime v3의 `DIAGNOSTIC/SHADOW`에서 호출할 수 있다. 이 활성화는 `TRADING`, 승인 또는 주문 권한을 부여하지 않는다. |
 
 ## 14. 검증·인수 조건
 
@@ -414,8 +416,8 @@ Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 �
 
 ## 15. 미결정·보류 항목
 
-- 첫 외부 provider와 과금 계정은 사용자가 credential을 준비할 때 결정한다.
-- Vercel AI Gateway의 실제 provider pinning·usage metadata는 구현 시 공식 API fixture로 재검증한다.
+- Provider·Gateway별 모델 응답 편차, usage 누락과 schema 통과율은 실제 SHADOW 이력으로 계속 측정한다.
+- Vercel AI Gateway의 provider pinning·usage metadata는 실제 계정을 사용할 때 공식 API fixture로 재검증한다.
 - Ollama에 배치할 모델과 quantization은 N100/16GB benchmark 후 결정한다.
 - 사용자 지정 Gateway allowlist에 포함할 제품은 별도 보안·이용약관 검토 후 추가한다.
 # 2026-08-07 Provider catalog and external SHADOW rules
@@ -442,12 +444,12 @@ Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 �
 
 이 절은 모델 호출 실패 처리에 대해 앞선 일반 재시도·다중 fallback 설계보다 우선한다. `DIAGNOSTIC/SHADOW`에서도 두 정책을 검증할 수 있지만 결과는 승인·주문에 연결하지 않는다.
 
-- `LLM-PROVIDER-115`: 역할별 실패 정책은 `FAIL_STOP` 또는 `FAILOVER` 두 가지만 지원하며 기본값은 `FAIL_STOP`이다.
-- `LLM-PROVIDER-116`: `FAILOVER`는 사용자가 미리 지정하고 검증한 예비 모델 1개만 허용한다. 기본 모델 실패 후 예비 모델을 최대 1회 호출하며 연쇄 fallback과 자동 재시도는 하지 않는다.
-- `LLM-PROVIDER-117`: 지원하지 않는 파라미터, 인증, timeout, rate limit, provider 오류와 출력 schema 오류가 발생해도 Cresta가 파라미터를 제거·보정하거나 모델 설정을 자동 변경하지 않는다.
-- `LLM-PROVIDER-118`: 기본·예비 모델이 모두 실패하거나 정책이 `FAIL_STOP`이면 해당 역할을 실패로 종료하고 AI 판단에 의한 승인·주문을 생성하지 않는다. 신규매수는 `WAIT` 또는 `RISK_BLOCK`으로 제한한다.
-- `LLM-PROVIDER-119`: AI 실패 중에도 고정 손절, 비상정지와 장마감 청산 등 Cresta Guard의 규칙 기반 보호 기능은 독립적으로 계속 동작한다.
-- `LLM-PROVIDER-120`: 각 호출 이력에는 역할, 기본 모델, 예비 모델, 오류 코드, 실패 파라미터(확인 가능한 경우), fallback 시도 여부, 실제 사용 모델과 최종 `SUCCEEDED/FAIL_STOP` 결과를 저장한다. credential과 provider 원문 응답은 저장하지 않는다.
+- `LLM-PROVIDER-160`: 역할별 실패 정책은 `FAIL_STOP` 또는 `FAILOVER` 두 가지만 지원하며 기본값은 `FAIL_STOP`이다.
+- `LLM-PROVIDER-161`: `FAILOVER`는 사용자가 미리 지정하고 검증한 예비 모델 1개만 허용한다. 기본 모델 실패 후 예비 모델을 최대 1회 호출하며 연쇄 fallback과 자동 재시도는 하지 않는다.
+- `LLM-PROVIDER-162`: 지원하지 않는 파라미터, 인증, timeout, rate limit, provider 오류와 출력 schema 오류가 발생해도 Cresta가 파라미터를 제거·보정하거나 모델 설정을 자동 변경하지 않는다.
+- `LLM-PROVIDER-163`: 기본·예비 모델이 모두 실패하거나 정책이 `FAIL_STOP`이면 해당 역할을 실패로 종료하고 AI 판단에 의한 승인·주문을 생성하지 않는다. 신규매수는 `WAIT` 또는 `RISK_BLOCK`으로 제한한다.
+- `LLM-PROVIDER-164`: AI 실패 중에도 고정 손절, 비상정지와 장마감 청산 등 Cresta Guard의 규칙 기반 보호 기능은 독립적으로 계속 동작한다.
+- `LLM-PROVIDER-165`: 각 호출 이력에는 역할, 기본 모델, 예비 모델, 오류 코드, 실패 파라미터(확인 가능한 경우), fallback 시도 여부, 실제 사용 모델과 최종 `SUCCEEDED/FAIL_STOP` 결과를 저장한다. credential과 provider 원문 응답은 저장하지 않는다.
 
 ### 역할별 응답 제한시간과 서비스 티어 (2026-08-10)
 
@@ -456,7 +458,7 @@ Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 �
 - `LLM-PROVIDER-123`: 역할 route는 `DEFAULT`, `PRIORITY`, `FLEX` 서비스 티어를 저장한다. `DEFAULT`는 요청 필드를 생략하여 Provider의 Standard/Auto 정책을 따르고, 나머지는 Adapter가 소문자 provider 필드로 전달한다.
 - `LLM-PROVIDER-124`: 서비스 티어와 timeout은 역할 배정 version의 일부다. 후보 검증과 원자 활성화를 거쳐야 변경되며 기존 run과 route 이력은 당시 값을 보존한다.
 - `LLM-PROVIDER-125`: Provider 또는 모델이 티어를 지원하지 않아 실패하면 자동 보정하거나 다른 티어로 재전송하지 않는다. 기존 `FAIL_STOP` 또는 명시적 단일 `FAILOVER` 정책과 안전한 오류 이력을 적용한다.
-- `LLM-PROVIDER-126`: `FLEX` 선택 시 Console은 600초를 권장값으로 채우지만 사용자가 역할 특성에 맞게 1–600초 범위에서 명시적으로 변경할 수 있다.
+- `LLM-PROVIDER-126`: `FLEX` 선택 시 Console은 300초를 권장값으로 채우지만 사용자가 역할 특성에 맞게 1–600초 범위에서 명시적으로 변경할 수 있다. 서비스 티어 변경이 이미 명시한 timeout을 강제로 덮어쓰지는 않는다.
 
 ### 역할별 Provider 웹 검색과 실행 시각 컨텍스트 (2026-08-11)
 
@@ -484,5 +486,11 @@ Provider 검색 필드 확인 자료:
 - `LLM-PROVIDER-138`: OpenAI 호환 요청은 APIchat과 동일하게 LLM Gateway 웹 검색에만 `web_search=true`를 사용한다. Cresta 전용 strict schema, invocation 감사, fail-closed 처리는 APIchat의 자유 형식 채팅 동작 위에 추가되는 독립 경계다.
 - `LLM-PROVIDER-139`: OpenAI 공식 Responses Adapter도 모델 ID가 `gpt-5` 또는 `o1/o3/o4` 계열이면 reasoning 설정 유무와 관계없이 `temperature`와 `top_p`를 전송하지 않는다. `reasoning_effort`가 명시된 경우에만 Responses API의 `reasoning.effort`로 전송한다.
 - `LLM-PROVIDER-140`: Adapter가 반환한 `output_json`은 Provider envelope와 분리된 model-owned 구조화 출력으로 취급한다. runtime은 이를 bounded canonical JSON으로 server validation 전에 캡처하되 raw response body나 assistant text를 저장하지 않는다.
-- `LLM-PROVIDER-140`: Native 및 OpenAI-compatible Adapter는 알려진 Provider citation 위치만 읽어 canonical source candidate로 반환한다. 임의 모델 본문의 URL을 citation으로 간주하지 않으며 비 HTTPS·userinfo·loopback·private IP URL은 폐기한다.
-- `LLM-PROVIDER-141`: source candidate 수집은 structured output 성공 여부와 독립된 감사 경계다. 후보는 `UNRATED`로만 저장하고 Adapter나 Agent가 검증 상태를 자체 부여하지 않는다.
+- `LLM-PROVIDER-166`: Native 및 OpenAI-compatible Adapter는 알려진 Provider citation 위치만 읽어 canonical source candidate로 반환한다. 임의 모델 본문의 URL을 citation으로 간주하지 않으며 비 HTTPS·userinfo·loopback·private IP URL은 폐기한다.
+- `LLM-PROVIDER-167`: source candidate 수집은 structured output 성공 여부와 독립된 감사 경계다. 후보는 `UNRATED`로만 저장하고 Adapter나 Agent가 검증 상태를 자체 부여하지 않는다.
+
+### 거래 경계의 모델·서비스 티어 채택 정책
+
+- `LLM-PROVIDER-168`: 외부 Agent를 향후 `TRADING` 경계에 연결할 때 실행 필수 역할은 `DEFAULT` 또는 검증된 `PRIORITY`만 허용한다. 가변 지연을 전제로 하는 `FLEX`는 DIAGNOSTIC·SHADOW·오프라인 replay 전용이며 거래 필수 경로에서는 route 검증을 거부한다.
+- `LLM-PROVIDER-169`: 모델·tier·timeout 조합은 실제 schema 통과율, latency, 비용과 판단 후 성과를 같은 replay 집합에서 비교한 뒤 채택한다. Provider 명칭이나 단일 성공 사례만으로 자동 승격하지 않는다.
+- `LLM-PROVIDER-170`: 조건부 고성능 Core 호출, 복수 모델 투표와 자동 모델 교체는 평가 자료가 생길 때까지 보류한다. 현행 운영은 사용자가 지정한 primary와 선택적 단일 fallback만 사용한다.

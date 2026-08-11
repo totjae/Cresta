@@ -175,6 +175,17 @@ VWAP
 | MKT-098 | 상대 거래량은 두 5개 구간이 모두 존재하고 직전 구간 거래량 합계가 0보다 클 때만 계산한다. SMA5 기울기는 6개 봉 이상, 실현 변동성은 3개 봉 이상일 때만 계산하며 부족한 값은 0이 아니라 null이다. |
 | MKT-099 | v2 지표는 market snapshot과 1:1인 불변 행에 계산 버전·입력 범위와 함께 저장한다. 매수·매도 체결강도는 키움 aggressor-side 신뢰 필드가 검증되기 전까지 계산하지 않는다. |
 
+### 3.11 시장·업종 Context snapshot
+
+| ID | 요구사항 |
+| --- | --- |
+| MKT-100 | `market-context-v1`은 종목이 속한 시장 index와 sector 식별자·등락률, 상승·하락·보합 종목 수를 trusted internal Adapter가 정규화한 불변 snapshot이다. 공식 또는 계약된 source Adapter가 없는 값은 null 또는 snapshot 부재로 남긴다. |
+| MKT-101 | breadth 비율은 `(상승 종목 수 / (상승+하락+보합)) × 100`으로 서버가 계산한다. 분모가 0이면 null이며 원시 count는 음수일 수 없다. |
+| MKT-102 | snapshot은 `source + market + symbol + source_ref`로 중복을 억제하고 canonical payload hash가 다른 동일 identity는 충돌로 거부한다. source credential과 원문 body는 저장하지 않는다. |
+| MKT-103 | `observed_at ≤ received_at`, `observed_at < valid_until`, 지원 market, 6자리 종목코드, 유효 Decimal 범위와 `NORMAL/INCOMPLETE` 품질을 검증한다. `INCOMPLETE` snapshot은 판단 입력으로 선택하지 않는다. |
+| MKT-104 | 운영 HTTP API에는 Market Context 생성·수정 endpoint를 제공하지 않는다. 초기 구현은 내부 service와 fixture로 저장·선택 계약을 검증하고 실제 source Adapter 선정 전 운영 데이터 부재를 정상 결측으로 취급한다. |
+| MKT-105 | Agent admission에 사용된 Market Context ID와 hash는 PostgreSQL run에 남아 원본 snapshot이 이후 추가돼도 기존 run 입력이 변하지 않아야 한다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 거래량이 역행하거나 가격이 유효 범위를 벗어나면 해당 이벤트를 격리하고 이전 정상 snapshot을 유지한다.

@@ -460,15 +460,18 @@ describe("Agent Worker v2", () => {
     const run = {
       schema_version: "1.0", request_id: "agent-1", run_id: "run-1", created: true,
       purpose: "DIAGNOSTIC", execution_stage: "SHADOW", market: "KRX", symbol: "005930",
-      market_snapshot_id: "snapshot-1", input_hash: "a".repeat(64), dag_version: "agent-dag-v1",
-      route_versions: {}, state: "PARTIAL", core_action: "WAIT", valid_until: "2026-08-06T01:01:00Z",
+      market_snapshot_id: "snapshot-1", input_hash: "a".repeat(64), dag_version: "agent-dag-v5",
+      analysis_context: "ENTRY", position_snapshot_hash: "f".repeat(64),
+      server_input_policy_version: "agent-server-input-v1", market_context_snapshot_id: null, market_context_snapshot_hash: null,
+      assessment_schema_version: "agent-assessment-v2", core_schema_version: "agent-core-v2", score_policy_version: "score-policy-v1",
+      route_versions: {}, state: "PARTIAL", core_action: "WAIT", shadow_assessment: "UNKNOWN", valid_until: "2026-08-06T01:01:00Z",
       stages: roles.map((role, index) => ({
         stage_run_id: `stage-${index}`, role, sequence: index + 1, dependencies: [], route_id: `route-${index}`,
-        state: role === "NEWS_DISCLOSURE_SCOUT" ? "INSUFFICIENT_DATA" : "SUCCEEDED",
+        state: role === "NEWS_DISCLOSURE_SCOUT" ? "INSUFFICIENT_DATA" : role === "POSITION_RISK_SCOUT" ? "NOT_APPLICABLE" : "SUCCEEDED",
         input_hash: "b".repeat(64), output: {}, output_hash: "c".repeat(64), error_code: null,
         attempt_count: 1, max_attempts: 1, fencing_token: 1, lease_expires_at: null, timeout_at: "2026-08-06T01:00:10Z",
-        invocation: { invocation_id: `inv-${index}`, attempt_number: 1, requested_model_profile_id: "model-1", state: "SUCCEEDED", actual_provider: "CRESTA_MOCK", actual_model: "deterministic-mock-v2", latency_ms: 0, validation_status: "PASSED", error_code: null, fallback_path: [], created_at: "2026-08-06T01:00:00Z" },
-        invocations: [{ invocation_id: `inv-${index}`, attempt_number: 1, requested_model_profile_id: "model-1", state: "SUCCEEDED", actual_provider: "CRESTA_MOCK", actual_model: "deterministic-mock-v2", latency_ms: 0, validation_status: "PASSED", error_code: null, fallback_path: [], created_at: "2026-08-06T01:00:00Z" }],
+        invocation: role === "POSITION_RISK_SCOUT" ? null : { invocation_id: `inv-${index}`, attempt_number: 1, requested_model_profile_id: "model-1", state: "SUCCEEDED", actual_provider: "CRESTA_MOCK", actual_model: "deterministic-mock-v2", latency_ms: 0, validation_status: "PASSED", error_code: null, fallback_path: [], created_at: "2026-08-06T01:00:00Z" },
+        invocations: role === "POSITION_RISK_SCOUT" ? [] : [{ invocation_id: `inv-${index}`, attempt_number: 1, requested_model_profile_id: "model-1", state: "SUCCEEDED", actual_provider: "CRESTA_MOCK", actual_model: "deterministic-mock-v2", latency_ms: 0, validation_status: "PASSED", error_code: null, fallback_path: [], created_at: "2026-08-06T01:00:00Z" }],
         started_at: "2026-08-06T01:00:00Z", completed_at: "2026-08-06T01:00:00Z",
       })),
       evidence_bundle: { bundle_id: "bundle-1", state: "PARTIAL", policy_version: "fixture-none-v1", evidence_ids: [], reason_codes: ["NO_EXTERNAL_EVIDENCE_FIXTURE"], bundle_hash: "d".repeat(64), as_of: "2026-08-06T01:00:00Z" },
@@ -499,7 +502,10 @@ describe("Agent Worker v2", () => {
     expect(await screen.findByText(/Route 준비: 5\/5/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "DIAGNOSTIC DAG 등록" }));
     expect(await screen.findByText(/Worker가 비동기로 실행/)).toBeInTheDocument();
-    expect(await screen.findByText("WAIT")).toBeInTheDocument();
+    expect(await screen.findByText("실행 WAIT")).toBeInTheDocument();
+    expect(await screen.findByText("UNKNOWN")).toBeInTheDocument();
+    expect(await screen.findByText(/agent-server-input-v1/)).toBeInTheDocument();
+    expect(await screen.findByText(/POSITION_RISK_SCOUT: 해당 없음/)).toBeInTheDocument();
     await user.click(screen.getAllByRole("button", { name: "구조화 응답 보기" })[0]);
     expect(await screen.findByText(/Provider 원문이 아니라 Adapter가 추출한/)).toBeInTheDocument();
     expect(await screen.findByText(/PRICE_BELOW_VWAP/)).toBeInTheDocument();

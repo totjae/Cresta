@@ -258,7 +258,7 @@ app/llm/*                     Provider/Gateway 호출 계층
 | MAO-091 | route가 필요한 역할은 `TECHNICAL_SCOUT`, `NEWS_DISCLOSURE_SCOUT`, `MARKET_SECTOR_SCOUT`, `POSITION_RISK_SCOUT`, `CORE`이다. 각 route는 요청 사용자 소유, `VALIDATED`, `SHADOW`, 해당 role 일치, 검증된 model이어야 한다. 실패 정책은 MAO-110~113의 `FAIL_STOP` 또는 단일 `FAILOVER`만 허용하며 하나라도 준비되지 않으면 run을 만들지 않는다. |
 | MAO-092 | `INTEL_COLLECTOR`는 OpenDART가 설정되면 MAO-120~124에 따라 PRIMARY 공시를 수집하고, 비활성 상태에서는 빈 fixture를 만든다. `EVIDENCE_VERIFIER`는 두 경우 모두 다른 출처 coverage가 없으므로 `PARTIAL` bundle로 고정하며 외부 정보 없음은 긍정 신호로 해석하지 않는다. |
 | MAO-093 | 실행 순서는 Intel → Verify → 4개 Scout → Candidate Audit → Core로 고정한다. 각 Scout는 Verify 이후 실행하고 Candidate Audit은 네 Scout 이후, Core는 Audit 이후 실행한다. stage dependency를 저장해 worker가 동일 DAG를 재현할 수 있어야 한다. |
-| MAO-094 | 각 route stage는 Provider 호출 전 `RUNNING` invocation을 저장하고 완료 후 실제 provider/model, 입력·응답 hash, latency와 서버 측 schema 검증 결과를 기록한다. 외부 Adapter는 `DIAGNOSTIC/SHADOW`에서만 허용하고 도구 사용은 거부한다. |
+| MAO-094 | 각 route stage는 Provider 호출 전 `RUNNING` invocation을 저장하고 완료 후 실제 provider/model, 입력·응답 hash, latency와 서버 측 schema 검증 결과를 기록한다. 외부 Adapter는 `DIAGNOSTIC/SHADOW`에서만 허용한다. 도구는 기본 거부하며 MAO-075와 LLM-PROVIDER-127~133이 허용한 두 Scout의 Provider 웹 검색만 예외다. |
 | MAO-095 | Technical은 최신 Watch 지표가 없으면, News는 검증된 외부 증거가 없으면, Position Risk는 열린 position이 없으면 `INSUFFICIENT_DATA`를 출력한다. Market은 정상·최신 snapshot만 평가한다. |
 | MAO-096 | Core는 필수 Scout 중 하나라도 `SUCCEEDED`가 아니면 `WAIT`만 출력한다. v1 Core는 `BUY`, 승인, 판단 실행, 주문을 생성할 수 없다. |
 | MAO-097 | 멱등 key는 사용자·purpose·market·symbol·market snapshot·DAG version·정렬된 route version map의 canonical SHA-256이다. 같은 key의 재요청은 기존 run을 반환하고 stage·invocation을 추가하지 않는다. |
@@ -333,3 +333,28 @@ app/llm/*                     Provider/Gateway 호출 계층
 - `MAO-122`: 채택한 공시는 접수번호 14자리, 고유번호 8자리, 종목코드 6자리와 접수일을 검증하고 공식 DART viewer URL, 안전한 필드, 수신시각과 canonical hash만 `DART_DISCLOSURE/PRIMARY` EvidenceItem으로 저장한다. API key와 원문 응답은 DB·로그·hash에 저장하지 않는다.
 - `MAO-123`: DART 수집이 성공해도 뉴스·거래소·기업 IR coverage가 없으므로 v1 Bundle은 `PARTIAL`을 유지한다. 검증된 DART evidence ID는 Scout allowlist에 포함하되 DART 빈 결과는 `DART_QUERY_COMPLETE_NO_MATCHES`로 구분한다.
 - `MAO-124`: DART 활성 여부·설정 상태·source policy version은 run input hash에 포함한다. 같은 snapshot이라도 source 설정이 바뀌면 과거 run을 재사용하지 않는다.
+
+### Agent Runtime v4 SHADOW 의미 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-125 | 신규 admission은 `dag_version=agent-dag-v4`와 `ENTRY` 또는 `POSITION` analysis context를 고정한다. 이미 생성된 v1~v3 run은 당시 DAG와 schema로 끝내며 재해석하거나 소급 변경하지 않는다. |
+| MAO-126 | admission은 열린 포지션 유무와 사용한 position snapshot 또는 명시적 `NO_OPEN_POSITION` 표지를 run 입력에 불변으로 저장한다. 실행 중 포지션 변화는 다음 run에서만 반영한다. |
+| MAO-127 | `ENTRY`의 `POSITION_RISK_SCOUT`는 `NOT_APPLICABLE`로 정상 종료할 수 있다. 이 상태는 dependency 종료 조건에는 포함하지만 성공률·실패율과 Core의 불완전 필수 역할 집계에서는 제외한다. `POSITION`에서는 같은 역할이 필수다. |
+| MAO-128 | 외부 Scout는 `agent-assessment-v2`, Core는 `agent-core-v2`로 검증한다. 평가가 `SUCCEEDED`가 아니면 점수는 null이어야 하며 Core의 실행 action은 계속 `WAIT`로 고정한다. |
+| MAO-129 | Core는 action과 분리된 context별 `shadow_assessment`를 반환한다. 필수 역할 실패, schema 오류, 증거 불충분 또는 context 불일치에서는 반드시 `UNKNOWN`으로 축소한다. |
+| MAO-130 | v4 idempotency key에는 analysis context와 frozen position snapshot hash를 포함한다. 같은 시장 snapshot이어도 context 또는 position snapshot이 다르면 기존 run을 재사용하지 않는다. |
+| MAO-131 | v4 DIAGNOSTIC run은 유효한 shadow assessment를 생성해도 `Decision`, `Approval`, `OrderIntent`, `TradingOrder`를 만들지 않는다. TRADING 연결은 별도 구현 단계와 인수 gate를 요구한다. |
+| MAO-132 | 기존 ACTIVE SHADOW route가 v1 출력 schema를 선언했더라도 v4 admission은 route를 재생성하지 않고 사용할 수 있다. 이때 run에는 route의 선언 schema와 v4의 유효 검증 schema를 함께 고정하며, 실제 출력은 반드시 v2 계약으로 검증한다. 신규 route는 v2 schema를 선언할 수 있고 기존 route row와 과거 run은 변경하지 않는다. |
+
+### 12.5 Agent Runtime v5 서버 입력 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-133 | 신규 admission은 `agent-dag-v5`와 `agent-server-input-v1`을 run 및 input hash에 고정한다. `agent-dag-v4` run은 context-aware v2 출력 계약으로 계속 처리하되 v5 파생 입력을 소급 생성하지 않는다. |
+| MAO-134 | POSITION snapshot 파생값은 admission transaction에서 server-owned calculator가 market snapshot, frozen position과 frozen Risk Policy provenance만 사용해 계산한다. stage worker는 현재 DB position이나 최신 정책을 다시 조회해 값을 바꾸지 않는다. |
+| MAO-135 | Market Context는 trusted internal Adapter만 생성하며 Web/API에서 임의 주입하지 않는다. snapshot은 market·symbol, index, sector, breadth 원시값, 서버 계산 비율, source tier·reference, 품질과 시각을 canonical payload와 hash로 보존한다. |
+| MAO-136 | admission은 같은 market·symbol에서 `quality=NORMAL`이고 admission 시각까지 관측됐으며 `valid_until`이 지나지 않은 최신 Market Context 하나만 선택한다. 선택 ID와 hash는 run에 고정한다. |
+| MAO-137 | Market Context가 없거나 stale·불완전하면 MARKET_SECTOR_SCOUT는 Provider 호출 입력에 null과 결측 reason을 명시하고 결과를 `INSUFFICIENT_DATA`로 강제한다. Provider 웹 검색 결과만으로 서버 Market Context를 대체하지 않는다. |
+| MAO-138 | Position·Market Context 파생 입력은 역할별 Provider 요청의 `allowed_input_refs`에 포함하고 Core에는 Scout가 채택한 assessment와 hash만 전달한다. Provider가 새 source ref나 파생값을 생성해 입력 provenance로 승격할 수 없다. |
+| MAO-139 | v5 DIAGNOSTIC의 실행 action은 계속 WAIT이며 Decision·Approval·OrderIntent·TradingOrder를 생성하지 않는다. 서버 입력 확장은 거래 권한을 변경하지 않는다. |

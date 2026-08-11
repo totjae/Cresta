@@ -230,3 +230,29 @@ core_output:
 | AI-099 | 외부 LLM이 비활성 또는 장애여도 결정론적 Mock·Guard·Broker의 현재 검증 경계를 깨지 않고 명시된 SHADOW/실패 상태를 기록한다. |
 | AI-100 | 외부 Scout와 Core는 서버가 주입한 versioned 역할별 reason code allowlist만 출력할 수 있다. Provider의 structured output 성공 여부와 별도로 서버가 부분집합을 검사하며 미등록 code는 판단 근거로 저장하지 않는다. |
 | AI-101 | OpenDART PRIMARY evidence는 공시 존재와 메타데이터의 검증 근거일 뿐 긍정·부정 방향을 규칙으로 추정하지 않는다. 방향 평가는 NEWS_DISCLOSURE_SCOUT가 허용 evidence를 사용해 수행한다. |
+
+### 6.5 Agent SHADOW 판단 계약 v2
+
+이 계약은 주문 연결이 아니라 SHADOW 판단의 의미와 평가 가능성을 완성한다. 기존 `agent-assessment-v1`, `agent-core-v1`과 `agent-dag-v3` 이력은 수정하지 않고 신규 run부터 versioned v2 계약을 사용한다.
+
+| ID | 요구사항 |
+| --- | --- |
+| AI-102 | 서버는 run admission 시 열린 포지션 유무를 불변 snapshot으로 고정하고 analysis context를 `ENTRY` 또는 `POSITION`으로 결정한다. stage 실행 중 현재 포지션이 바뀌어도 이미 생성된 run의 context를 변경하지 않는다. |
+| AI-103 | `ENTRY` context에서 열린 포지션이 없는 `POSITION_RISK_SCOUT`는 데이터 부족이 아니라 `NOT_APPLICABLE`, `stance=UNKNOWN`, `entry_score=null`, `exit_risk_score=null`, `OPEN_POSITION_NOT_FOUND`를 반환한다. 이 상태는 Core의 불완전 필수 역할로 계산하지 않는다. |
+| AI-104 | `POSITION` context에서는 `POSITION_RISK_SCOUT`가 필수 역할이다. admission snapshot에는 포지션이 있었지만 평가 가능한 position snapshot이 누락·오염·만료된 경우에만 `INSUFFICIENT_DATA` 또는 `CONFLICTED`로 종료한다. |
+| AI-105 | `agent-assessment-v2`는 `status != SUCCEEDED`이면 `entry_score`와 `exit_risk_score`를 모두 null로 강제한다. `NOT_APPLICABLE`은 성공이나 실패로 점수 통계에 포함하지 않고 별도 분모로 집계한다. |
+| AI-106 | `score-policy-v1`은 0–24 `STRONGLY_ADVERSE`, 25–44 `ADVERSE`, 45–55 `MIXED`, 56–74 `SUPPORTIVE`, 75–100 `STRONGLY_SUPPORTIVE` 의미를 제공한다. 이 점수는 SHADOW 비교용이며 Guard 한도나 주문금액에 사용하지 않는다. 경계 변경은 replay 근거와 새 정책 version을 요구한다. |
+| AI-107 | `agent-core-v2`의 실행 `action`은 계속 `WAIT`로 고정하고 별도 `shadow_assessment`를 기록한다. ENTRY는 `ENTRY_STRONG`, `ENTRY_SUPPORTIVE`, `NEUTRAL`, `ENTRY_ADVERSE`, `UNKNOWN`을 허용하고 POSITION은 `HOLD_SUPPORTIVE`, `NEUTRAL`, `EXIT_RISK_ELEVATED`, `EXIT_RISK_HIGH`, `UNKNOWN`을 허용한다. |
+| AI-108 | 필수 역할이 불완전하거나 schema·evidence 검증이 실패하면 Core의 `shadow_assessment`는 `UNKNOWN`이어야 한다. 유효한 평가는 판단·승인·주문을 생성하지 않고 사후 성과 측정에만 사용한다. |
+| AI-109 | 모델별 성능 비교는 `shadow_assessment`, schema 통과율, unsupported claim, latency, 비용과 판단 후 5분·10분·30분 수익률 및 MFE·MAE를 같은 입력 집합에서 측정한다. 조건부 Core 승격이나 모델 자동 교체는 이 평가 근거가 생기기 전에는 구현하지 않는다. |
+
+### 6.6 서버 소유 판단 입력 v1
+
+| ID | 요구사항 |
+| --- | --- |
+| AI-110 | 신규 `agent-dag-v5` run은 `agent-server-input-v1`을 사용한다. v4와 이전 run은 당시 입력 의미로 보존하며 worker는 이미 생성된 v4를 계속 v2 출력 계약으로 처리한다. |
+| AI-111 | POSITION admission은 frozen position snapshot에 잔여 수량·평균단가·현재가, 평가금액, 원가, 미실현손익 금액·수익률, 세션 고점 대비 하락률, 추적 시작 후 경과시간, 고정 손절가격과 손절선 거리를 서버 계산값으로 저장한다. 모델이 반환한 같은 이름의 값으로 이를 덮어쓰지 않는다. |
+| AI-112 | 손절 계산은 admission 당시 활성 사용자 Risk Policy를 사용하고 없으면 명시적 SAFE_DEFAULT를 사용한다. snapshot에는 정책 source, version ID 또는 null, payload hash와 계산 version을 남긴다. 종목별 전략 stop과 실제 보유 시작시각은 아직 없으므로 session high와 `Position.created_at`을 각각 명시적인 대체 provenance로 사용한다. |
+| AI-113 | Position freshness는 position `updated_at`과 market snapshot 기준시각의 차이, 적용한 stale threshold와 상태를 함께 기록한다. stale·누락·hash 불일치는 점수를 만들지 않고 `INSUFFICIENT_DATA` 또는 `CONFLICTED`로 축소한다. |
+| AI-114 | MARKET_SECTOR_SCOUT는 서버가 선택해 run에 고정한 `market-context-v1` snapshot만 사용한다. 유효한 snapshot이 없으면 개별 종목 quote를 시장·업종 흐름으로 오인하지 않고 `INSUFFICIENT_DATA`, null 점수와 `MARKET_DATA_INSUFFICIENT`를 반환한다. |
+| AI-115 | 서버 입력의 모든 Decimal은 canonical 문자열로 직렬화하고 계산 version, source reference, observed/received/valid 시각과 freshness를 포함한다. 같은 원시 입력과 정책 version은 같은 canonical hash와 파생값을 생성해야 한다. |

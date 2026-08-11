@@ -334,6 +334,7 @@ Docker Compose에서 API 또는 Frontend 컨테이너만 재생성하면 고정 
 | OPS-075 | LLM 장애 대응은 신규 AI 매수 판단을 중지하되 Broker worker·재동기화·실시간 Guard를 재시작하거나 중단시키지 않는다. |
 | OPS-076 | `backend/app/agents`, 공통 LLM Adapter 또는 Agent migration 변경 배포는 `api`, `scheduler`뿐 아니라 Compose `agent` 이미지를 반드시 build·recreate한다. 배포 후 `agent` 컨테이너의 source marker와 신규 DAG stage 수를 확인한다. |
 | OPS-077 | OpenDART는 선택형 `deploy/compose.dart.yaml`로만 활성화한다. `secrets/dart_api_key`가 없거나 유효하지 않으면 기본 Compose는 계속 기동하되 DART 활성 run은 생성·수집하지 않는다. |
+| OPS-078 | OpenDART를 활성 운영하는 호스트의 부팅 조정 명령에는 `compose.dart.yaml`을 포함해야 한다. 기본 `cresta-boot.service`가 기본·키움 overlay만 참조하는 동안에는 DART가 재부팅 자동복구 대상으로 검증됐다고 표시하지 않는다. |
 
 ### 4.2 OpenDART 공시 수집 활성화
 
@@ -346,6 +347,8 @@ sudo stat -c '%u:%g %a %s-byte %n' secrets/dart_api_key
 ```
 
 정상 기대값은 `10001:10001 400 41-byte`이며 마지막 1 byte는 줄바꿈일 수 있다. 활성 배포에는 기본·키움·DART Compose 파일을 모두 사용한다.
+
+현재 저장소의 `cresta-boot.service` 템플릿은 기본·키움 overlay만 사용한다. 따라서 아래 수동 배포로 DART를 활성화해도 재부팅 뒤 DART 설정이 자동 조정된다고 간주하지 않는다. DART 상시 운영 전에는 unit의 Compose 파일 목록을 설정 가능하게 만드는 후속 구현과 재부팅 인수시험이 필요하다.
 
 ```bash
 sudo docker compose \

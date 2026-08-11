@@ -398,19 +398,19 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 | UI-115 | agent run 화면은 DAG, stage 상태, 입력·증거·출력 schema, 실제 provider/model, 지연·사용량·비용과 실패 이유를 표시하되 raw prompt·원문 응답은 기본 표시하지 않는다. |
 | UI-116 | SHADOW 비교 화면은 같은 입력에서 모델별 출력·schema 통과·latency·cost 차이를 표시하고 어떤 결과도 승인·주문을 생성하지 않았음을 고정 표시한다. |
 | UI-117 | provider 장애·circuit open·rate/cost limit·필수 stage 실패는 `연결됨`이나 `판단 성공`으로 표시하지 않고 신규매수에 미치는 차단 이유를 함께 표시한다. |
-| UI-118 | AI 판단 화면의 Agent Runtime v1 패널은 종목·시장과 5개 필수 role의 활성 SHADOW route 준비 상태를 표시하고 모두 준비된 경우에만 DIAGNOSTIC run 생성을 허용한다. |
+| UI-118 | AI 판단 화면의 Agent Runtime v3 패널은 종목·시장과 5개 필수 role의 활성 SHADOW route 준비 상태를 표시하고 모두 준비된 경우에만 DIAGNOSTIC run 생성을 허용한다. |
 | UI-119 | run 목록·상세는 DAG·stage 상태·실제 provider/model·evidence bundle 상태·Core action을 표시하고 `SHADOW · 주문 없음`을 고정 표시한다. raw prompt·응답·credential은 입력하거나 표시하지 않는다. |
 | UI-120 | AI 설정 화면은 `Provider`, `역할별 배정`, `이력` 영역을 분리한다. 모델 목록과 사용 전환은 해당 Provider 카드 안에서 관리한다. |
 | UI-121 | Provider 기본 화면은 provider당 한 행 또는 카드로 이름·Adapter·health·credential 설정 여부를 표시하고 등록·수정·연결 시험은 modal 또는 별도 편집 panel에서 수행한다. |
 | UI-122 | Provider 카드의 모델 목록은 alias·provider model ID·검증 상태를 표시하고 사용 여부를 전환한다. 같은 모델을 역할 수만큼 복제 생성하지 않는다. |
-| UI-123 | 역할별 배정 화면은 runtime이 모델 route를 요구하는 각 Scout·Core를 한 행씩 고정 표시하고 각 행에서 등록된 검증 모델 하나를 선택한다. 같은 모델을 여러 역할에서 선택할 수 있다. v1의 deterministic Intel·Verify 내부 stage는 별도 모델 배정 행을 표시하지 않는다. |
+| UI-123 | 역할별 배정 화면은 runtime이 모델 route를 요구하는 각 Scout·Core를 한 행씩 고정 표시하고 각 행에서 등록된 검증 모델 하나를 선택한다. 같은 모델을 여러 역할에서 선택할 수 있다. deterministic Intel·Verify·Candidate Auditor 내부 stage는 별도 모델 배정 행을 표시하지 않는다. |
 | UI-124 | 역할 행의 `파라미터` 편집은 temperature·top_p·max output token·reasoning effort·seed의 모델 기본값, 역할 override와 최종값을 구분한다. 선택 모델이 지원하지 않는 필드는 비활성화하고 이유를 표시한다. |
 | UI-127 | Provider 추가 기본 화면은 서비스 제공자 선택, 연결 이름, write-only API key와 `연결 시험 및 등록` 버튼만 표시한다. endpoint는 서버 카탈로그에서 고정하며 고급 수동 등록과 분리한다. |
 | UI-128 | 연결 시험 성공 후 Provider 카드 안에 발견 모델 목록과 `사용/사용 안 함` 전환을 표시한다. 사용 모델만 역할 배정의 등록 모델 선택지에 나타나며 API key는 성공·실패 후 입력 상태에서 제거한다. |
 | UI-129 | Provider 카드는 연결 상태, 활성/전체 모델 수, 모델 접기·동기화를 한 곳에 표시하고 실패한 연결을 카탈로그에 누적하지 않는다. |
 | UI-125 | 기본 역할 화면은 현재 활성 배정만 표시하고 draft·validated·superseded version은 `이력` drawer/table에서 조회한다. 중복 후보가 있으면 첫 행을 자동 선택하지 않고 `현재 배정 미확정`으로 표시한다. |
 | UI-126 | 선행조건 미충족으로 비활성화된 버튼은 `not-allowed` cursor와 구체적인 누락 사유를 표시한다. 실제 요청 처리 중에만 spinner와 `wait` cursor를 사용한다. |
-| UI-127 | DIAGNOSTIC DAG 버튼은 run admission 완료 즉시 다시 활성화한다. `CREATED/RUNNING` run이 있으면 1~2초 간격으로 목록을 갱신하고 stage 상태·attempt를 표시하되 HTTP 요청을 DAG 완료까지 유지하지 않는다. |
+| UI-138 | DIAGNOSTIC DAG 버튼은 run admission 완료 즉시 다시 활성화한다. `CREATED/RUNNING` run이 있으면 1~2초 간격으로 목록을 갱신하고 stage 상태·attempt를 표시하되 HTTP 요청을 DAG 완료까지 유지하지 않는다. |
 | UI-130 | 역할별 배정은 기본 `FAIL_STOP`과 선택적 `FAILOVER`를 제공한다. `FAILOVER`일 때만 기본 모델과 다른 예비 모델 하나를 요구하고, route 이력과 Agent run 카드에 기본·예비 모델의 시도 순서·상태·오류 코드를 표시한다. |
 | UI-131 | Agent run 카드는 stage별 채택 결과(action/stance/status와 reason code), 실제 provider/model, schema 검증 상태, latency와 오류 코드를 표시한다. raw provider 응답·prompt·credential은 표시하지 않는다. |
 | UI-136 | Agent run의 각 LLM 시도에는 `구조화 응답 보기`를 제공한다. 사용자가 펼칠 때만 전용 API를 호출해 model output JSON, hash와 검증 결과를 표시하며 목록 polling payload에는 포함하지 않는다. |
@@ -429,3 +429,12 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 - `UI-133`: timeout 도움말은 최종 구조화 JSON 수신 완료까지의 제한임을 명시한다. `FLEX` 선택 시 600초를 권장값으로 채우되 자동 활성화하지 않고 후보 검증 절차를 유지한다.
 - `UI-134`: 역할 배정 화면은 뉴스·공시 Scout와 시장·업종 Scout에만 `Provider 웹 검색 허용` 토글을 표시하고 선택 모델의 web search capability가 검증되지 않으면 비활성화한다.
 - `UI-135`: 웹 검색 활성 여부는 route version의 일부이며 변경 시 새 후보 검증과 원자 적용 절차를 거친다.
+
+### Agent SHADOW 판단 계약 v2 표시
+
+| ID | 요구사항 |
+| --- | --- |
+| UI-139 | Agent run 카드는 `실행 결과: WAIT`와 `SHADOW 평가`를 서로 다른 항목으로 표시해 WAIT를 시장 평가로 오인하지 않게 한다. |
+| UI-140 | `NOT_APPLICABLE`은 성공·실패·데이터 부족과 다른 `해당 없음` 상태로 표시하고, ENTRY에서 열린 포지션이 없어 포지션 위험 평가가 불필요하다는 이유를 보여 준다. |
+| UI-141 | 상세 화면은 analysis context, DAG·assessment·core·score policy version과 null 점수를 표시한다. null을 0점으로 렌더링하거나 통계에 포함하지 않는다. |
+| UI-142 | Agent run 카드의 계약 정보는 v5에서 서버 입력 정책 version과 Market Context 상태(`고정됨` 또는 `없음`)를 표시한다. position 파생값 원문이나 Risk Policy payload는 기본 카드에 노출하지 않는다. |

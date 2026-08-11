@@ -54,6 +54,9 @@ class ExternalFixtureAdapter:
         elif request.role == "CORE":
             output = {
                 "action": "WAIT",
+                "shadow_assessment": (
+                    "UNKNOWN" if role_input["required_incomplete_roles"] else "NEUTRAL"
+                ),
                 "confidence": 0.6,
                 "risk_level": "MEDIUM",
                 "reason_codes": [
@@ -178,7 +181,7 @@ def test_external_outputs_are_server_validated_and_adopted_without_trading(
     technical = next(
         stage for stage in completed["stages"] if stage["role"] == "TECHNICAL_SCOUT"
     )
-    assert technical["output"]["schema_version"] == "agent-assessment-v1"
+    assert technical["output"]["schema_version"] == "agent-assessment-v2"
     assert technical["output"]["stage_run_id"] == technical["stage_run_id"]
     assert technical["output"]["symbol"] == "005930"
     assert technical["output"]["reason_codes"] == ["DATA_SUFFICIENT"]
@@ -279,7 +282,7 @@ def test_provider_sources_are_persisted_as_unrated_candidates_without_bundle_pro
         monkeypatch,
         source_candidates=[source, source],
     )
-    search_route = db.get(LlmRoleRoute, route_ids["MARKET_SECTOR_SCOUT"])
+    search_route = db.get(LlmRoleRoute, route_ids["NEWS_DISCLOSURE_SCOUT"])
     assert search_route is not None
     search_route.web_search_enabled = True
     db.commit()

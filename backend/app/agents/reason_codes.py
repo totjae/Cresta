@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from app.agents.contracts import AgentCoreModelOutput, AgentScoutModelOutput
+from app.agents.contracts import (
+    AgentCoreModelOutput,
+    AgentCoreModelOutputV2,
+    AgentScoutModelOutput,
+)
 
 REASON_CODE_POLICY_VERSION = "reason-code-policy-v1"
 
@@ -125,9 +129,15 @@ def reason_code_context(role: str) -> dict[str, object]:
     }
 
 
-def output_schema_for_role(role: str) -> dict[str, object]:
+def output_schema_for_role(
+    role: str, *, core_schema_version: str = "agent-core-v1"
+) -> dict[str, object]:
     base_schema = (
-        AgentCoreModelOutput.model_json_schema()
+        (
+            AgentCoreModelOutputV2.model_json_schema()
+            if core_schema_version == "agent-core-v2"
+            else AgentCoreModelOutput.model_json_schema()
+        )
         if role == "CORE"
         else AgentScoutModelOutput.model_json_schema()
     )

@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
@@ -13,7 +14,9 @@ from sqlalchemy.orm import Session
 
 from app.agents.contracts import (
     AgentAssessment,
+    AgentAssessmentV2,
     AgentCoreModelOutput,
+    AgentCoreModelOutputV2,
     AgentScoutModelOutput,
 )
 from app.agents.reason_codes import (
@@ -22,12 +25,17 @@ from app.agents.reason_codes import (
     output_schema_for_role,
     reason_code_context,
 )
+from app.agents.server_inputs import (
+    SERVER_INPUT_POLICY_VERSION,
+    build_position_snapshot,
+)
 from app.config import get_settings
 from app.llm.contracts import LlmRequest
 from app.llm.discovery import get_template
 from app.llm.parameter_policy import supports_service_tier
 from app.llm.registry import AdapterNotImplementedError, provider_registry
 from app.llm.secrets import LlmSecretError, LlmSecretStore
+from app.market_context import select_market_context
 from app.models import (
     AgentRun,
     AgentStageRun,
@@ -44,7 +52,11 @@ from app.models import (
     User,
 )
 
-DAG_VERSION = "agent-dag-v3"
+DAG_VERSION = "agent-dag-v5"
+V2_DAG_VERSIONS = frozenset({"agent-dag-v4", DAG_VERSION})
+ASSESSMENT_SCHEMA_VERSION = "agent-assessment-v2"
+CORE_SCHEMA_VERSION = "agent-core-v2"
+SCORE_POLICY_VERSION = "score-policy-v1"
 EVIDENCE_POLICY_VERSION = "opendart-primary-v1"
 ROUTE_ROLES = (
     "TECHNICAL_SCOUT",
@@ -116,6 +128,10 @@ class InvocationOutcome:
     model: LlmModelProfile
     provider: LlmProviderProfile
     output_json: dict[str, object] | None
+
+
+def uses_v2_contract(dag_version: str) -> bool:
+    return dag_version in V2_DAG_VERSIONS
 
 
 def _canonical(value: object) -> str:
@@ -221,7 +237,11 @@ def _load_routes(
             or (route.fallback_policy == "FAIL_STOP" and fallback_ids)
             or (route.fallback_policy == "FAILOVER" and len(fallback_ids) != 1)
             or route.output_schema_version
-            != ("agent-core-v1" if role == "CORE" else "agent-assessment-v1")
+            not in (
+                {"agent-core-v1", "agent-core-v2"}
+                if role == "CORE"
+                else {"agent-assessment-v1", "agent-assessment-v2"}
+            )
         ):
             raise AgentRuntimeError("AGENT_ROUTE_NOT_READY")
         model = db.get(LlmModelProfile, route.primary_model_profile_id)
@@ -348,6 +368,12 @@ def _invoke_once(
     role_input: dict[str, object],
     now: datetime,
 ) -> InvocationOutcome | None:
+    run = db.get(AgentRun, stage.run_id)
+    if run is None:
+        raise AgentRuntimeError("AGENT_RUN_NOT_FOUND")
+    core_schema_version = (
+        CORE_SCHEMA_VERSION if uses_v2_contract(run.dag_version) else "agent-core-v1"
+    )
     effective_role_input = {**role_input, **reason_code_context(stage.role)}
     stage.state = "RUNNING"
     stage.started_at = now
@@ -426,7 +452,9 @@ def _invoke_once(
         input_schema_version="agent-runtime-input-v1",
         input_hash=stage.input_hash,
         messages=messages,
-        output_json_schema=output_schema_for_role(stage.role),
+        output_json_schema=output_schema_for_role(
+            stage.role, core_schema_version=core_schema_version
+        ),
         timeout_ms=binding.route.timeout_ms,
         service_tier=binding.route.service_tier,
         max_output_tokens=binding.route.max_output_tokens_override or model.max_output_tokens,
@@ -528,7 +556,11 @@ def _invoke_once(
     if provider.adapter_type != "MOCK":
         try:
             if stage.role == "CORE":
-                output = AgentCoreModelOutput.model_validate(result.output_json)
+                output = (
+                    AgentCoreModelOutputV2.model_validate(result.output_json)
+                    if uses_v2_contract(run.dag_version)
+                    else AgentCoreModelOutput.model_validate(result.output_json)
+                )
                 if invalid_reason_codes(stage.role, output.reason_codes):
                     invocation.state = "INVALID_OUTPUT"
                     invocation.validation_status = "FAILED"
@@ -543,6 +575,34 @@ def _invoke_once(
                     invocation.validation_status = "FAILED"
                     invocation.error_code = "LLM_CORE_INCOMPLETE_ROLES_MISMATCH"
                     return None
+                if uses_v2_contract(run.dag_version):
+                    context = str(role_input.get("analysis_context"))
+                    allowed_assessments = (
+                        {
+                            "ENTRY_STRONG",
+                            "ENTRY_SUPPORTIVE",
+                            "NEUTRAL",
+                            "ENTRY_ADVERSE",
+                            "UNKNOWN",
+                        }
+                        if context == "ENTRY"
+                        else {
+                            "HOLD_SUPPORTIVE",
+                            "NEUTRAL",
+                            "EXIT_RISK_ELEVATED",
+                            "EXIT_RISK_HIGH",
+                            "UNKNOWN",
+                        }
+                    )
+                    if (
+                        output.shadow_assessment not in allowed_assessments
+                        or expected_incomplete
+                        and output.shadow_assessment != "UNKNOWN"
+                    ):
+                        invocation.state = "INVALID_OUTPUT"
+                        invocation.validation_status = "FAILED"
+                        invocation.error_code = "LLM_CORE_SHADOW_ASSESSMENT_MISMATCH"
+                        return None
             else:
                 output = AgentScoutModelOutput.model_validate(result.output_json)
                 if invalid_reason_codes(stage.role, output.reason_codes):
@@ -730,6 +790,141 @@ def _assessment(
     )
 
 
+def _assessment_v2(
+    role: str,
+    *,
+    stage_run_id: str,
+    symbol: str,
+    input_refs: list[str],
+    indicator: IndicatorSnapshot | None,
+    snapshot: MarketSnapshot,
+    position: Position | dict[str, object] | None,
+    market_context: dict[str, object] | None,
+    server_input_policy_version: str | None,
+    analysis_context: str,
+    observed_at: datetime,
+    valid_until: datetime,
+) -> AgentAssessmentV2:
+    common = {
+        "stage_run_id": stage_run_id,
+        "role": role,
+        "symbol": symbol,
+        "input_refs": input_refs,
+        "observed_at": observed_at,
+        "valid_until": valid_until,
+    }
+    if role == "POSITION_RISK_SCOUT" and analysis_context == "ENTRY":
+        return AgentAssessmentV2(
+            **common,
+            status="NOT_APPLICABLE",
+            stance="UNKNOWN",
+            confidence=0,
+            uncertainty=1,
+            reason_codes=["OPEN_POSITION_NOT_FOUND"],
+            evidence_refs=[],
+        )
+    if (
+        role == "MARKET_SECTOR_SCOUT"
+        and server_input_policy_version == SERVER_INPUT_POLICY_VERSION
+    ):
+        if market_context is None:
+            return AgentAssessmentV2(
+                **common,
+                status="INSUFFICIENT_DATA",
+                stance="UNKNOWN",
+                confidence=0,
+                uncertainty=1,
+                reason_codes=["MARKET_DATA_INSUFFICIENT"],
+                evidence_refs=[],
+            )
+        index = market_context.get("index")
+        sector = market_context.get("sector")
+        breadth = market_context.get("breadth")
+        index_change = Decimal(str(index.get("change_pct"))) if isinstance(index, dict) and index.get("change_pct") is not None else None
+        sector_change = Decimal(str(sector.get("change_pct"))) if isinstance(sector, dict) and sector.get("change_pct") is not None else None
+        breadth_ratio = Decimal(str(breadth.get("advancer_ratio_pct"))) if isinstance(breadth, dict) and breadth.get("advancer_ratio_pct") is not None else None
+        if index_change is None or sector_change is None or breadth_ratio is None:
+            return AgentAssessmentV2(
+                **common,
+                status="INSUFFICIENT_DATA",
+                stance="UNKNOWN",
+                confidence=0,
+                uncertainty=1,
+                reason_codes=["MARKET_DATA_INSUFFICIENT"],
+                evidence_refs=[],
+            )
+        supportive = index_change >= 0 and sector_change >= 0 and breadth_ratio >= 50
+        adverse = index_change < 0 and sector_change < 0 and breadth_ratio < 40
+        return AgentAssessmentV2(
+            **common,
+            status="SUCCEEDED",
+            stance="SUPPORTIVE" if supportive else "CAUTION" if adverse else "NEUTRAL",
+            entry_score=65 if supportive else 35 if adverse else 50,
+            exit_risk_score=30 if supportive else 70 if adverse else 50,
+            confidence=0.75,
+            uncertainty=0.25,
+            reason_codes=[
+                "MARKET_TREND_SUPPORTIVE"
+                if supportive
+                else "MARKET_TREND_WEAK"
+                if adverse
+                else "MARKET_SECTOR_SIGNALS_MIXED"
+            ],
+            evidence_refs=[],
+        )
+    if (
+        role == "POSITION_RISK_SCOUT"
+        and isinstance(position, dict)
+        and server_input_policy_version == SERVER_INPUT_POLICY_VERSION
+    ):
+        freshness = position.get("freshness")
+        if not isinstance(freshness, dict) or freshness.get("status") != "FRESH":
+            return AgentAssessmentV2(
+                **common,
+                status="INSUFFICIENT_DATA",
+                stance="UNKNOWN",
+                confidence=0,
+                uncertainty=1,
+                reason_codes=["POSITION_DATA_STALE"],
+                evidence_refs=[],
+            )
+        stop_distance = Decimal(str(position["distance_to_fixed_stop_pct"]))
+        unrealized_return = Decimal(str(position["unrealized_return_pct"]))
+        critical = stop_distance <= 0
+        elevated = not critical and stop_distance <= Decimal("0.5")
+        losing = unrealized_return < 0
+        return AgentAssessmentV2(
+            **common,
+            status="SUCCEEDED",
+            stance="RISK" if critical or elevated else "CAUTION" if losing else "NEUTRAL",
+            exit_risk_score=90 if critical else 75 if elevated else 60 if losing else 35,
+            confidence=0.85,
+            uncertainty=0.15,
+            reason_codes=[
+                "FIXED_STOP_TRIGGERED"
+                if critical
+                else "FIXED_STOP_NEAR"
+                if elevated
+                else "POSITION_LOSING"
+                if losing
+                else "POSITION_RISK_NORMAL"
+            ],
+            evidence_refs=[],
+        )
+    legacy = _assessment(
+        role,
+        stage_run_id=stage_run_id,
+        symbol=symbol,
+        input_refs=input_refs,
+        indicator=indicator,
+        snapshot=snapshot,
+        position=position,  # type: ignore[arg-type]
+        observed_at=observed_at,
+        valid_until=valid_until,
+    )
+    return AgentAssessmentV2(**legacy.model_dump(exclude={"schema_version"}))
+
+
 def create_diagnostic_run(
     db: Session,
     *,
@@ -744,11 +939,46 @@ def create_diagnostic_run(
     if settings.dart_enabled and settings.dart_configuration_status() != "CONFIGURED":
         raise AgentRuntimeError("AGENT_DART_NOT_CONFIGURED", 409)
     snapshot = _snapshot(db, market, symbol)
+    position = db.scalar(
+        select(Position)
+        .where(
+            Position.symbol == symbol,
+            Position.state == "OPEN",
+            Position.quantity > 0,
+        )
+        .order_by(Position.updated_at.desc(), Position.id)
+    )
+    analysis_context = "POSITION" if position is not None else "ENTRY"
+    position_snapshot: dict[str, object] = (
+        build_position_snapshot(
+            db,
+            user=user,
+            position=position,
+            market_snapshot=snapshot,
+            settings=settings,
+        )
+        if position is not None
+        else {
+            "marker": "NO_OPEN_POSITION",
+            "calculation_version": "position-risk-input-v1",
+            "symbol": symbol,
+            "market_observed_at": snapshot.event_at.isoformat(),
+            "source_refs": [snapshot.id],
+        }
+    )
+    position_snapshot_hash = _hash(position_snapshot)
+    market_context = select_market_context(
+        db, market=market, symbol=symbol, now=observed
+    )
     bindings = _load_routes(db, owner_id=user.id, route_ids=route_ids)
     route_versions = {
         role: {
             "route_id": binding.route.id,
             "route_version": binding.route.version,
+            "declared_output_schema_version": binding.route.output_schema_version,
+            "effective_output_schema_version": (
+                CORE_SCHEMA_VERSION if role == "CORE" else ASSESSMENT_SCHEMA_VERSION
+            ),
             "model_id": binding.model.id,
             "model_version": binding.model.version,
             "failure_policy": binding.route.fallback_policy,
@@ -801,6 +1031,16 @@ def create_diagnostic_run(
         "market_snapshot_id": snapshot.id,
         "payload_hash": snapshot.payload_hash,
         "dag_version": DAG_VERSION,
+        "analysis_context": analysis_context,
+        "position_snapshot_hash": position_snapshot_hash,
+        "server_input_policy_version": SERVER_INPUT_POLICY_VERSION,
+        "market_context_snapshot_id": market_context.id if market_context else None,
+        "market_context_snapshot_hash": (
+            market_context.payload_hash if market_context else None
+        ),
+        "assessment_schema_version": ASSESSMENT_SCHEMA_VERSION,
+        "core_schema_version": CORE_SCHEMA_VERSION,
+        "score_policy_version": SCORE_POLICY_VERSION,
         "reason_code_policy_version": REASON_CODE_POLICY_VERSION,
         "evidence_source_policy": {
             "version": EVIDENCE_POLICY_VERSION,
@@ -825,6 +1065,12 @@ def create_diagnostic_run(
         market_snapshot_id=snapshot.id,
         input_hash=input_hash,
         dag_version=DAG_VERSION,
+        analysis_context=analysis_context,
+        position_snapshot_json=_canonical(position_snapshot),
+        position_snapshot_hash=position_snapshot_hash,
+        server_input_policy_version=SERVER_INPUT_POLICY_VERSION,
+        market_context_snapshot_id=market_context.id if market_context else None,
+        market_context_snapshot_hash=market_context.payload_hash if market_context else None,
         route_versions_json=_canonical(route_versions),
         idempotency_key=idempotency_key,
         state="CREATED",

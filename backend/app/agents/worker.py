@@ -12,8 +12,11 @@ from sqlalchemy.orm import Session
 
 from app.agents.contracts import (
     AgentAssessment,
+    AgentAssessmentV2,
     AgentCoreModelOutput,
+    AgentCoreModelOutputV2,
     AgentCoreOutput,
+    AgentCoreOutputV2,
     AgentScoutModelOutput,
 )
 from app.agents.dart import (
@@ -22,15 +25,21 @@ from app.agents.dart import (
     receipt_date_as_utc,
 )
 from app.agents.runtime import (
+    ASSESSMENT_SCHEMA_VERSION,
+    CORE_SCHEMA_VERSION,
+    DAG_VERSION,
     EVIDENCE_POLICY_VERSION,
     ROUTE_ROLES,
+    SCORE_POLICY_VERSION,
     AgentRuntimeError,
     RouteBinding,
     _assessment,
+    _assessment_v2,
     _canonical,
     _complete_stage,
     _hash,
     _invoke_model,
+    uses_v2_contract,
 )
 from app.config import Settings, get_settings
 from app.db import SessionLocal
@@ -46,12 +55,13 @@ from app.models import (
     LlmPromptProfile,
     LlmProviderProfile,
     LlmRoleRoute,
+    MarketContextSnapshot,
     MarketSnapshot,
     Position,
 )
 
 logger = logging.getLogger("cresta.agent_worker")
-DEPENDENCY_OK = {"SUCCEEDED", "INSUFFICIENT_DATA", "CONFLICTED"}
+DEPENDENCY_OK = {"SUCCEEDED", "NOT_APPLICABLE", "INSUFFICIENT_DATA", "CONFLICTED"}
 TERMINAL = DEPENDENCY_OK | {"TIMED_OUT", "FAILED", "INVALID_OUTPUT"}
 DEFAULT_TIMEOUT_SECONDS = {
     "INTEL_COLLECTOR": 20,
@@ -83,6 +93,9 @@ def _finalize_run(db: Session, run: AgentRun, now: datetime) -> None:
         return
     core = next(stage for stage in stages if stage.role == "CORE")
     run.core_action = "WAIT" if core.state == "SUCCEEDED" else None
+    if core.state == "SUCCEEDED" and core.output_json:
+        core_output = json.loads(core.output_json)
+        run.shadow_assessment = core_output.get("shadow_assessment")
     bundle = db.scalar(select(EvidenceBundle).where(EvidenceBundle.run_id == run.id))
     if core.state != "SUCCEEDED" or any(
         stage.state in {"FAILED", "TIMED_OUT", "INVALID_OUTPUT"} for stage in stages
@@ -92,7 +105,10 @@ def _finalize_run(db: Session, run: AgentRun, now: datetime) -> None:
     else:
         run.state = (
             "PARTIAL"
-            if any(stage.state != "SUCCEEDED" for stage in stages)
+            if any(
+                stage.state not in {"SUCCEEDED", "NOT_APPLICABLE"}
+                for stage in stages
+            )
             or bundle is None
             or bundle.state != "VERIFIED"
             else "SUCCEEDED"
@@ -187,14 +203,25 @@ def claim_next_stage(
         if run is None or run.state in {"SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED"}:
             continue
         dependencies = _dependencies(db, stage)
-        if any(item.state in {"FAILED", "TIMED_OUT", "INVALID_OUTPUT"} for item in dependencies):
-            stage.state = "FAILED"
-            stage.error_code = "AGENT_DEPENDENCY_FAILED"
-            stage.completed_at = now
-            _finalize_run(db, run, now)
-            db.commit()
-            return None
-        if any(item.state not in DEPENDENCY_OK for item in dependencies):
+        dependency_failed = any(
+            item.state in {"FAILED", "TIMED_OUT", "INVALID_OUTPUT"}
+            for item in dependencies
+        )
+        if dependency_failed:
+            may_reduce_v4_result = uses_v2_contract(run.dag_version) and stage.role in {
+                "EVIDENCE_CANDIDATE_AUDITOR",
+                "CORE",
+            }
+            if not may_reduce_v4_result:
+                stage.state = "FAILED"
+                stage.error_code = "AGENT_DEPENDENCY_FAILED"
+                stage.completed_at = now
+                _finalize_run(db, run, now)
+                db.commit()
+                return None
+            if any(item.state not in TERMINAL for item in dependencies):
+                continue
+        elif any(item.state not in DEPENDENCY_OK for item in dependencies):
             continue
         if _aware(run.valid_until) <= now:
             stage.state = "TIMED_OUT"
@@ -301,18 +328,28 @@ def _scout_role_input(
     snapshot: MarketSnapshot,
     bundle: EvidenceBundle,
     indicator: IndicatorSnapshot | None,
-    position: Position | None,
+    position: Position | dict[str, object] | None,
+    market_context: MarketContextSnapshot | None = None,
 ) -> tuple[dict[str, object], list[str]]:
+    position_ref = (
+        str(position.get("position_id"))
+        if isinstance(position, dict) and position.get("position_id")
+        else position.id
+        if isinstance(position, Position)
+        else None
+    )
     input_refs = [
         snapshot.id,
         bundle.id,
         *([indicator.id] if indicator else []),
-        *([position.id] if position else []),
+        *([position_ref] if position_ref else []),
+        *([market_context.id] if market_context else []),
     ]
     allowed_evidence_refs = [str(item) for item in json.loads(bundle.evidence_ids_json)]
     role_input: dict[str, object] = {
         "market": run.market,
         "symbol": run.symbol,
+        "analysis_context": run.analysis_context,
         "observed_at": snapshot.event_at.isoformat(),
         "valid_until": run.valid_until.isoformat(),
         "market_snapshot": {
@@ -356,6 +393,15 @@ def _scout_role_input(
         ),
         "position": (
             {
+                "ref": position_ref,
+                "quantity": position.get("quantity"),
+                "average_price": position.get("average_price"),
+                "state": position.get("state"),
+                "version": position.get("version"),
+            }
+            if isinstance(position, dict)
+            else
+            {
                 "ref": position.id,
                 "quantity": position.quantity,
                 "average_price": _decimal_text(position.average_price),
@@ -364,6 +410,10 @@ def _scout_role_input(
             }
             if position
             else None
+        ),
+        "server_input_policy_version": run.server_input_policy_version,
+        "market_context_snapshot": (
+            json.loads(market_context.payload_json) if market_context else None
         ),
         "allowed_input_refs": input_refs,
         "allowed_evidence_refs": allowed_evidence_refs,
@@ -502,6 +552,21 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
 
     bundle = db.scalar(select(EvidenceBundle).where(EvidenceBundle.run_id == run.id))
     if bundle is None:
+        if uses_v2_contract(run.dag_version) and stage.role == "CORE":
+            core = AgentCoreOutputV2(
+                shadow_assessment="UNKNOWN",
+                confidence=0,
+                risk_level="HIGH",
+                reason_codes=["AGENT_RUNTIME_SHADOW_ONLY", "REQUIRED_SCOUT_INCOMPLETE"],
+                incomplete_roles=list(ROUTE_ROLES[:-1]),
+            )
+            _complete_stage(
+                stage,
+                state="SUCCEEDED",
+                output=core.model_dump(mode="json"),
+                now=now,
+            )
+            return
         raise AgentRuntimeError("AGENT_EVIDENCE_BUNDLE_NOT_FOUND")
     if stage.role == "EVIDENCE_CANDIDATE_AUDITOR":
         candidates = list(
@@ -551,20 +616,223 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
                 IndicatorSnapshot.market_snapshot_id == snapshot.id
             )
         )
-        position = db.scalar(
-            select(Position).where(
-                Position.symbol == run.symbol,
-                Position.state == "OPEN",
-                Position.quantity > 0,
+        market_context: MarketContextSnapshot | None = None
+        market_context_payload: dict[str, object] | None = None
+        market_context_conflicted = False
+        if run.dag_version == DAG_VERSION and run.market_context_snapshot_id:
+            market_context = db.get(
+                MarketContextSnapshot, run.market_context_snapshot_id
             )
-        )
+            if market_context is None:
+                market_context_conflicted = True
+            else:
+                try:
+                    payload = json.loads(market_context.payload_json)
+                except (TypeError, ValueError):
+                    payload = None
+                if (
+                    not isinstance(payload, dict)
+                    or market_context.payload_hash != run.market_context_snapshot_hash
+                    or _hash(payload) != run.market_context_snapshot_hash
+                ):
+                    market_context_conflicted = True
+                    market_context = None
+                else:
+                    market_context_payload = payload
+        if uses_v2_contract(run.dag_version):
+            if not run.position_snapshot_json or not run.position_snapshot_hash:
+                _, input_refs = _scout_role_input(
+                    run=run,
+                    snapshot=snapshot,
+                    bundle=bundle,
+                    indicator=indicator,
+                    position=None,
+                )
+                assessment = AgentAssessmentV2(
+                    stage_run_id=stage.id,
+                    role=stage.role,
+                    symbol=run.symbol,
+                    status="INSUFFICIENT_DATA",
+                    stance="UNKNOWN",
+                    confidence=0,
+                    entry_score=None,
+                    exit_risk_score=None,
+                    reason_codes=["INPUT_DATA_MISSING"],
+                    uncertainty=1,
+                    evidence_refs=[],
+                    input_refs=input_refs,
+                    observed_at=now,
+                    valid_until=run.valid_until,
+                )
+                _complete_stage(
+                    stage,
+                    state=assessment.status,
+                    output=assessment.model_dump(mode="json"),
+                    now=now,
+                )
+                return
+            try:
+                frozen_position = json.loads(run.position_snapshot_json)
+            except (TypeError, ValueError):
+                frozen_position = {}
+            if _hash(frozen_position) != run.position_snapshot_hash:
+                _, input_refs = _scout_role_input(
+                    run=run,
+                    snapshot=snapshot,
+                    bundle=bundle,
+                    indicator=indicator,
+                    position=None,
+                )
+                reason_codes = ["INPUT_DATA_CONFLICTED"]
+                if stage.role == "POSITION_RISK_SCOUT":
+                    reason_codes.append("POSITION_DATA_CONFLICTED")
+                assessment = AgentAssessmentV2(
+                    stage_run_id=stage.id,
+                    role=stage.role,
+                    symbol=run.symbol,
+                    status="CONFLICTED",
+                    stance="UNKNOWN",
+                    confidence=0,
+                    entry_score=None,
+                    exit_risk_score=None,
+                    reason_codes=reason_codes,
+                    uncertainty=1,
+                    evidence_refs=[],
+                    input_refs=input_refs,
+                    observed_at=now,
+                    valid_until=run.valid_until,
+                )
+                _complete_stage(
+                    stage,
+                    state=assessment.status,
+                    output=assessment.model_dump(mode="json"),
+                    now=now,
+                )
+                return
+            position = (
+                frozen_position
+                if frozen_position.get("marker") == "OPEN_POSITION"
+                else None
+            )
+        else:
+            position = db.scalar(
+                select(Position).where(
+                    Position.symbol == run.symbol,
+                    Position.state == "OPEN",
+                    Position.quantity > 0,
+                )
+            )
         role_input, input_refs = _scout_role_input(
             run=run,
             snapshot=snapshot,
             bundle=bundle,
             indicator=indicator,
             position=position,
+            market_context=(
+                market_context if stage.role == "MARKET_SECTOR_SCOUT" else None
+            ),
         )
+        if run.dag_version == DAG_VERSION and stage.role == "MARKET_SECTOR_SCOUT":
+            if market_context_conflicted:
+                assessment_v2 = AgentAssessmentV2(
+                    stage_run_id=stage.id,
+                    role=stage.role,
+                    symbol=run.symbol,
+                    status="CONFLICTED",
+                    stance="UNKNOWN",
+                    confidence=0,
+                    uncertainty=1,
+                    reason_codes=["INPUT_DATA_CONFLICTED"],
+                    evidence_refs=[],
+                    input_refs=input_refs,
+                    observed_at=now,
+                    valid_until=run.valid_until,
+                )
+                _complete_stage(
+                    stage,
+                    state=assessment_v2.status,
+                    output=assessment_v2.model_dump(mode="json"),
+                    now=now,
+                )
+                return
+            if market_context is None:
+                assessment_v2 = _assessment_v2(
+                    stage.role,
+                    stage_run_id=stage.id,
+                    symbol=run.symbol,
+                    input_refs=input_refs,
+                    indicator=indicator,
+                    snapshot=snapshot,
+                    position=position,
+                    market_context=None,
+                    server_input_policy_version=run.server_input_policy_version,
+                    analysis_context=run.analysis_context or "ENTRY",
+                    observed_at=now,
+                    valid_until=run.valid_until,
+                )
+                _complete_stage(
+                    stage,
+                    state=assessment_v2.status,
+                    output=assessment_v2.model_dump(mode="json"),
+                    now=now,
+                )
+                return
+        if (
+            uses_v2_contract(run.dag_version)
+            and stage.role == "POSITION_RISK_SCOUT"
+            and run.analysis_context == "ENTRY"
+        ):
+            assessment_v2 = _assessment_v2(
+                stage.role,
+                stage_run_id=stage.id,
+                symbol=run.symbol,
+                input_refs=input_refs,
+                indicator=indicator,
+                snapshot=snapshot,
+                position=None,
+                market_context=market_context_payload,
+                server_input_policy_version=run.server_input_policy_version,
+                analysis_context="ENTRY",
+                observed_at=now,
+                valid_until=run.valid_until,
+            )
+            _complete_stage(
+                stage,
+                state=assessment_v2.status,
+                output=assessment_v2.model_dump(mode="json"),
+                now=now,
+            )
+            return
+        if (
+            run.dag_version == DAG_VERSION
+            and stage.role == "POSITION_RISK_SCOUT"
+            and isinstance(position, dict)
+            and (
+                not isinstance(position.get("freshness"), dict)
+                or position["freshness"].get("status") != "FRESH"
+            )
+        ):
+            assessment_v2 = _assessment_v2(
+                stage.role,
+                stage_run_id=stage.id,
+                symbol=run.symbol,
+                input_refs=input_refs,
+                indicator=indicator,
+                snapshot=snapshot,
+                position=position,
+                market_context=market_context_payload,
+                server_input_policy_version=run.server_input_policy_version,
+                analysis_context=run.analysis_context or "POSITION",
+                observed_at=now,
+                valid_until=run.valid_until,
+            )
+            _complete_stage(
+                stage,
+                state=assessment_v2.status,
+                output=assessment_v2.model_dump(mode="json"),
+                now=now,
+            )
+            return
         outcome = _invoke_model(
             db,
             stage=stage,
@@ -573,27 +841,56 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
             now=now,
         )
         if outcome.provider.adapter_type == "MOCK":
-            assessment = _assessment(
-                stage.role,
-                stage_run_id=stage.id,
-                symbol=run.symbol,
-                input_refs=input_refs,
-                indicator=indicator,
-                snapshot=snapshot,
-                position=position,
-                observed_at=now,
-                valid_until=run.valid_until,
+            assessment = (
+                _assessment_v2(
+                    stage.role,
+                    stage_run_id=stage.id,
+                    symbol=run.symbol,
+                    input_refs=input_refs,
+                    indicator=indicator,
+                    snapshot=snapshot,
+                    position=position,
+                    market_context=market_context_payload,
+                    server_input_policy_version=run.server_input_policy_version,
+                    analysis_context=run.analysis_context or "ENTRY",
+                    observed_at=now,
+                    valid_until=run.valid_until,
+                )
+                if uses_v2_contract(run.dag_version)
+                else _assessment(
+                    stage.role,
+                    stage_run_id=stage.id,
+                    symbol=run.symbol,
+                    input_refs=input_refs,
+                    indicator=indicator,
+                    snapshot=snapshot,
+                    position=position if isinstance(position, Position) else None,
+                    observed_at=now,
+                    valid_until=run.valid_until,
+                )
             )
         else:
             model_output = AgentScoutModelOutput.model_validate(outcome.output_json)
-            assessment = AgentAssessment(
-                stage_run_id=stage.id,
-                role=stage.role,
-                symbol=run.symbol,
-                input_refs=input_refs,
-                observed_at=now,
-                valid_until=run.valid_until,
-                **model_output.model_dump(),
+            assessment = (
+                AgentAssessmentV2(
+                    stage_run_id=stage.id,
+                    role=stage.role,
+                    symbol=run.symbol,
+                    input_refs=input_refs,
+                    observed_at=now,
+                    valid_until=run.valid_until,
+                    **model_output.model_dump(),
+                )
+                if uses_v2_contract(run.dag_version)
+                else AgentAssessment(
+                    stage_run_id=stage.id,
+                    role=stage.role,
+                    symbol=run.symbol,
+                    input_refs=input_refs,
+                    observed_at=now,
+                    valid_until=run.valid_until,
+                    **model_output.model_dump(),
+                )
             )
         _complete_stage(
             stage,
@@ -611,12 +908,39 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
             )
         )
     )
-    assessments = {
-        item.role: AgentAssessment.model_validate(json.loads(item.output_json or "{}"))
-        for item in scout_stages
-    }
+    assessment_contract = (
+        AgentAssessmentV2 if uses_v2_contract(run.dag_version) else AgentAssessment
+    )
+    assessments: dict[str, AgentAssessmentV2 | AgentAssessment] = {}
+    invalid_assessment_roles: list[str] = []
+    assessment_payloads: dict[str, object] = {}
+    for item in scout_stages:
+        try:
+            payload = json.loads(item.output_json) if item.output_json else None
+            if not isinstance(payload, dict):
+                raise TypeError("Agent assessment output is unavailable")
+            assessments[item.role] = assessment_contract.model_validate(payload)
+            assessment_payloads[item.role] = payload
+        except (TypeError, ValueError):
+            if not uses_v2_contract(run.dag_version):
+                raise
+            invalid_assessment_roles.append(item.role)
+            assessment_payloads[item.role] = {
+                "status": item.state,
+                "error_code": item.error_code or "AGENT_ASSESSMENT_OUTPUT_UNAVAILABLE",
+            }
     incomplete = sorted(
-        role for role, assessment in assessments.items() if assessment.status != "SUCCEEDED"
+        set(invalid_assessment_roles)
+        | {
+            role
+            for role, assessment in assessments.items()
+            if assessment.status
+            not in (
+                {"SUCCEEDED", "NOT_APPLICABLE"}
+                if uses_v2_contract(run.dag_version) and run.analysis_context == "ENTRY"
+                else {"SUCCEEDED"}
+            )
+        }
     )
     candidate_audit_stage = db.scalar(
         select(AgentStageRun).where(
@@ -637,6 +961,17 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
             raise AgentRuntimeError("AGENT_EVIDENCE_CANDIDATE_AUDIT_NOT_FOUND")
         candidate_audit = json.loads(candidate_audit_stage.output_json)
         candidate_audit_ref = candidate_audit_stage.id
+    if uses_v2_contract(run.dag_version) and invalid_assessment_roles:
+        core = AgentCoreOutputV2(
+            shadow_assessment="UNKNOWN",
+            confidence=0,
+            risk_level="HIGH",
+            reason_codes=["AGENT_RUNTIME_SHADOW_ONLY", "REQUIRED_SCOUT_INCOMPLETE"],
+            incomplete_roles=incomplete,
+        )
+        _complete_stage(stage, state="SUCCEEDED", output=core.model_dump(mode="json"), now=now)
+        return
+
     outcome = _invoke_model(
         db,
         stage=stage,
@@ -644,11 +979,23 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
         role_input={
             "market": run.market,
             "symbol": run.symbol,
+            "analysis_context": run.analysis_context,
+            "assessment_schema_version": (
+                ASSESSMENT_SCHEMA_VERSION
+                if uses_v2_contract(run.dag_version)
+                else "agent-assessment-v1"
+            ),
+            "core_schema_version": (
+                CORE_SCHEMA_VERSION
+                if uses_v2_contract(run.dag_version)
+                else "agent-core-v1"
+            ),
+            "score_policy_version": (
+                SCORE_POLICY_VERSION if uses_v2_contract(run.dag_version) else None
+            ),
             "market_snapshot_ref": snapshot.id,
             "evidence_bundle_ref": bundle.id,
-            "assessments": {
-                item.role: json.loads(item.output_json or "{}") for item in scout_stages
-            },
+            "assessments": assessment_payloads,
             "assessment_hashes": {
                 item.role: item.output_hash for item in scout_stages
             },
@@ -662,21 +1009,39 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
         },
         now=now,
     )
-    core = (
-        AgentCoreOutput(
-            confidence=0 if incomplete else 0.5,
-            risk_level="HIGH" if incomplete else "MEDIUM",
-            reason_codes=[
-                "AGENT_RUNTIME_SHADOW_ONLY",
-                "REQUIRED_SCOUT_INCOMPLETE" if incomplete else "DIAGNOSTIC_WAIT_ONLY",
-            ],
-            incomplete_roles=incomplete,
+    if uses_v2_contract(run.dag_version):
+        core = (
+            AgentCoreOutputV2(
+                shadow_assessment="UNKNOWN" if incomplete else "NEUTRAL",
+                confidence=0 if incomplete else 0.5,
+                risk_level="HIGH" if incomplete else "MEDIUM",
+                reason_codes=[
+                    "AGENT_RUNTIME_SHADOW_ONLY",
+                    "REQUIRED_SCOUT_INCOMPLETE" if incomplete else "DIAGNOSTIC_WAIT_ONLY",
+                ],
+                incomplete_roles=incomplete,
+            )
+            if outcome.provider.adapter_type == "MOCK"
+            else AgentCoreOutputV2(
+                **AgentCoreModelOutputV2.model_validate(outcome.output_json).model_dump()
+            )
         )
-        if outcome.provider.adapter_type == "MOCK"
-        else AgentCoreOutput(
-            **AgentCoreModelOutput.model_validate(outcome.output_json).model_dump()
+    else:
+        core = (
+            AgentCoreOutput(
+                confidence=0 if incomplete else 0.5,
+                risk_level="HIGH" if incomplete else "MEDIUM",
+                reason_codes=[
+                    "AGENT_RUNTIME_SHADOW_ONLY",
+                    "REQUIRED_SCOUT_INCOMPLETE" if incomplete else "DIAGNOSTIC_WAIT_ONLY",
+                ],
+                incomplete_roles=incomplete,
+            )
+            if outcome.provider.adapter_type == "MOCK"
+            else AgentCoreOutput(
+                **AgentCoreModelOutput.model_validate(outcome.output_json).model_dump()
+            )
         )
-    )
     _complete_stage(stage, state="SUCCEEDED", output=core.model_dump(mode="json"), now=now)
 
 

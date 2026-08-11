@@ -16,6 +16,8 @@
 10. 계획, 구현 완료, 검증 완료와 외부 환경 미검증 상태를 명확히 구분한다.
 11. 실제 비밀번호, API key, token, TOTP secret, DB URL과 private key를 문서에 기록하지 않는다.
 12. 외부 API 규격, 거래시간과 제도처럼 변경 가능한 사실은 공식 자료로 확인하고 확인일 또는 미검증 상태를 명시한다.
+13. 과거 착수 검토·단계별 구현 기록은 역사적 스냅샷으로 표시하고 현행 요구사항을 덮어쓰지 않게 한다. 현재 상태는 `IMPLEMENTATION_STATUS.md`, 현재 검증 근거는 `TEST_PLAN.md`의 최신 날짜 기록을 우선한다.
+14. 같은 제약을 여러 문서에 독립적으로 복제하지 않는다. 한 상세 명세를 기준으로 두고 다른 문서는 링크·요약만 유지하며, 임시 또는 보류 정책에는 적용 기간과 우선순위를 명시한다.
 
 ### 1.1 작업 순서
 
@@ -57,7 +59,7 @@
 | 판단 실행·승인 명세 | [docs/DECISION_EXECUTION_SPEC.md](docs/DECISION_EXECUTION_SPEC.md) | AI·Guard 신호의 실행 권한 분기, Guard 재검사, 승인과 주문 생성 경계 |
 | 데이터베이스 명세 | [docs/DATABASE_SPEC.md](docs/DATABASE_SPEC.md) | 테이블, 제약조건, 트랜잭션, migration, 보존과 Redis 경계 |
 | 운영·장애복구 명세 | [docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md) | 배포, 모니터링, 백업·복원과 장애 대응 |
-| 구현 준비도 검토 | [docs/IMPLEMENTATION_READINESS_REVIEW.md](docs/IMPLEMENTATION_READINESS_REVIEW.md) | 명세 공백, 구현 가능 범위, 외부 확인과 착수 게이트 |
+| 구현 준비도 검토 | [docs/IMPLEMENTATION_READINESS_REVIEW.md](docs/IMPLEMENTATION_READINESS_REVIEW.md) | 2026-07-31~08-06 구현 전 명세 공백·초기 착수 게이트를 보존한 역사적 스냅샷 |
 | 시스템 설계 | [docs/SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md) | 전체 아키텍처, 모듈 책임, 데이터 모델과 장애·보안 원칙 |
 | API 명세 | [docs/API_SPEC.md](docs/API_SPEC.md) | HTTP API, 멱등성·동시성·오류와 실시간 이벤트 계약 |
 | 구현 상태 | [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | 영역별 계획·구현·검증·보류 상태 |

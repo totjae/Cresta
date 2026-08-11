@@ -858,6 +858,48 @@ class IndicatorSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class MarketContextSnapshot(Base):
+    __tablename__ = "market_context_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "source",
+            "market",
+            "symbol",
+            "source_ref",
+            name="uq_market_context_source_identity",
+        ),
+        CheckConstraint("market IN ('KRX','NXT')", name="ck_market_context_market"),
+        CheckConstraint(
+            "source_tier IN ('PRIMARY','CONTRACTED')",
+            name="ck_market_context_source_tier",
+        ),
+        CheckConstraint(
+            "quality IN ('NORMAL','INCOMPLETE')", name="ck_market_context_quality"
+        ),
+        Index(
+            "ix_market_context_selection",
+            "market",
+            "symbol",
+            "quality",
+            "observed_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    market: Mapped[str] = mapped_column(String(16), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_tier: Mapped[str] = mapped_column(String(16), nullable=False)
+    quality: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class LlmProviderProfile(Base):
     __tablename__ = "llm_provider_profiles"
     __table_args__ = (
@@ -1158,6 +1200,16 @@ class AgentRun(Base):
             name="ck_agent_runs_state",
         ),
         CheckConstraint("execution_stage = 'SHADOW'", name="ck_agent_runs_execution_stage"),
+        CheckConstraint(
+            "analysis_context IS NULL OR analysis_context IN ('ENTRY','POSITION')",
+            name="ck_agent_runs_analysis_context",
+        ),
+        CheckConstraint(
+            "shadow_assessment IS NULL OR shadow_assessment IN ("
+            "'ENTRY_STRONG','ENTRY_SUPPORTIVE','NEUTRAL','ENTRY_ADVERSE',"
+            "'HOLD_SUPPORTIVE','EXIT_RISK_ELEVATED','EXIT_RISK_HIGH','UNKNOWN')",
+            name="ck_agent_runs_shadow_assessment",
+        ),
         Index("ix_agent_runs_owner_created", "owner_id", "created_at"),
     )
 
@@ -1176,6 +1228,15 @@ class AgentRun(Base):
     idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="CREATED")
     core_action: Mapped[str | None] = mapped_column(String(32))
+    analysis_context: Mapped[str | None] = mapped_column(String(16))
+    position_snapshot_json: Mapped[str | None] = mapped_column(Text)
+    position_snapshot_hash: Mapped[str | None] = mapped_column(String(64))
+    shadow_assessment: Mapped[str | None] = mapped_column(String(32))
+    server_input_policy_version: Mapped[str | None] = mapped_column(String(32))
+    market_context_snapshot_id: Mapped[str | None] = mapped_column(
+        ForeignKey("market_context_snapshots.id"), index=True
+    )
+    market_context_snapshot_hash: Mapped[str | None] = mapped_column(String(64))
     error_code: Mapped[str | None] = mapped_column(String(64))
     valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -1194,7 +1255,7 @@ class AgentStageRun(Base):
             name="ck_agent_stage_runs_role",
         ),
         CheckConstraint(
-            "state IN ('PENDING','RUNNING','SUCCEEDED','INSUFFICIENT_DATA','CONFLICTED',"
+            "state IN ('PENDING','RUNNING','SUCCEEDED','NOT_APPLICABLE','INSUFFICIENT_DATA','CONFLICTED',"
             "'TIMED_OUT','FAILED','INVALID_OUTPUT')",
             name="ck_agent_stage_runs_state",
         ),

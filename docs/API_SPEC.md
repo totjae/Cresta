@@ -11,7 +11,7 @@
 | API-001 | 요청·응답 본문은 UTF-8 JSON을 사용하고 모든 객체에 명시된 `schema_version`을 적용한다. |
 | API-002 | 금액·가격·비율은 JSON number가 아닌 단위가 명시된 문자열로 전송해 클라이언트 부동소수점 손실을 방지한다. 수량은 정수다. |
 | API-003 | 모든 응답은 `request_id`를 포함하고 상태 변경 결과는 생성·변경된 resource의 ID와 현재 version을 반환한다. |
-| API-004 | 목록 API는 cursor pagination, 기본 50건·최대 200건을 사용하며 정렬 기준과 방향을 고정한다. |
+| API-004 | 목록 API는 결정론적 정렬과 서버측 상한을 사용한다. 현재 endpoint별 `limit` 상한은 응답 계약에 명시하며, cursor pagination은 대용량 주문·감사 이력에 필요해질 때 해당 endpoint version에서 도입한다. |
 | API-005 | 알 수 없는 요청 필드와 지원하지 않는 enum은 묵시적으로 무시하지 않고 `VALIDATION_ERROR`로 거부한다. |
 | API-006 | 서버는 클라이언트가 보낸 사용자·계좌·Guard 결과·주문 상태를 신뢰하지 않고 세션과 서버 상태에서 다시 계산한다. |
 
@@ -38,13 +38,12 @@
 | GET | `/quotes/{symbol}` | 시장별 최신 시세·품질·기준시각 조회 |
 | GET/POST | `/watchlist` | 감시 종목 조회/등록 |
 | DELETE | `/watchlist/{id}` | 감시 해제 |
-| GET/PATCH | `/settings/execution-policy` | 행동별 자동·승인·비활성 정책 조회/수정 |
+| GET/POST | `/settings/execution-policy*` | 행동별 자동·승인·비활성 정책 조회·초안·검증·활성화·이력 |
 | GET/POST | `/settings/risk-policy*` | Guard 사용자 기본 위험 설정 조회·초안·검증·활성화·이력 |
 | GET/PATCH | `/settings/execution-stage` | SHADOW·승인형·MOCK 자동 실행 단계 조회/변경 |
 | GET/PATCH | `/settings/trading-session` | 감시·분석·신규매수·장 마감 시간 조회/수정 |
 | GET/PATCH | `/settings/overnight-policy` | 익일 보유 정책 조회/수정 |
 | GET/PATCH | `/settings/order-policy` | 가격, 승인 범위, 미체결·재호가 정책 조회/수정 |
-| GET/PATCH | `/settings/risk-policy` | 투자·손실·손절·데이터 위험 설정 조회/초안 수정 |
 | GET/PATCH | `/settings/emergency-policy` | 비상정지 기본 동작·확인·해제 정책 조회/초안 수정 |
 | POST | `/settings/validate` | 설정 조합 서버 검증 및 영향 미리보기 |
 | POST | `/settings/{version}/activate` | 검증된 설정 버전 즉시·예약 활성화 |
@@ -72,7 +71,7 @@
 | POST | `/risk/emergency-stop/release` | 재인증 후 비상정지 해제 |
 | GET | `/system/health` | 데이터·브로커·큐·DB 상태 |
 | GET | `/system/broker` | 키움 환경, 연결, 토큰 만료 예정, Active worker와 호출 제한 상태 |
-| POST | `/system/broker/mock-order-test` | TOTP 재인증 후 MOCK·KRX 매수 1주 연결 시험 주문 대기열 생성 |
+| POST | `/system/broker/mock-order-test` | MOCK·KRX 매수 1주 연결 시험 주문 대기열 생성; 현재는 세션·CSRF·확인문구를 요구하고 TOTP 재인증은 API-DEV 정책에 따라 보류 |
 
 인증 API는 계정 존재·비밀번호 오류·TOTP 오류를 구분하지 않는 공통 오류를 반환한다. TOTP challenge와 재인증 증명은 1회용이며 URL이나 WebSocket query string으로 전달하지 않는다. 비밀번호·TOTP·복구 코드는 응답, 감사 이벤트와 애플리케이션 로그에 포함하지 않는다.
 
@@ -237,7 +236,7 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 
 ## 8. 미결정·보류 항목
 
-- OpenAPI 기준 파일은 `docs/generated/openapi-v1.json`에 생성하며 CI에서 구현과 차이를 검사한다. 첫 버전은 별도 SDK를 배포하지 않고 Console 내부 TypeScript client만 생성한다.
+- 현재 API 기준은 이 문서와 FastAPI가 생성하는 `/openapi.json`이다. 정적 OpenAPI 파일과 CI drift 검사는 승인·주문 공개 API를 활성화하기 전 도입하며, 도입 전에는 존재하는 것으로 표시하지 않는다.
 - WebSocket replay 이벤트는 10분 보존하고 범위를 벗어나면 REST snapshot을 요구한다.
 - Console은 배포 시점의 Chrome·Edge·Safari 최신 2개 주요 버전을 지원한다. HTTPS 응답은 Nginx에서 gzip 또는 Brotli를 사용하되 실시간 이벤트는 지연 우선으로 압축을 강제하지 않는다.
 
@@ -248,8 +247,8 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-043 | 실행 권한은 `GET /settings/execution-policy`, `POST /settings/execution-policy/drafts`, `POST /settings/execution-policy/{id}/validate`, `POST /settings/execution-policy/{id}/activate`, `GET /settings/execution-policy/history`로 관리한다. |
 | API-044 | 위험 설정은 `GET /settings/risk-policy`, `POST /settings/risk-policy/drafts`, `POST /settings/risk-policy/{id}/validate`, `POST /settings/risk-policy/{id}/activate`, `GET /settings/risk-policy/history`로 관리한다. write 요청은 로그인 세션·CSRF를 요구한다. |
 | API-045 | 활성 위험 설정이 없으면 조회는 `source=SAFE_DEFAULT`, `active_version_id=null`, `entry_order_amount=null`을 반환한다. 검증·활성화 응답은 version ID·sequence·state·정규화 policy·reason·시각을 반환한다. |
-| API-044 | 실행 권한 활성화 요청은 CSRF, 공백이 아닌 변경 사유, 대상 버전에 결합된 TOTP 재인증 증명을 요구한다. |
-| API-045 | API는 활성 버전이 없을 때 안전 기본값과 `active_version_id=null`을 반환하며 이를 영속 활성화로 표현하지 않는다. |
+| API-046 | 실행 권한 활성화 요청은 CSRF와 공백이 아닌 변경 사유를 요구한다. 현재 개발 단계의 별도 TOTP 재인증 보류는 API-DEV-001~003을 따른다. |
+| API-047 | 실행 권한 API는 활성 버전이 없을 때 안전 기본값과 `active_version_id=null`을 반환하며 이를 영속 활성화로 표현하지 않는다. |
 
 ### 8.2 Mock AI 진단 API 계약
 
@@ -336,11 +335,11 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-147 | 인증된 run 소유자는 `GET /api/v1/ai/agent-runs/{run_id}/invocations/{invocation_id}/output`으로 해당 invocation의 캡처된 구조화 model output과 hash·검증 상태를 조회한다. 목록 API에는 output을 포함하지 않는다. |
 | API-148 | model output이 없거나 금지·크기 초과로 폐기된 경우 output 조회는 `output_available=false`와 안전한 상태·오류만 반환하며 Provider 원문이나 prompt로 대체하지 않는다. |
 
-Foundation v1의 기존 수동 profile API와 역할 배정 API는 호환을 위해 유지한다. 간편 등록 단계에서는 공식 OpenAI·Anthropic·Gemini 카탈로그, TOTP 결합 등록, 실제 모델 발견·재동기화와 모델 사용/사용 안 함 API를 추가했다. 일반 단일 route `/activate`와 외부 Agent runtime 활성화는 아직 제공하지 않는다.
+Foundation v1의 기존 수동 profile API는 호환 목적으로 유지한다. 현행 Console은 Provider 등록·모델 동기화·역할별 후보 검증·5개 역할 원자 활성화 API를 사용하며 외부 모델은 `DIAGNOSTIC/SHADOW`에서만 실행한다. Provider·route 변경의 현재 인증 경계는 세션·CSRF·변경 사유이고 TOTP 추가 재인증은 API-DEV 정책에 따라 보류한다.
 
 간편 Provider 등록 API는 `GET /ai/provider-catalog`, `POST /ai/provider-registrations/preview`, `POST /ai/provider-registrations`, `POST /ai/providers/{id}/models/sync`, `POST /ai/models/{id}/disable`을 제공한다. 등록 응답에는 credential 원문이 없고 실제 모델 목록 조회가 성공한 경우에만 Provider와 발견 모델을 반환한다.
 
-Agent Runtime v1에서는 `GET /ai/agent-runs`, `GET /ai/agent-runs/{id}`, `POST /ai/agent-runs/diagnostic`을 추가한다. 생성 요청은 market·symbol과 5개 필수 role의 검증된 SHADOW route ID를 전달하며 응답은 `created`로 멱등 신규·기존 반환을 구분한다. 이 endpoint는 decision·execution·approval·order를 생성하지 않는다.
+현행 Agent Runtime v4는 `GET /ai/agent-runs`, `GET /ai/agent-runs/{id}`, `POST /ai/agent-runs/diagnostic`을 제공한다. 생성 요청은 market·symbol과 5개 필수 role의 활성 SHADOW route를 기준으로 8개 stage를 생성하고, 서버가 ENTRY/POSITION context와 position snapshot을 고정한다. 응답은 `created`로 멱등 신규·기존 반환을 구분하며 이 endpoint는 decision·execution·approval·order를 생성하지 않는다. 기존 v1~v3 run 조회는 nullable v4 field로 호환한다.
 ## 외부 LLM credential (Native Adapter Foundation v2)
 
 ```text
@@ -348,16 +347,16 @@ POST /api/v1/ai/providers/{provider_id}/credential-preview
 POST /api/v1/ai/providers/{provider_id}/credential
 ```
 
-- preview는 `LLM_PROVIDER_CREDENTIAL_SET`과 Provider version에 결합된 `target_id`만 반환한다.
-- credential 등록은 CSRF·세션·1회용 TOTP proof를 요구한다.
+- preview는 향후 선택적 재인증에 사용할 수 있는 `LLM_PROVIDER_CREDENTIAL_SET` 대상 ID를 반환한다.
+- 현재 credential 등록은 세션·CSRF를 요구하고 1회용 TOTP proof는 API-DEV 정책에 따라 요구하지 않는다.
 - 응답은 `credential_configured`만 반환하며 credential 원문과 secret ref를 반환하지 않는다.
 - Provider test는 외부 생성 호출 없이 Adapter 계약과 secret 가독성만 검증한다.
 # LLM Provider catalog additions (2026-08-07)
 
 - `GET /api/v1/ai/provider-catalog` returns `template_id`, canonical `adapter_type`, registration availability, support level, and non-secret configuration fields.
 - Registration preview and registration accept `template_id` and `configuration`; legacy native `adapter_type` remains accepted during migration.
-- `POST /api/v1/ai/providers/{provider_id}/delete-preview` returns a TOTP-bound `LLM_PROVIDER_DELETE` target.
-- `DELETE /api/v1/ai/providers/{provider_id}` consumes the reauthentication proof and returns `204`.
+- `POST /api/v1/ai/providers/{provider_id}/delete-preview` returns an auditable `LLM_PROVIDER_DELETE` target for the selected Provider.
+- `DELETE /api/v1/ai/providers/{provider_id}` currently requires session and CSRF, tombstones the Provider, and returns `204`; reauthentication proof consumption is deferred by API-DEV policy.
 
 ## Prompt management API (2026-08-08)
 
@@ -370,7 +369,7 @@ POST /api/v1/ai/providers/{provider_id}/credential
 
 - `API-DEV-001`: 로그인 이후 현재 구현된 설정·Provider·역할 배정·MOCK 주문 시험 mutation은 세션과 CSRF를 요구하지만 request body의 `reauth_proof`를 요구하지 않는다.
 - `API-DEV-002`: `/auth/reauth/totp` 기반시설은 향후 선택적 고위험 행동 재인증을 위해 유지할 수 있으나 현재 Console 흐름에서는 사용하지 않는다.
-- `API-DEV-003`: API-044·096·131·134·140·142의 TOTP proof 부분은 서비스 완성 후 재도입 전까지 보류한다. 변경 사유, validation, idempotency, 원자성, 상태 gate와 감사 요구는 유지한다.
+- `API-DEV-003`: API-046·096·131·134·140·142의 TOTP proof 부분은 서비스 완성 후 재도입 전까지 보류한다. 변경 사유, validation, idempotency, 원자성, 상태 gate와 감사 요구는 유지한다.
 - `API-DEV-004`: Provider 삭제 후 `/ai/providers`와 `/ai/models`는 tombstone 대상을 제외하고, `/ai/routes`는 보존된 `SUPERSEDED` 이력을 계속 반환한다. `/ai/role-assignments`는 삭제된 Provider route를 현재 배정이나 후보로 반환하지 않는다.
 
 ## LLM route timeout and service tier (2026-08-10)
@@ -379,4 +378,20 @@ POST /api/v1/ai/providers/{provider_id}/credential
 - `GET /api/v1/ai/routes` and role-assignment responses return both fields for every immutable route version.
 - `POST /api/v1/ai/routes` accepts `web_search_enabled` with default `false`; validation permits `true` only for supported SHADOW Scout roles whose primary and fallback models declare web-search capability.
 - Agent-run invocation responses expose `runtime_context_at` and `web_search_enabled` for audit without exposing prompts, credentials, or raw provider responses.
-- New requests default to 30 seconds and `DEFAULT`; existing rows retain their configured timeout and receive `DEFAULT` during migration.
+- 신규 route 요청은 120초와 `DEFAULT`를 기본값으로 사용한다. 기존 row는 설정된 timeout과 migration 당시 부여된 `DEFAULT` tier를 유지한다.
+
+## Agent SHADOW 판단 계약 v2 API
+
+| ID | 요구사항 |
+| --- | --- |
+| API-149 | `POST /api/v1/ai/agent-runs/diagnostic`은 서버가 결정한 `analysis_context`, 고정된 position snapshot reference와 현행 `dag_version=agent-dag-v5`를 응답한다. 클라이언트가 context나 position 존재 여부를 임의 지정하지 않는다. 기존 v4 run은 당시 계약으로 조회·처리한다. |
+| API-150 | run 상세는 stage의 `NOT_APPLICABLE`을 별도 상태로 반환하고 Core의 `action=WAIT`와 nullable `shadow_assessment`를 분리해 반환한다. 기존 v1~v3 응답은 기존 필드 의미를 유지한다. |
+| API-151 | 목록·상세 응답은 사용한 assessment/core/score policy version을 노출하되 position 원문, prompt, credential과 Provider raw response는 노출하지 않는다. 신규 API는 판단·승인·주문 mutation을 제공하지 않는다. |
+
+### Agent 서버 입력 provenance
+
+| ID | 요구사항 |
+| --- | --- |
+| API-152 | Agent run 목록·상세 응답은 nullable `server_input_policy_version`, `market_context_snapshot_id`, `market_context_snapshot_hash`를 제공한다. position 원문 snapshot과 Risk Policy payload는 응답하지 않는다. |
+| API-153 | v5 run은 `agent-server-input-v1`과 선택된 Market Context reference를 반환하고, context가 없으면 ID·hash를 null로 반환한다. null은 API 오류가 아니라 Scout 결측 입력을 뜻한다. |
+| API-154 | Market Context를 외부에서 생성·수정하는 운영 HTTP endpoint는 제공하지 않는다. |

@@ -160,9 +160,18 @@ export type AgentRunData = {
   market_snapshot_id: string;
   input_hash: string;
   dag_version: string;
+  analysis_context: "ENTRY" | "POSITION" | null;
+  position_snapshot_hash: string | null;
+  server_input_policy_version: string | null;
+  market_context_snapshot_id: string | null;
+  market_context_snapshot_hash: string | null;
+  assessment_schema_version: string | null;
+  core_schema_version: string | null;
+  score_policy_version: string | null;
   route_versions: Record<string, unknown>;
   state: string;
   core_action: "WAIT" | null;
+  shadow_assessment: "ENTRY_STRONG" | "ENTRY_SUPPORTIVE" | "NEUTRAL" | "ENTRY_ADVERSE" | "HOLD_SUPPORTIVE" | "EXIT_RISK_ELEVATED" | "EXIT_RISK_HIGH" | "UNKNOWN" | null;
   valid_until: string;
   stages: AgentStageData[];
   evidence_bundle: null | {

@@ -33,6 +33,8 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | `recovery_codes` | id, user_id, code_hash, used_at | 평문 저장 금지 |
 | `sessions` | id_hash, user_id, created_at, last_seen_at, expires_at, revoked_at | 원문 token 저장 금지 |
 | `auth_challenges` | id_hash, user_id, type, expires_at, consumed_at, attempts | 1회 사용 |
+| `reauth_proofs` | id, proof_hash, user_id, target_action, target_id, expires_at, consumed_at | 대상 결합·1회 사용, 원문 proof 저장 금지 |
+| `auth_rate_limits` | subject_hash, failure_count, lockout_level, locked_until, updated_at | 평문 login ID·IP 저장 금지 |
 | `instruments` | symbol, name, market_support, tradable_status | symbol unique |
 | `watchlist_items` | id, user_id, symbol, market, created_at, updated_at | user+market+symbol unique, 사용자별 최대 3개 |
 | `configuration_versions` | id, scope, target_symbol, state, payload, schema_version | 활성 범위별 1개 |
@@ -44,6 +46,7 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | `decision_executions` | id, decision/rule source, action, mode, policy versions, state, version | source+action+policy unique |
 | `guard_evaluations` | id, phase, subject, result, rule_results, input versions, valid_until | 불변 평가 |
 | `approvals` | id, execution_id, decision_id, status, scope_snapshot, expires_at, actor_id, reauth_id, version | execution당 최대 1개 |
+| `trading_gates` | account_alias, environment, status, reason, version, updated_at | 계좌별 1개, READY 전 주문 생성 금지 |
 | `order_intents` | id, execution_id, guard_evaluation_id, order_group_id, symbol, side, requested_quantity, action, config_version | execution당 최대 1개 |
 | `orders` | id, intent_id, parent_order_id, client_order_id, idempotency_key, broker_order_id, status, quantities | client/idempotency unique |
 | `order_events` | id, order_id, event_type, source, source_key, payload_hash, occurred_at | source 중복 방지 |
@@ -256,9 +259,9 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-121 | `llm_invocations`는 요청·실제 provider/model, route, request ID, 상태, 사용량, 지연, 비용, retry/fallback과 redacted hash를 저장하고 prompt 원문은 별도 보존 정책 없이는 저장하지 않는다. |
 | DB-122 | agent stage 완료와 invocation 완료, Core 판단 enqueue는 유실·중복을 막는 transaction 또는 transactional outbox로 연결한다. |
 | DB-123 | invocation·evidence 보존 삭제는 판단·감사 legal hold와 참조 무결성을 확인하고 hash·최소 provenance를 유지한다. |
-| DB-124 | Agent Runtime v1의 `agent_runs`는 owner, purpose, market·symbol, market snapshot·input hash, DAG·route map, 상태·Core action, valid_until과 unique idempotency key를 저장한다. |
+| DB-124 | Agent Runtime의 `agent_runs`는 owner, purpose, market·symbol, market snapshot·input hash, DAG·route map, 상태·Core action, valid_until과 unique idempotency key를 저장한다. 기존 DAG version 이력은 보존하고 신규 admission은 현행 `agent-dag-v4`를 사용한다. |
 | DB-125 | `agent_stage_runs`는 run+role unique, dependency·route·invocation 참조, 불변 input/output JSON·hash, 상태·오류·시각을 저장하며 완료 stage를 API로 수정하지 않는다. |
-| DB-126 | `evidence_items`는 출처·시각·facts·content hash를 저장하고 `evidence_bundles`는 owner·run·상태·evidence ID·canonical hash를 저장한다. v1은 외부 수집 없이 `PARTIAL` 빈 bundle 하나만 생성한다. |
+| DB-126 | `evidence_items`는 출처·시각·facts·content hash를 저장하고 `evidence_bundles`는 owner·run·상태·evidence ID·canonical hash를 저장한다. 외부 수집이 없으면 `PARTIAL` 빈 bundle을 만들고, OpenDART 같은 검증 source가 있으면 해당 evidence ID를 불변 bundle에 포함한다. |
 | DB-127 | `agent_stage_runs.invocation_id`는 stage의 첫 invocation을 참조한다. `llm_invocations.stage_run_id`는 같은 stage의 기본·예비 호출을 각각 보존하며 API는 생성 순서로 반환한다. |
 | DB-132 | `agent_stage_runs`는 `lease_owner_id`, `lease_expires_at`, `fencing_token`, `attempt_count`, `max_attempts`, `timeout_at`, `heartbeat_at`을 저장한다. fencing과 attempt는 음수가 아니며 max attempt는 1 이상이어야 한다. |
 | DB-133 | worker claim 조회는 `state, available_at, lease_expires_at, created_at, sequence` 인덱스를 사용하고 PostgreSQL에서는 잠금된 행을 건너뛰어 복수 worker가 같은 stage를 claim하지 않게 한다. |
@@ -298,4 +301,32 @@ market_snapshots(symbol, market, observed_at desc)
 
 - Migration `20260810_0020` adds non-null `llm_role_routes.service_tier` with `DEFAULT`, `PRIORITY`, and `FLEX` values.
 - Migration `20260811_0021` adds `llm_role_routes.web_search_enabled` and records `runtime_context_at` plus `web_search_enabled` on every `llm_invocations` attempt.
-- The same migration widens `timeout_ms` to 1–600 seconds and changes only the server default for newly created routes to 30 seconds. Historical values are not rewritten.
+- `20260811_0021` widens `timeout_ms` to 1–600 seconds and, at that migration point, changed the new-route default to 30 seconds. Historical route values were not rewritten.
+
+## Agent evidence and LLM diagnostic migrations (2026-08-11)
+
+- Migration `20260811_0022` adds `EVIDENCE_CANDIDATE_AUDITOR` to the allowed `agent_stage_runs.role` values. The auditor is deterministic and does not create an LLM invocation.
+- Migration `20260811_0023` adds bounded `model_output_json`, `model_output_hash`, and `model_output_captured_at` fields to `llm_invocations`. They store Adapter-extracted structured output for diagnostics, never the credential, request header, raw prompt, or unbounded raw provider response.
+- Migration `20260811_0024` changes only the default for newly created `llm_model_profiles.max_output_tokens` to `8192`. Existing model profiles and route snapshots are preserved.
+- Migration `20260811_0025` makes model `temperature` nullable so omission means Adapter/provider default, and changes only the new-route `timeout_ms` server default to `120000`. Existing route timeout values are preserved.
+- Migration `20260811_0026` adds nullable v4 analysis context, frozen position snapshot and hash, Core shadow assessment, and the `NOT_APPLICABLE` stage state. Existing v1~v3 rows are not rewritten.
+- Migration `20260811_0027` adds immutable Market Context snapshots and nullable server-input provenance references to Agent runs. Existing v1~v4 rows are not rewritten.
+- The current schema head is `20260811_0027`. Any later migration must append to this chain and update this section and `IMPLEMENTATION_STATUS.md` in the same change.
+
+## Agent SHADOW 판단 계약 v2 영속성
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-144 | `agent_runs`는 불변 `analysis_context`, position snapshot 또는 `NO_OPEN_POSITION` 표지와 그 canonical hash, Core의 nullable `shadow_assessment`를 저장한다. 기존 run은 null과 기존 DAG version으로 의미를 보존한다. |
+| DB-145 | `agent_stage_runs.state`는 `NOT_APPLICABLE`을 허용한다. 애플리케이션은 v2 출력 계약을 사용하는 `agent-dag-v4/v5 + ENTRY + POSITION_RISK_SCOUT` 조합에서만 이 상태를 생성하고 다른 역할·context의 사용을 거부한다. |
+| DB-146 | `agent-assessment-v2`에서 stage 상태가 `SUCCEEDED`가 아니면 entry·exit 점수는 모두 null이어야 한다. DB JSON 저장 전 서버 검증으로 교차 필드 불변식을 강제한다. |
+| DB-147 | migration `20260811_0026_agent_shadow_contract_v2`는 신규 nullable column과 stage 상태 제약만 추가하고 기존 v1~v3 run, stage와 invocation을 재작성하지 않는다. downgrade는 `NOT_APPLICABLE` stage를 `INSUFFICIENT_DATA`로 안전 축소한 뒤 신규 구조를 제거한다. |
+
+## 서버 소유 판단 입력 v1 영속성
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-148 | `market_context_snapshots`는 source identity, market·symbol, source tier·quality, observed/received/valid 시각, canonical payload JSON과 SHA-256 hash를 불변으로 저장한다. |
+| DB-149 | `agent_runs`는 nullable `server_input_policy_version`, `market_context_snapshot_id`, `market_context_snapshot_hash`를 저장한다. 기존 v1~v4 run은 null로 의미를 보존한다. |
+| DB-150 | position 파생값과 Risk Policy provenance는 기존 frozen `position_snapshot_json`과 그 hash에 포함한다. 별도 mutable 계산 행이나 stage 실행 시 재계산을 허용하지 않는다. |
+| DB-151 | migration `20260811_0027_server_owned_agent_inputs`는 기존 run을 재작성하지 않고 신규 table·nullable column·index와 제약만 추가한다. downgrade는 신규 참조 column을 제거한 뒤 context table을 삭제한다. |

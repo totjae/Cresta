@@ -7,10 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.runtime import (
+    ASSESSMENT_SCHEMA_VERSION,
+    CORE_SCHEMA_VERSION,
+    SCORE_POLICY_VERSION,
     AgentRuntimeError,
     create_diagnostic_run,
     get_agent_run,
     list_agent_runs,
+    uses_v2_contract,
 )
 from app.api.dependencies import AuthContext, get_auth_context, require_csrf
 from app.db import get_db
@@ -133,9 +137,24 @@ def _response(
         market_snapshot_id=run.market_snapshot_id,
         input_hash=run.input_hash,
         dag_version=run.dag_version,
+        analysis_context=run.analysis_context,
+        position_snapshot_hash=run.position_snapshot_hash,
+        server_input_policy_version=run.server_input_policy_version,
+        market_context_snapshot_id=run.market_context_snapshot_id,
+        market_context_snapshot_hash=run.market_context_snapshot_hash,
+        assessment_schema_version=(
+            ASSESSMENT_SCHEMA_VERSION if uses_v2_contract(run.dag_version) else None
+        ),
+        core_schema_version=(
+            CORE_SCHEMA_VERSION if uses_v2_contract(run.dag_version) else None
+        ),
+        score_policy_version=(
+            SCORE_POLICY_VERSION if uses_v2_contract(run.dag_version) else None
+        ),
         route_versions=json.loads(run.route_versions_json),
         state=run.state,
         core_action=run.core_action,
+        shadow_assessment=run.shadow_assessment,
         valid_until=run.valid_until,
         stages=stage_responses,
         evidence_bundle=bundle_response,

@@ -63,7 +63,7 @@ npm test
 npm run build
 ```
 
-현재 AI 실험 경로는 외부 Provider route와 OpenDART PRIMARY 공시 수집을 선택적으로 사용하는 Agent Runtime v3을 포함한다. Web Console의 AI 판단 화면에서 5개 role route 준비도를 확인하고 DIAGNOSTIC DAG를 실행할 수 있으며 결과는 계속 SHADOW이고 승인·주문은 생성하지 않는다.
+현재 AI 실험 경로는 외부 Provider route와 OpenDART PRIMARY 공시 수집을 선택적으로 사용하는 Agent Runtime v5를 포함한다. Web Console의 AI 판단 화면에서 5개 role route 준비도를 확인하고 ENTRY/POSITION context, 서버 계산 포지션 위험값과 검증된 Market Context가 고정된 DIAGNOSTIC DAG를 실행할 수 있다. Market Context가 없으면 시장·업종 값을 추정하지 않고 결측으로 처리한다. 실행 action `WAIT`와 별도의 SHADOW 평가만 기록하며 승인·주문은 생성하지 않는다.
 
 AI 설정은 Provider·Model 카탈로그와 역할별 배정을 분리한다. 등록한 모델은 여러 Scout·Core에서 재사용할 수 있고 역할별 generation parameter override와 이력, 5개 역할의 원자적 일괄 활성화를 지원한다.
 
@@ -75,7 +75,7 @@ OpenDART 공시 수집은 기본적으로 비활성화되어 있다. 40자리 �
 
 운영 Web 진입점은 `https://trade.mihoservice.xyz`이며, Compose gateway는 `127.0.0.1:7788`에만 바인딩됩니다. 호스트 Nginx 예시는 `deploy/host-nginx.example.conf`에 있으며 7788 포트는 인터넷에 직접 개방하지 않습니다.
 
-서버 재부팅 후 전체 Compose 스택을 자동 복구하려면 최초 1회 `deploy/cresta-boot.service`를 systemd에 설치하고 활성화합니다. unit 변경이 포함된 업데이트 뒤에는 파일을 다시 설치하고 `daemon-reload`해야 합니다. 정확한 설치·부팅 인수시험 절차는 [배포·운영·장애복구 명세](docs/OPERATIONS_RUNBOOK.md)의 3.2절을 따릅니다.
+서버 재부팅 후 기본·키움 Compose 스택을 자동 복구하려면 최초 1회 `deploy/cresta-boot.service`를 systemd에 설치하고 활성화합니다. 현재 unit은 선택형 DART overlay를 포함하지 않으므로 OpenDART 상시 운영의 재부팅 자동복구는 별도 후속 작업이다. unit 변경이 포함된 업데이트 뒤에는 파일을 다시 설치하고 `daemon-reload`해야 하며, 정확한 절차는 [배포·운영·장애복구 명세](docs/OPERATIONS_RUNBOOK.md)의 3.2절과 4.2절을 따릅니다.
 
 ## 문서
 

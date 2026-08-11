@@ -11,7 +11,7 @@
 - `T-LLM-TOKEN-003`: Console의 신규 역할 후보 5개가 `max output=8192`로 시작하고 사용자가 명시적으로 변경할 수 있는지 확인한다.
 - `T-LLM-TOKEN-004`: migration이 DB server default를 `8192`로 변경하되 기존 Profile·Route 값을 수정하지 않는지 upgrade/downgrade로 확인한다.
 
-Local evidence: Backend 전체 시험과 Ruff, Frontend 12개 component 시험과 TypeScript 검사가 통과했다. SQLite migration 왕복에서 head default `8192`, downgrade default `1024`, 재-upgrade `8192`를 확인했다. Ubuntu PostgreSQL migration과 신규 역할 후보 화면은 배포 후 확인한다.
+Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript 검사가 통과했다. SQLite migration 왕복에서 head default `8192`, downgrade default `1024`, 재-upgrade `8192`를 확인했고 Ubuntu PostgreSQL에서도 `20260811_0025` head와 default `8192`를 확인했다. 신규 역할 후보 화면의 기본값은 다음 배포 회귀에서 다시 확인한다.
 
 ### LLM 파라미터 안전 기본값 시험 (2026-08-11)
 
@@ -23,7 +23,14 @@ Local evidence: Backend 전체 시험과 Ruff, Frontend 12개 component 시험�
 - `T-LLM-PARAM-006`: 일일 호출 한도 도달 시 외부 호출 없이 RATE_LIMITED Invocation을 기록하는지 확인한다.
 - `T-LLM-PARAM-007`: migration `20260811_0025`가 기존 값은 보존하면서 temperature nullable과 Route timeout server default를 변경하는지 왕복 확인한다.
 
-Local evidence: Backend 전체 시험과 Ruff, Frontend 12개 component 시험과 TypeScript 검사가 통과했다. SQLite `20260811_0025` 왕복에서 head는 temperature nullable·timeout `120000`·max output `8192`, downgrade는 temperature non-null default `0`·timeout `30000`, 재-upgrade는 head 값을 확인했다. Ubuntu PostgreSQL과 실제 Provider 요청은 배포 후 확인한다.
+Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript 검사가 통과했다. SQLite `20260811_0025` 왕복에서 head는 temperature nullable·timeout `120000`·max output `8192`, downgrade는 temperature non-null default `0`·timeout `30000`, 재-upgrade는 head 값을 확인했다. Ubuntu PostgreSQL에서도 `20260811_0025` head를 적용했고 OpenAI·LLM Gateway의 실제 SHADOW 요청과 schema 재검증을 확인했다.
+
+### 현행 검증 기록 해석 원칙 (2026-08-11)
+
+- 아래 표의 `계획`, `부분 통과`와 과거 evidence 문구는 해당 테스트가 마지막으로 갱신된 시점의 기록이다. 이후 날짜가 붙은 회귀시험·Ubuntu 실서버 evidence가 같은 항목을 검증했다면 최신 기록이 우선한다.
+- 현재 구현 기준선은 migration `20260811_0027`, Agent Runtime `agent-dag-v5`, 외부 LLM `DIAGNOSTIC/SHADOW`, OpenDART PRIMARY evidence다.
+- OpenDART 실제 호출은 삼성전자 최근 3일 공시 6건 수집까지 확인했다. 외부 LLM은 OpenAI와 LLM Gateway를 통한 역할별 구조화 응답 성공·실패 이력을 확인했다.
+- 이 문서의 과거 미구현 문구만으로 기능 완료를 판정하지 않는다. 최종 상태는 [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md)와 해당 날짜의 실행 evidence를 함께 확인한다.
 
 ## 2. 적용 범위
 
@@ -238,15 +245,15 @@ Local evidence: Backend 전체 시험과 Ruff, Frontend 12개 component 시험�
 | T-MAO-008 | MAO-070~074 | 웹 원문에 주문·비밀·내부 URL 접근 지시 삽입 | 명령 무시, SSRF·도구·Broker 접근 차단, 안전 escape | 계획 |
 | T-MAO-009 | MAO-080~083 | 신규 model·prompt·DAG를 SHADOW로 실행·활성화 시도 | 회귀시험·TOTP 전 활성화 불가, SHADOW 승인·주문 0건 | 계획 |
 | T-MAO-010 | MAO-090~098, DB-124~127, API-135, UI-118~119 | 5개 Mock route로 DIAGNOSTIC DAG 실행·중복 요청·route 변조 | run 1개, stage 8개·invocation 5개 provenance, Candidate Audit 후 Core WAIT, decision·approval·order 0건 | 통과 (2026-08-06 최초, 2026-08-11 Candidate Audit 회귀) |
-| T-MAO-011 | MAO-100~107, DB-132~134, API-143~144, UI-127 | 비동기 admission, stage claim·lease 만료·재claim과 이전 fencing 완료 시도, scheduler ACTIVE route admission | stage 단일 소유·fencing 증가·늦은 완료 거부, UI 비동기 상태 갱신, 최종 PARTIAL/WAIT, decision·approval·order 0건 | 통과 (2026-08-06, 자동 DB·API·component fixture) |
+| T-MAO-011 | MAO-100~107, DB-132~134, API-143~144, UI-138 | 비동기 admission, stage claim·lease 만료·재claim과 이전 fencing 완료 시도, scheduler ACTIVE route admission | stage 단일 소유·fencing 증가·늦은 완료 거부, UI 비동기 상태 갱신, 최종 PARTIAL/WAIT, decision·approval·order 0건 | 통과 (2026-08-06, 자동 DB·API·component fixture) |
 
 ### 3.12.2 LLM Provider 및 Gateway
 
 | 테스트 ID | 관련 요구사항 | 시나리오 | 기대 결과 | 상태 |
 | --- | --- | --- | --- | --- |
-| T-LLM-001 | LLM-001~005, LLM-080~083 | 공식·Gateway·Ollama·사용자 endpoint profile 검증 | Mock Adapter 선택과 무통신 검증, 비허용 scheme·credential URL 거부; 외부 Adapter는 미구현 오류 | 부분 통과 (2026-08-05, 자동 fixture) |
+| T-LLM-001 | LLM-001~005, LLM-080~083 | 공식·Gateway·Ollama·사용자 endpoint profile 검증 | 허용 Adapter 선택, 비허용 scheme·credential URL 거부, credential 비노출 | 통과 (2026-08-05 fixture, 2026-08-11 OpenAI·Gateway 실서버) |
 | T-LLM-002 | LLM-010~014, LLM-080~084, CFG-090~095 | 발견 모델·미검증 capability·route 이중 활성화 | 자동 활성화 없음, Mock fixture보다 넓은 capability와 SHADOW 외 route 거부 | 부분 통과 (2026-08-05, 자동 fixture) |
-| T-LLM-003 | LLM-020~024, LLM-083 | Mock Adapter canonical fixture와 외부 Adapter 선택 | deterministic 내부 result, 외부 Adapter는 호출 전에 차단 | 부분 통과 (2026-08-05, Mock만) |
+| T-LLM-003 | LLM-020~024, LLM-083 | Mock Adapter canonical fixture와 외부 Adapter 선택 | deterministic 내부 result와 SHADOW 외부 호출을 분리하고 거래·승인·주문에는 연결하지 않음 | 통과 (2026-08-05 Mock, 2026-08-11 외부 SHADOW) |
 | T-LLM-004 | LLM-030~033 | timeout·cancellation·허용되지 않은 header/body override | 호출 격리, global 설정 불변, Authorization/host override 거부 | 계획 |
 | T-LLM-005 | LLM-040~044 | 429·5xx·timeout·응답유실·Gateway 내부 fallback | 유효시간 내 제한 재시도, Core fail-closed, 실제 route 불명확 시 활성화 금지 | 계획 |
 | T-LLM-006 | LLM-050~054 | usage 누락·가격 미확정·호출/비용 한도·Ollama 과부하 | `UNKNOWN` 비용, 한도 차단, Core 사용 전 benchmark gate | 계획 |
@@ -455,7 +462,7 @@ Local evidence: route 계약의 기본 `FAIL_STOP`, 서로 다른 검증 모델 
 - `T-AGENT-EXT-003`: Core는 유효한 `WAIT` 응답만 stage에 채택하며 외부 응답을 사용한 전체 DIAGNOSTIC run에서 `Decision`, `Approval`, `TradingOrder`가 0건인지 검증한다.
 - `T-AGENT-EXT-004`: Adapter request에 역할별 JSON Schema와 정규화된 market·indicator·position·evidence 입력이 전달되고 credential·주문 도구·원문은 포함되지 않는지 검증한다.
 
-Local evidence: 외부 Adapter fixture로 4 Scout·Core 유효 응답의 stage 채택, server-owned provenance, strict-schema 필수 필드, request ID·usage 영속화, 계약 오류의 `INVALID_OUTPUT/FAIL_STOP` 및 주문 0건을 검증했다. backend 168개 회귀 시험·Ruff, frontend TypeScript·11개 component 시험·production build가 통과했다. 실제 유료 Provider의 요청·응답은 Ubuntu 서버에서 별도 검증한다.
+Evidence: 외부 Adapter fixture로 4 Scout·Core 유효 응답의 stage 채택, server-owned provenance, strict-schema 필수 필드, request ID·usage 영속화, 계약 오류의 `INVALID_OUTPUT/FAIL_STOP` 및 주문 0건을 검증했다. Ubuntu 서버에서는 OpenAI·LLM Gateway의 성공·Provider 오류·schema 실패와 역할별 실제 모델 provenance를 확인했다. 외부 출력은 계속 `DIAGNOSTIC/SHADOW`이며 주문 0건이다.
 
 - `T-AGENT-EXT-005`: Adapter가 정규화한 terminal 상태와 `LLM_*` 오류는 `AGENT_LLM_FAIL_STOP` stage 처리 후에도 그대로 보존되고, 완료되지 않은 invocation만 `AGENT_INVOCATION_OUTCOME_UNKNOWN`으로 격리되는지 검증한다.
 
@@ -463,7 +470,7 @@ Local evidence: 외부 Adapter fixture로 4 Scout·Core 유효 응답의 stage �
 
 - `T-LLM-ROUTE-006`: route API가 1–600초 timeout과 `DEFAULT/PRIORITY/FLEX`를 검증·영속화·조회하고 migration이 기존 route를 `DEFAULT`로 보존하는지 검증한다.
 - `T-LLM-ADAPTER-007`: `DEFAULT`는 service tier 필드를 생략하고 명시적 `PRIORITY/FLEX`는 native/compatible Adapter 요청에 소문자로 전달되는지, 완성 응답이라도 전체 제한시간을 넘으면 결과를 폐기하는지 fixture로 검증한다.
-- `T-LLM-UI-008`: 역할별 배정에서 timeout과 tier를 후보에 저장하고 route 요약에서 확인할 수 있으며 `FLEX` 선택 시 600초 권장값이 적용되는지 검증한다.
+- `T-LLM-UI-008`: 역할별 배정에서 timeout과 tier를 후보에 저장하고 route 요약에서 확인할 수 있으며 `FLEX` 선택 시 300초 권장값이 적용되는지 검증한다.
 
 # LLM Provider web search·runtime clock 시험 (2026-08-11)
 
@@ -480,7 +487,7 @@ Local evidence: 외부 Adapter fixture로 4 Scout·Core 유효 응답의 stage �
 - `T-LLM-ADAPTER-016`: Provider가 정규화된 요청이나 strict schema를 거부하면 요청을 변경해 재호출하지 않고 기존 오류 상태와 0회 retry를 유지하는지 확인한다.
 - `T-LLM-ADAPTER-017`: OpenAI Responses Adapter의 GPT-5/o계열 요청은 reasoning 기본값에서도 `temperature/top_p`를 생략하고, 명시한 reasoning effort만 `reasoning.effort`로 전달하는지 확인한다.
 
-Local evidence: OpenAI 호환·Responses Adapter와 parameter policy 집중 시험 20개, backend 전체 183개 시험 및 Ruff가 통과했다. 실제 OpenAI와 LLM Gateway 외부 모델의 SHADOW 호출은 Ubuntu 서버 검증 항목이다.
+Evidence: OpenAI 호환·Responses Adapter와 parameter policy 집중 시험 및 backend 전체 회귀·Ruff가 통과했다. Ubuntu 서버에서 OpenAI GPT-5 계열과 LLM Gateway 경유 Gemini의 실제 SHADOW 호출, 실제 모델 ID와 schema 통과·실패 이력을 확인했다.
 
 # Provider 출처 후보와 evidence reference 경계 시험 (2026-08-11)
 
@@ -500,7 +507,7 @@ Local evidence: OpenAI 호환·Responses Adapter와 parameter policy 집중 시�
 - `T-REASON-003`: 허용된 역할별 code는 server-owned provenance와 함께 stage 출력에 채택되고 기존 evidence reference 및 Core incomplete-role 검사가 그대로 적용되는지 확인한다.
 - `T-REASON-004`: Mock fixture, 외부 FAIL_STOP/FAILOVER와 SHADOW 주문 0건 경계를 회귀 검증한다.
 
-Local evidence: 역할별 allowlist의 중복·schema enum·입력 정책 버전, 허용 code 채택, 미등록 code의 전용 오류 및 주문 0건을 검증했다. backend 전체 196개 테스트와 Ruff lint가 통과했다. 실제 Provider가 enum을 준수하는지는 Ubuntu SHADOW 호출에서 추가 확인한다.
+Evidence: 역할별 allowlist의 중복·schema enum·입력 정책 버전, 허용 code 채택, 미등록 code의 전용 오류 및 주문 0건을 로컬 회귀시험으로 검증했다. Ubuntu SHADOW 호출에서 역할별 schema 통과와 `LLM_INVALID_OUTPUT` 격리를 모두 확인했다.
 
 # OpenDART PRIMARY evidence 수집 시험 (2026-08-11)
 
@@ -509,7 +516,7 @@ Local evidence: 역할별 allowlist의 중복·schema enum·입력 정책 버전
 - `T-DART-003`: `000` 성공과 `013` 빈 성공을 구분하고 인증·IP·한도·HTTP·timeout·page cap 오류는 안정적인 `DART_*` code로 fail-closed 처리한다.
 - `T-DART-004`: 검증한 공시를 `DART_DISCLOSURE/PRIMARY` EvidenceItem과 Scout allowlist에 포함하되 Bundle은 `PARTIAL`, 주문은 0건으로 유지한다.
 
-Local evidence: MockTransport 고유번호 해석·pagination·필터·빈 결과·Provider 오류, 잘못된 secret의 admission 차단과 Agent DAG 통합을 검증했다. backend 전체 205개 테스트와 Ruff lint가 통과했다. 실제 OpenDART key·출구 IP·응답은 Ubuntu에서 별도 검증한다.
+Evidence: MockTransport 고유번호 해석·pagination·필터·빈 결과·Provider 오류, 잘못된 secret의 admission 차단과 Agent DAG 통합을 검증했다. Ubuntu 고정 출구 IP 환경에서 실제 OpenDART 키로 삼성전자 최근 3일 공시 6건과 `OPENDART_PRIMARY` stage 결과를 확인했다.
 
 # 구조화 LLM 응답 이력 시험 (2026-08-11)
 
@@ -518,7 +525,7 @@ Local evidence: MockTransport 고유번호 해석·pagination·필터·빈 결�
 - `T-LLM-OUTPUT-003`: run 소유자만 개별 invocation output을 조회하고 run 목록에는 model output을 포함하지 않는다.
 - `T-LLM-OUTPUT-004`: Console은 사용자 요청 시에만 구조화 응답을 불러와 JSON·hash·검증 상태 또는 응답 없음 안내를 표시한다.
 
-Local evidence: 성공 및 미등록 reason code 응답의 validation 전 저장·hash·전용 조회, 목록 비노출, 민감 key·64 KiB 초과 fail-closed를 검증했다. `20260811_0023` upgrade→downgrade→upgrade, backend 전체 207개 시험·Ruff, frontend TypeScript·11개 component 시험·production build가 통과했다. 실제 외부 Provider 응답의 Ubuntu 조회는 배포 후 검증한다.
+Evidence: 성공 및 미등록 reason code 응답의 validation 전 저장·hash·전용 조회, 목록 비노출, 민감 key·64 KiB 초과 fail-closed를 검증했다. `20260811_0023` migration 왕복과 backend·frontend 회귀시험을 통과했고 Ubuntu Console에서 실제 외부 Provider의 구조화 응답과 검증 상태 조회를 확인했다.
 
 # Guard 위험 설정 1차 시험 (2026-08-11)
 
@@ -529,3 +536,30 @@ Local evidence: 성공 및 미등록 reason code 응답의 validation 전 저장
 - `T-RISK-CONFIG-005`: Console이 위험 설정 source·active version·미설정 진입금액 차단을 표시하고 검증·활성화 흐름을 수행하는지 확인한다.
 
 Local evidence: SAFE_DEFAULT의 null 진입금액, 서버 수치·금액 순서 검증, category별 version 생명주기·stale 충돌·감사, Console 검증·활성화와 TOTP 재인증 미사용을 자동 검증했다. backend 전체 209개 테스트·Ruff, frontend TypeScript·12개 component 테스트·production build가 통과했다.
+
+# Agent SHADOW 판단 계약 v2 시험
+
+- `T-AGENT-SHADOW-001`: admission 순간 열린 포지션 유무로 ENTRY/POSITION context와 position snapshot hash가 고정되고 stage 실행 중 포지션 변화가 기존 run을 바꾸지 않는지 확인한다.
+- `T-AGENT-SHADOW-002`: ENTRY에서 열린 포지션이 없으면 POSITION_RISK_SCOUT가 `NOT_APPLICABLE`, UNKNOWN, null 점수로 종료되고 Core 불완전 역할에 포함되지 않는지 확인한다.
+- `T-AGENT-SHADOW-003`: POSITION에서는 POSITION_RISK_SCOUT가 필수이며 snapshot 누락·오염·만료가 `INSUFFICIENT_DATA` 또는 `CONFLICTED`와 Core UNKNOWN으로 축소되는지 확인한다.
+- `T-AGENT-SHADOW-004`: `status != SUCCEEDED`의 모든 Scout 출력에서 두 점수가 null이고, 유효 점수 범위·score-policy-v1 경계와 role별 reason code가 서버에서 검증되는지 확인한다.
+- `T-AGENT-SHADOW-005`: Core의 action은 모든 v4 경로에서 WAIT이며 context별 shadow_assessment enum과 불완전 입력의 UNKNOWN 규칙을 지키는지 확인한다.
+- `T-AGENT-SHADOW-006`: 같은 snapshot이라도 context 또는 position hash가 다르면 새 run이 생성되고, 같은 v4 입력은 재사용되며 기존 v1~v3 run은 기존 계약으로 조회되는지 확인한다.
+- `T-AGENT-SHADOW-007`: 성공·실패·NOT_APPLICABLE 모든 DIAGNOSTIC 경로에서 Decision·Approval·OrderIntent·TradingOrder가 0건인지 확인한다.
+- `T-AGENT-SHADOW-008`: Console이 WAIT와 shadow assessment를 분리하고 NOT_APPLICABLE과 null 점수를 각각 `해당 없음`과 `-`로 표시하는지 확인한다.
+- `T-AGENT-SHADOW-009`: 기존 v1 schema 선언 route를 v4에서 사용할 때 run snapshot에 선언 schema와 실제 v2 검증 schema가 함께 기록되고 route row는 변경되지 않는지 확인한다.
+
+Local evidence: `T-AGENT-SHADOW-001`~`009` 집중시험, backend 전체 회귀와 Ruff, migration `20260811_0026` upgrade/downgrade/upgrade, frontend TypeScript·12개 component 시험·production build가 통과했다. Ubuntu PostgreSQL migration과 실제 Console 표시는 다음 배포에서 확인한다.
+
+# 서버 소유 Agent 입력 v1 시험 계획
+
+- `T-AGENT-INPUT-001`: 고정 position·market·Risk Policy fixture에서 평가금액, 원가, 미실현손익·수익률, session-high drawdown, stop 가격·거리, tracked duration과 freshness가 canonical Decimal로 재현되는지 확인한다.
+- `T-AGENT-INPUT-002`: 활성 Risk Policy와 SAFE_DEFAULT provenance가 version ID·payload hash와 함께 snapshot에 고정되고 admission 후 정책 변경이 기존 run을 바꾸지 않는지 확인한다.
+- `T-AGENT-INPUT-003`: stale·누락·hash 불일치 position snapshot은 null 점수의 INSUFFICIENT_DATA/CONFLICTED로 축소되고 Core assessment가 UNKNOWN인지 확인한다.
+- `T-MARKET-CONTEXT-001`: trusted service가 정상 index·sector·breadth fixture를 canonicalize하고 breadth 비율·hash·source 시각을 재현하며 중복과 identity 충돌을 구분하는지 확인한다.
+- `T-MARKET-CONTEXT-002`: admission이 최신 NORMAL·유효 snapshot만 고정하고 stale·INCOMPLETE·미래 관측 snapshot을 선택하지 않는지 확인한다.
+- `T-MARKET-CONTEXT-003`: context 부재 시 MARKET_SECTOR_SCOUT가 Provider 입력을 추정하지 않고 INSUFFICIENT_DATA/null 점수로 종료하는지 확인한다.
+- `T-AGENT-INPUT-004`: v5 API·Console이 server input version과 context 고정/없음을 표시하고 기존 v1~v4 run은 nullable field로 조회되는지 확인한다.
+- `T-AGENT-INPUT-005`: v5 성공·결측·충돌 모든 경로에서 Decision·Approval·OrderIntent·TradingOrder가 0건인지 확인한다.
+
+Local evidence: 서버 입력·Market Context 집중시험, backend 전체 회귀와 Ruff, migration `20260811_0027` upgrade/downgrade/upgrade, frontend TypeScript·12개 component 시험이 통과했다. Ubuntu PostgreSQL migration과 실제 Console 표시, 운영 Market Context source 연결은 다음 배포에서 확인한다.
