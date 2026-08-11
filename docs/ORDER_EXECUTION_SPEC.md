@@ -147,6 +147,8 @@ order_guard:
 
 주문시장과 참조 호가시장은 일치해야 한다. SOR 사용 시 실제 주문시장과 체결시장을 함께 저장한다.
 
+주문시장은 사용자 종목 설정이 아니라 [거래시장 자동 선택 명세](VENUE_SELECTION_SPEC.md)의 평가 결과로 정한다. KRX/NXT 양 시장 운영시간에는 Broker SOR 또는 서버가 영속화한 양 시장 호가 비교를 사용하며, 선택 결과가 없거나 stale이면 주문을 만들지 않는다.
+
 | ID | 요구사항 |
 | --- | --- |
 | ORD-039 | 주문 전 안전검사는 [판단 실행 및 승인 오케스트레이션 명세](DECISION_EXECUTION_SPEC.md)의 불변 Guard evaluation을 생성하고 주문이 해당 evaluation ID를 참조하게 한다. |

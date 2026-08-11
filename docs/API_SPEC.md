@@ -169,6 +169,8 @@ PATCH는 활성 설정을 직접 수정하지 않고 초안 version을 생성한
 | API-090 | quote 응답은 가격을 문자열, 수량을 정수, 시각을 UTC ISO 8601로 제공한다. |
 | API-091 | 응답은 `quality`, `age_seconds`, `is_fresh`를 분리해 제공하며 `is_fresh`만으로 주문 가능 여부를 표현하지 않는다. |
 | API-092 | KRX와 NXT 조회는 명시적인 `market`으로 분리하고 지원하지 않는 시장은 검증 오류로 거부한다. |
+| API-155 | `POST /venue-selections/diagnostic`은 로그인·CSRF를 요구하고 서버의 최신 KRX/NXT snapshot으로 `KRX/NXT/SOR/WAIT`를 평가한다. 클라이언트는 호가·평가시각·실행시장을 제출할 수 없으며 응답은 항상 `SHADOW`, `order_creation_allowed=false`다. |
+| API-156 | `GET /venue-selections`은 현재 사용자의 평가 이력만 최신순으로 반환하며 종목과 개수를 제한할 수 있다. |
 | API-093 | 시스템 상태의 시장데이터 값은 stream이 없으면 `NOT_STARTED`, 갭이 있으면 `DEGRADED`, 정상 stream이 모두 오래됐으면 `STALE`, 최신 정상 stream이 있으면 `AVAILABLE`로 표시한다. |
 | API-106 | 공개 또는 인증된 HTTP mutation으로 fixture·quote·stream 상태를 주입하지 않는다. |
 

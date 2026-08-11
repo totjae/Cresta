@@ -330,3 +330,6 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-149 | `agent_runs`는 nullable `server_input_policy_version`, `market_context_snapshot_id`, `market_context_snapshot_hash`를 저장한다. 기존 v1~v4 run은 null로 의미를 보존한다. |
 | DB-150 | position 파생값과 Risk Policy provenance는 기존 frozen `position_snapshot_json`과 그 hash에 포함한다. 별도 mutable 계산 행이나 stage 실행 시 재계산을 허용하지 않는다. |
 | DB-151 | migration `20260811_0027_server_owned_agent_inputs`는 기존 run을 재작성하지 않고 신규 table·nullable column·index와 제약만 추가한다. downgrade는 신규 참조 column을 제거한 뒤 context table을 삭제한다. |
+## 거래시장 선택 평가
+
+`venue_selection_evaluations`는 [거래시장 자동 선택 명세](VENUE_SELECTION_SPEC.md)의 SHADOW 평가를 보존한다. 사용자·종목·방향·수량·주문유형·긴급도·세션·NXT 적격성·SOR 지원 여부·양 시장 snapshot 참조·선택 결과·reason code·canonical input hash를 저장한다. 이 테이블은 주문 권한을 가지지 않으며 `order_creation_allowed=false`로 고정한다.

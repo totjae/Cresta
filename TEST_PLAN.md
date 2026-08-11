@@ -580,3 +580,15 @@ Local evidence: `T-AGENT-SHADOW-001`~`010` 집중시험, backend 전체 회귀�
 - `T-AGENT-INPUT-005`: v5 성공·결측·충돌 모든 경로에서 Decision·Approval·OrderIntent·TradingOrder가 0건인지 확인한다.
 
 Local evidence: 서버 입력·Market Context 집중시험, backend 전체 회귀와 Ruff, migration `20260811_0027` upgrade/downgrade/upgrade, frontend TypeScript·12개 component 시험이 통과했다. Ubuntu PostgreSQL migration과 실제 Console 표시, 운영 Market Context source 연결은 다음 배포에서 확인한다.
+## 거래시장 자동 선택
+
+| ID | 시험 |
+| --- | --- |
+| T-VENUE-001 | KST 경계시각 08:00, 08:50, 09:00, 09:00:30, 15:20, 15:30, 15:40, 20:00이 명세 세션으로 정확히 분류된다. |
+| T-VENUE-002 | NXT 프리·애프터 단독 세션은 적격 종목과 최신 NXT 호가가 있을 때만 NXT를 선택한다. |
+| T-VENUE-003 | 양 시장 일반 주문은 가격 우선, 긴급 주문은 표시 잔량 우선, 완전 동률은 KRX 우선으로 결정된다. |
+| T-VENUE-004 | SOR는 REAL·지원됨·양 시장 최신 호가일 때만 추천되며 MOCK에서는 직접 비교한다. |
+| T-VENUE-005 | stale·미래·비정상·거래불가·필수 가격/잔량 누락 호가는 후보에서 제외되고 양쪽 모두 없으면 WAIT다. |
+| T-VENUE-006 | 진단 API는 서버 snapshot만 사용해 평가를 영속화하고 Approval·OrderIntent·TradingOrder를 생성하지 않는다. |
+| T-VENUE-007 | migration `20260812_0028`의 upgrade→downgrade→upgrade가 통과한다. |
+| T-VENUE-008 | NXT snapshot이 없는 상태를 미지원으로 단정하지 않고 `UNKNOWN`으로 기록하며, NXT 단독 세션에서는 `WAIT/NXT_ELIGIBILITY_UNVERIFIED`로 종료한다. |

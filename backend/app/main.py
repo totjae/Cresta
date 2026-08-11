@@ -18,6 +18,7 @@ from app.api.quotes import router as quotes_router
 from app.api.risk_settings import router as risk_settings_router
 from app.api.settings import router as settings_router
 from app.api.system import router as system_router
+from app.api.venue_selections import router as venue_selections_router
 from app.api.watchlist import router as watchlist_router
 from app.auth.service import AuthenticationError, CsrfError, ReauthProofError
 from app.broker.mock_order_test import MockOrderTestError
@@ -261,6 +262,7 @@ def create_app() -> FastAPI:
     application.include_router(settings_router, prefix="/api/v1")
     application.include_router(risk_settings_router, prefix="/api/v1")
     application.include_router(system_router, prefix="/api/v1")
+    application.include_router(venue_selections_router, prefix="/api/v1")
     application.include_router(watchlist_router, prefix="/api/v1")
     return application
 

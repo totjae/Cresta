@@ -796,6 +796,65 @@ class MarketStreamState(Base):
     }
 
 
+class VenueSelectionEvaluation(Base):
+    __tablename__ = "venue_selection_evaluations"
+    __table_args__ = (
+        CheckConstraint("side IN ('BUY','SELL')", name="ck_venue_selection_side"),
+        CheckConstraint(
+            "order_type IN ('LIMIT','MARKET')", name="ck_venue_selection_order_type"
+        ),
+        CheckConstraint(
+            "urgency IN ('NORMAL','EMERGENCY')", name="ck_venue_selection_urgency"
+        ),
+        CheckConstraint(
+            "selected_venue IN ('KRX','NXT','SOR','WAIT')",
+            name="ck_venue_selection_selected_venue",
+        ),
+        CheckConstraint(
+            "state IN ('SELECTED','WAIT')", name="ck_venue_selection_state"
+        ),
+        CheckConstraint(
+            "execution_stage = 'SHADOW'", name="ck_venue_selection_shadow_only"
+        ),
+        CheckConstraint(
+            "NOT order_creation_allowed", name="ck_venue_selection_no_order_creation"
+        ),
+        CheckConstraint(
+            "nxt_eligibility_status IN ('VERIFIED','INELIGIBLE','UNKNOWN')",
+            name="ck_venue_selection_nxt_eligibility",
+        ),
+        Index("ix_venue_selection_symbol_created", "symbol", "created_at"),
+        Index("ix_venue_selection_input_hash", "input_hash"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(6), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    order_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    urgency: Mapped[str] = mapped_column(String(16), nullable=False)
+    environment: Mapped[str] = mapped_column(String(16), nullable=False)
+    execution_stage: Mapped[str] = mapped_column(String(16), nullable=False, default="SHADOW")
+    session: Mapped[str] = mapped_column(String(32), nullable=False)
+    nxt_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    nxt_eligibility_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    sor_supported: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    selected_venue: Mapped[str] = mapped_column(String(8), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    order_creation_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    krx_snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("market_snapshots.id"))
+    nxt_snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("market_snapshots.id"))
+    input_json: Mapped[str] = mapped_column(Text, nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason_codes_json: Mapped[str] = mapped_column(Text, nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class MinuteBar(Base):
     __tablename__ = "minute_bars"
     __table_args__ = (

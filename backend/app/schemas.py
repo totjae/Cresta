@@ -937,3 +937,55 @@ class AgentRunListResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str
     items: list[AgentRunResponse]
+
+
+class VenueSelectionDiagnosticRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    symbol: str = Field(pattern=r"^[0-9]{6}$")
+    side: Literal["BUY", "SELL"]
+    quantity: int = Field(ge=1, le=1_000_000_000)
+    order_type: Literal["LIMIT", "MARKET"] = "LIMIT"
+    urgency: Literal["NORMAL", "EMERGENCY"] = "NORMAL"
+
+
+class VenueSelectionQuoteResponse(StrictModel):
+    market: Literal["KRX", "NXT"]
+    snapshot_id: str
+    bid_price: str | None
+    bid_quantity: int | None
+    ask_price: str | None
+    ask_quantity: int | None
+    event_at: datetime
+    valid: bool
+
+
+class VenueSelectionResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    selection_id: str
+    policy_version: str
+    execution_stage: Literal["SHADOW"]
+    order_creation_allowed: Literal[False]
+    environment: str
+    symbol: str
+    side: Literal["BUY", "SELL"]
+    quantity: int
+    order_type: Literal["LIMIT", "MARKET"]
+    urgency: Literal["NORMAL", "EMERGENCY"]
+    session: str
+    nxt_eligible: bool
+    nxt_eligibility_status: Literal["VERIFIED", "INELIGIBLE", "UNKNOWN"]
+    sor_supported: bool
+    selected_venue: Literal["KRX", "NXT", "SOR", "WAIT"]
+    state: Literal["SELECTED", "WAIT"]
+    reason_codes: list[str]
+    quotes: dict[str, VenueSelectionQuoteResponse | None]
+    input_hash: str
+    evaluated_at: datetime
+    created_at: datetime
+
+
+class VenueSelectionListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[VenueSelectionResponse]

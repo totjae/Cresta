@@ -1,5 +1,12 @@
 # Cresta 구현 상태
 
+### 2026-08-12 KRX·NXT 자동 거래시장 선택 SHADOW 기반
+
+- 사용자가 거래시장을 고정하지 않고 KST 세션, NXT 적격성, KRX·NXT 최신 호가와 표시 수량, 주문 긴급도 및 Broker SOR 지원 여부로 `KRX/NXT/SOR/WAIT`를 결정하는 `venue-selection-v1` 엔진을 구현했다.
+- 진단 API와 `venue_selection_evaluations` 감사 원장을 추가했다. 입력 호가와 평가 시각은 서버 상태에서만 가져오며 `execution_stage=SHADOW`, `order_creation_allowed=false`를 DB 제약과 응답 계약으로 고정해 Decision·Approval·OrderIntent·TradingOrder를 만들지 않는다.
+- NXT snapshot 부재를 미지원으로 오판하지 않도록 적격성을 `VERIFIED/INELIGIBLE/UNKNOWN`으로 구분한다. 실제 NXT 종목 적격 목록 수집, 키움 NXT stream 및 SOR 주문 매핑, Guard 직전 재선택은 후속 단계다.
+- 집중 테스트·Ruff와 SQLite migration `20260812_0028` upgrade/downgrade/upgrade가 통과했다. Ubuntu PostgreSQL 적용과 실제 NXT 데이터 검증은 미완료다.
+
 ## 1. 목적
 
 명세된 요구사항의 계획, 구현, 검증 상태를 구분해 관리한다. `명세 완료`는 코드 구현이나 시험 완료를 의미하지 않는다.

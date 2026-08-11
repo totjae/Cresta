@@ -17,6 +17,7 @@
 - 결정론적 Paper Broker 주문·부분체결·취소·정정·응답유실 상태 머신
 - 주문·체결·포지션 원장과 인증된 주문 조회 API
 - Web UI 감시 종목 최대 3개 관리, 키움 MOCK KRX `0B`·`0D` 실시간 구독, 1분봉과 VWAP·SMA5·상대 거래량·실현 변동성·고점 하락률·호가 spread 영속·조회
+- 서버 소유 KRX/NXT snapshot과 KST 세션·호가·유동성으로 `KRX/NXT/SOR/WAIT`를 계산하고 주문 없이 이력을 남기는 SHADOW 거래시장 선택 진단
 - 키움 모의투자 전용 메모리 토큰·REST client와 `ka10001` 복구 시세 정규화 기반
 - 키움 `ka00001` 10자리 계좌 일치 검증과 비밀 마스킹 `kiwoom-check` 점검 명령
 - 키움 `ka10075`·`ka10076`·`kt00018` 연속조회 정규화와 읽기 전용 DB 대조 `kiwoom-reconcile-check`
@@ -81,6 +82,7 @@ OpenDART 공시, KRX 전 거래일 공식 시장 증거와 NAVER API HUB 뉴스 
 
 - [제품 요구사항](docs/PRODUCT_REQUIREMENTS.md)
 - [거래 세션 및 감시 운영 명세](docs/TRADING_SESSION_SPEC.md)
+- [거래시장 자동 선택 명세](docs/VENUE_SELECTION_SPEC.md)
 - [주문 가격 및 미체결 재처리 명세](docs/ORDER_EXECUTION_SPEC.md)
 - [주문 상태 머신 및 키움 매핑 명세](docs/ORDER_STATE_MACHINE_SPEC.md)
 - [계좌·주문 재동기화 명세](docs/RECONCILIATION_SPEC.md)

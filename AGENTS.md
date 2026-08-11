@@ -45,6 +45,7 @@
 | 제품 요구사항 | [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md) | MVP 범위, 키움 모의투자, 행동별 실행 권한과 익일 보유 정책 |
 | 거래 세션 명세 | [docs/TRADING_SESSION_SPEC.md](docs/TRADING_SESSION_SPEC.md) | 장 전 점검, KRX·NXT 세션, 감시 주기, 신규매수와 장 마감 정책 |
 | 주문 실행 명세 | [docs/ORDER_EXECUTION_SPEC.md](docs/ORDER_EXECUTION_SPEC.md) | 주문 가격, 승인 범위, 미체결·부분체결·취소·재주문 정책 |
+| 거래시장 자동 선택 명세 | [docs/VENUE_SELECTION_SPEC.md](docs/VENUE_SELECTION_SPEC.md) | 시간대·호가·유동성·NXT 적격성·SOR에 따른 KRX/NXT 자동 선택과 SHADOW 검증 |
 | 주문 상태 머신 명세 | [docs/ORDER_STATE_MACHINE_SPEC.md](docs/ORDER_STATE_MACHINE_SPEC.md) | Cresta 주문 상태, 키움 주문·체결 매핑과 수량 불변조건 |
 | 계좌 재동기화 명세 | [docs/RECONCILIATION_SPEC.md](docs/RECONCILIATION_SPEC.md) | 시작·재연결·응답유실 시 주문·체결·잔고 대조와 외부 주문 처리 |
 | 키움 Broker Adapter 명세 | [docs/KIWOOM_BROKER_SPEC.md](docs/KIWOOM_BROKER_SPEC.md) | 키움 인증, 배포 경로, 단일 worker, 환경 분리, 호출 제한과 연결 정책 |
