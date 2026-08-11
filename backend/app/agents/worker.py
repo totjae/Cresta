@@ -24,6 +24,11 @@ from app.agents.dart import (
     collect_dart_disclosures,
     receipt_date_as_utc,
 )
+from app.agents.krx import (
+    KRX_SOURCE_POLICY_VERSION,
+    base_date_as_utc,
+    collect_krx_daily_market,
+)
 from app.agents.runtime import (
     ASSESSMENT_SCHEMA_VERSION,
     CORE_SCHEMA_VERSION,
@@ -428,13 +433,14 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
         raise AgentRuntimeError("AGENT_MARKET_SNAPSHOT_NOT_FOUND")
     if stage.role == "INTEL_COLLECTOR":
         settings = get_settings()
+        evidence_ids: list[str] = []
+        source_results: dict[str, object] = {}
         if settings.dart_enabled:
             collection = collect_dart_disclosures(
                 settings,
                 symbol=run.symbol,
                 now=now,
             )
-            evidence_ids: list[str] = []
             for disclosure in collection.disclosures:
                 facts = disclosure.facts()
                 record = {
@@ -461,17 +467,74 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
                 db.add(evidence)
                 db.flush()
                 evidence_ids.append(evidence.id)
+            source_results["OPENDART"] = {
+                "source_policy_version": DART_SOURCE_POLICY_VERSION,
+                "query_start_date": collection.start_date,
+                "query_end_date": collection.end_date,
+                "pages_fetched": collection.pages_fetched,
+                "evidence_count": len(collection.disclosures),
+            }
+        if settings.krx_enabled:
+            collection = collect_krx_daily_market(
+                settings,
+                symbol=run.symbol,
+                now=now,
+            )
+            if collection.item is not None:
+                item = collection.item
+                facts = item.facts()
+                record = {
+                    "source_policy_version": KRX_SOURCE_POLICY_VERSION,
+                    "base_date": item.base_date,
+                    "symbol": item.symbol,
+                    "facts": facts,
+                }
+                evidence = EvidenceItem(
+                    run_id=run.id,
+                    market=run.market,
+                    symbol=run.symbol,
+                    source_type="KRX_DAILY_MARKET",
+                    source_tier="PRIMARY",
+                    source_name="KRX_OPEN_API",
+                    source_url=item.source_url,
+                    title=f"{item.name} {item.market_name} {item.base_date} 일별매매정보",
+                    facts_json=_canonical(facts),
+                    content_hash=_hash(record),
+                    extraction_method="RULE",
+                    published_at=base_date_as_utc(item.base_date),
+                    event_at=base_date_as_utc(item.base_date),
+                    received_at=now,
+                )
+                db.add(evidence)
+                db.flush()
+                evidence_ids.append(evidence.id)
+            source_results["KRX"] = {
+                "source_policy_version": KRX_SOURCE_POLICY_VERSION,
+                "dates_queried": list(collection.dates_queried),
+                "requests_made": collection.requests_made,
+                "evidence_count": int(collection.item is not None),
+            }
+        if source_results:
+            source_mode = (
+                "MULTI_PRIMARY"
+                if len(source_results) > 1
+                else "OPENDART_PRIMARY"
+                if "OPENDART" in source_results
+                else "KRX_DAILY_PRIMARY"
+            )
             _complete_stage(
                 stage,
                 state="SUCCEEDED",
                 output={
-                    "schema_version": "intel-opendart-v1",
+                    "schema_version": "intel-official-primary-v2",
                     "status": "SUCCEEDED",
-                    "source_mode": "OPENDART_PRIMARY",
-                    "source_policy_version": DART_SOURCE_POLICY_VERSION,
-                    "query_start_date": collection.start_date,
-                    "query_end_date": collection.end_date,
-                    "pages_fetched": collection.pages_fetched,
+                    "source_mode": source_mode,
+                    "source_policy_version": (
+                        next(iter(source_results.values()))["source_policy_version"]
+                        if len(source_results) == 1
+                        else EVIDENCE_POLICY_VERSION
+                    ),
+                    "source_results": source_results,
                     "evidence_count": len(evidence_ids),
                     "evidence_ids": evidence_ids,
                 },
@@ -504,19 +567,26 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
                 .where(
                     EvidenceItem.run_id == run.id,
                     EvidenceItem.source_tier == "PRIMARY",
-                    EvidenceItem.source_type == "DART_DISCLOSURE",
+                    EvidenceItem.source_type.in_(
+                        ("DART_DISCLOSURE", "KRX_DAILY_MARKET")
+                    ),
                 )
                 .order_by(EvidenceItem.created_at, EvidenceItem.id)
             )
         )
         evidence_ids = [item.id for item in verified_items]
-        reason_codes = (
-            ["DART_PRIMARY_EVIDENCE_VERIFIED"]
-            if evidence_ids
-            else ["DART_QUERY_COMPLETE_NO_MATCHES"]
-            if intel_output.get("source_mode") == "OPENDART_PRIMARY"
-            else ["NO_EXTERNAL_EVIDENCE_FIXTURE"]
-        )
+        source_results = intel_output.get("source_results", {})
+        reason_codes: list[str] = []
+        if any(item.source_type == "DART_DISCLOSURE" for item in verified_items):
+            reason_codes.append("DART_PRIMARY_EVIDENCE_VERIFIED")
+        elif "OPENDART" in source_results or intel_output.get("source_mode") == "OPENDART_PRIMARY":
+            reason_codes.append("DART_QUERY_COMPLETE_NO_MATCHES")
+        if any(item.source_type == "KRX_DAILY_MARKET" for item in verified_items):
+            reason_codes.append("KRX_PRIMARY_EVIDENCE_VERIFIED")
+        elif "KRX" in source_results:
+            reason_codes.append("KRX_QUERY_COMPLETE_NO_MATCH")
+        if not reason_codes:
+            reason_codes.append("NO_EXTERNAL_EVIDENCE_FIXTURE")
         record = {
             "schema_version": "evidence-bundle-v1",
             "market": run.market,

@@ -334,7 +334,10 @@ Docker Compose에서 API 또는 Frontend 컨테이너만 재생성하면 고정 
 | OPS-075 | LLM 장애 대응은 신규 AI 매수 판단을 중지하되 Broker worker·재동기화·실시간 Guard를 재시작하거나 중단시키지 않는다. |
 | OPS-076 | `backend/app/agents`, 공통 LLM Adapter 또는 Agent migration 변경 배포는 `api`, `scheduler`뿐 아니라 Compose `agent` 이미지를 반드시 build·recreate한다. 배포 후 `agent` 컨테이너의 source marker와 신규 DAG stage 수를 확인한다. |
 | OPS-077 | OpenDART는 선택형 `deploy/compose.dart.yaml`로만 활성화한다. `secrets/dart_api_key`가 없거나 유효하지 않으면 기본 Compose는 계속 기동하되 DART 활성 run은 생성·수집하지 않는다. |
-| OPS-078 | OpenDART를 활성 운영하는 호스트의 부팅 조정 명령에는 `compose.dart.yaml`을 포함해야 한다. 기본 `cresta-boot.service`가 기본·키움 overlay만 참조하는 동안에는 DART가 재부팅 자동복구 대상으로 검증됐다고 표시하지 않는다. |
+| OPS-078 | OpenDART를 활성 운영하는 호스트의 부팅 조정 명령에는 `compose.dart.yaml`을 포함해야 한다. `boot-reconcile.sh`가 secret을 감지해 이를 포함하지만 실제 재부팅 인수시험 전에는 DART가 자동복구 검증됐다고 표시하지 않는다. |
+| OPS-079 | `deploy/boot-reconcile.sh`는 기본·키움 Compose를 고정하고, 비어 있지 않은 `secrets/dart_api_key`와 `secrets/krx_api_key`가 존재할 때만 각 선택 overlay를 추가한다. 선택 secret 일부가 없다는 이유로 기본 MOCK 스택을 중단하지 않는다. |
+| OPS-080 | KRX OPEN API는 선택형 `deploy/compose.krx.yaml`로 활성화한다. 인증키와 유가증권·코스닥 일별매매 서비스 승인이 모두 준비되지 않으면 활성화하지 않는다. key당 일 10,000회 한도 보호를 위해 일자·시장 캐시를 사용하며 오류 반복 시 신규 Agent run을 중지한다. |
+| OPS-081 | 부팅 unit 변경 후 `boot-reconcile.sh --check`, systemd daemon-reload, 재부팅 인수시험을 수행한다. DART·KRX secret이 있는 호스트에서는 재부팅 뒤 API와 Agent 컨테이너에 해당 overlay 설정이 모두 복원되어야 한다. |
 
 ### 4.2 OpenDART 공시 수집 활성화
 
@@ -348,7 +351,7 @@ sudo stat -c '%u:%g %a %s-byte %n' secrets/dart_api_key
 
 정상 기대값은 `10001:10001 400 41-byte`이며 마지막 1 byte는 줄바꿈일 수 있다. 활성 배포에는 기본·키움·DART Compose 파일을 모두 사용한다.
 
-현재 저장소의 `cresta-boot.service` 템플릿은 기본·키움 overlay만 사용한다. 따라서 아래 수동 배포로 DART를 활성화해도 재부팅 뒤 DART 설정이 자동 조정된다고 간주하지 않는다. DART 상시 운영 전에는 unit의 Compose 파일 목록을 설정 가능하게 만드는 후속 구현과 재부팅 인수시험이 필요하다.
+`cresta-boot.service`는 `deploy/boot-reconcile.sh`를 통해 비어 있지 않은 DART secret을 감지하고 overlay를 자동 포함한다. 업데이트 뒤 unit을 다시 설치하고 `sudo deploy/boot-reconcile.sh --check`를 통과시킨 다음 실제 재부팅 인수시험을 수행해야 자동복구 검증이 완료된다.
 
 ```bash
 sudo docker compose \
@@ -365,6 +368,12 @@ sudo docker compose \
 ```
 
 새 DIAGNOSTIC run의 `INTEL_COLLECTOR`가 `source_mode=OPENDART_PRIMARY`, `source_policy_version=opendart-list-v1`을 기록하면 활성화된 것이다. 공시가 없으면 `DART_QUERY_COMPLETE_NO_MATCHES`, 있으면 Bundle에 `DART_PRIMARY_EVIDENCE_VERIFIED`와 `DART_DISCLOSURE/PRIMARY` evidence ID가 나타난다. Bundle은 다른 출처 coverage가 없으므로 계속 `PARTIAL`이다. `DART_STATUS_010/011/012/020`, `DART_TIMED_OUT`, `DART_PROVIDER_ERROR`가 발생하면 키·출구 IP·호출 한도·네트워크를 확인하고 빈 성공으로 우회하지 않는다.
+
+### 4.3 KRX 전 거래일 공식 시장 증거 활성화
+
+KRX Data Marketplace에서 인증키 발급과 `유가증권 일별매매정보`, `코스닥 일별매매정보` 이용 승인을 완료한 뒤 40자리 키를 `/home/totquf4171/cresta/secrets/krx_api_key`에 저장한다. `sudo deploy/prepare-secrets.sh` 적용 후 `deploy/compose.krx.yaml`을 배포 명령에 추가한다. 이 Adapter는 실시간 시세를 대체하지 않고 최근 전 거래일의 공식 OHLC·거래량·거래대금만 PRIMARY 증거로 제공한다.
+
+새 run의 INTEL 출력에서 `KRX_DAILY_PRIMARY`, `krx-stock-daily-v1`과 `KRX_PRIMARY_EVIDENCE_VERIFIED`를 확인한다. `KRX_QUERY_COMPLETE_NO_MATCH`는 정상 무자료이며 `KRX_TIMED_OUT`, `KRX_PROVIDER_ERROR`, `KRX_RESPONSE_INVALID`는 장애다. 배포 전후 `deploy/boot-reconcile.sh --check`로 선택 overlay 구성을 검증한다.
 
 ## 5. 검증·인수 조건
 

@@ -1,0 +1,17 @@
+services:
+  api:
+    environment:
+      CRESTA_KRX_ENABLED: "true"
+      CRESTA_KRX_API_KEY_FILE: /run/secrets/krx_api_key
+    secrets:
+      - krx_api_key
+  agent:
+    environment:
+      CRESTA_KRX_ENABLED: "true"
+      CRESTA_KRX_API_KEY_FILE: /run/secrets/krx_api_key
+    secrets:
+      - krx_api_key
+
+secrets:
+  krx_api_key:
+    file: ../secrets/krx_api_key

@@ -518,6 +518,14 @@ Evidence: 역할별 allowlist의 중복·schema enum·입력 정책 버전, 허�
 
 Evidence: MockTransport 고유번호 해석·pagination·필터·빈 결과·Provider 오류, 잘못된 secret의 admission 차단과 Agent DAG 통합을 검증했다. Ubuntu 고정 출구 IP 환경에서 실제 OpenDART 키로 삼성전자 최근 3일 공시 6건과 `OPENDART_PRIMARY` stage 결과를 확인했다.
 
+# KRX PRIMARY 전 거래일 시장 증거 시험 (2026-08-11)
+
+- `T-KRX-001`: 공식 HTTPS host, 승인된 KOSPI·KOSDAQ 일별 endpoint와 40자리 file secret만 허용하고 인증키·원문 응답을 영속화하지 않는다.
+- `T-KRX-002`: KST 실행일 이전 7일 안에서 정상 빈 날짜를 건너뛰고 두 시장 응답의 정확한 6자리 종목코드 한 행만 채택한다.
+- `T-KRX-003`: 일자·시장 cache가 반복 run의 호출량을 줄이고 HTTP·timeout·인증·quota·형식 오류를 안정적인 `KRX_*` code로 fail-closed 처리한다.
+- `T-KRX-004`: 검증한 행을 `KRX_DAILY_MARKET/PRIMARY`로 DART와 함께 불변 bundle에 포함하되 계약 뉴스 coverage 전까지 Bundle `PARTIAL`과 주문 0건을 유지한다.
+- `T-BOOT-004`: 선택 secret 유무에 따라 boot reconcile이 DART·KRX overlay를 정확히 포함하고 재부팅 뒤 설정 상태와 Agent 수집을 복원한다.
+
 # 구조화 LLM 응답 이력 시험 (2026-08-11)
 
 - `T-LLM-OUTPUT-001`: 성공 output과 server contract 실패 output을 validation 전에 canonical JSON·hash·capture 시각으로 저장한다.

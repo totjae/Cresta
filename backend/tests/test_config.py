@@ -98,3 +98,21 @@ def test_non_official_dart_endpoint_is_rejected() -> None:
     settings = Settings(dart_base_url="https://example.com")
     with pytest.raises(RuntimeError, match="official OpenDART"):
         settings.validate_safety()
+
+
+def test_krx_configuration_requires_enabled_hex_secret(tmp_path: Path) -> None:
+    key_file = tmp_path / "krx_api_key"
+    key_file.write_text("a" * 40, encoding="utf-8")
+    disabled = Settings(krx_api_key_file=str(key_file))
+    configured = Settings(krx_enabled=True, krx_api_key_file=str(key_file))
+    assert disabled.krx_configuration_status() == "DISABLED"
+    assert configured.krx_configuration_status() == "CONFIGURED"
+    assert configured.load_krx_api_key() == "a" * 40
+    key_file.write_text("not-a-valid-key", encoding="utf-8")
+    assert configured.krx_configuration_status() == "INVALID"
+
+
+def test_non_official_krx_endpoint_is_rejected() -> None:
+    settings = Settings(krx_base_url="https://example.com")
+    with pytest.raises(RuntimeError, match="official KRX"):
+        settings.validate_safety()

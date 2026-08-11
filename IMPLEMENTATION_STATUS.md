@@ -71,7 +71,7 @@
 | LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | 40개 Provider template, 35개 단일-key 등록, Native·OpenAI-compatible Adapter, 모델 동기화·역할·Prompt·FAIL_STOP/단일 FAILOVER·service tier·웹 검색·호출 이력 구현; OpenAI·LLM Gateway 실제 SHADOW 호출 검증 완료, 복합 인증 5종·가격 기반 비용 집계 미구현 |
 | DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·Scout 입력, LLM Foundation·Agent Runtime v6, 역할 배정·Agent lease·Provider tombstone·Prompt·Evidence Auditor·Market Context와 제한된 구조화 응답 이력을 `20260811_0027`까지 로컬 왕복 완료; Ubuntu는 `0027` 적용 확인 |
 | 판단 실행·승인 | `docs/DECISION_EXECUTION_SPEC.md` | 구현 중 | DIAGNOSTIC/TRADING 경계, scheduler 인계, 멱등 SHADOW execution, 불변 Guard 평가와 안전 차단 구현; 승인·주문 생성은 미구현 |
-| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 기본·키움 Compose 부팅 조정 unit 구현; 2026-08-05 Ubuntu 재부팅 후 전체 health·worker READY 복구 통과, DART overlay 부팅 자동복구·백업·경보·복구훈련 미완료 |
+| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 선택형 DART·KRX overlay 감지 부팅 조정 unit 구현; 2026-08-05 기본·키움 재부팅 복구 통과, 신규 source overlay 재부팅 인수시험·백업·경보·복구훈련 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 역사적 검토 | 2026-08-06 Foundation·Agent Runtime v1 착수 게이트 기록이며 현재 상태는 이 문서를 기준으로 한다. |
 | Backend·Docker 골격 | `docs/SYSTEM_DESIGN.md`, `docs/OPERATIONS_RUNBOOK.md` | 검증 완료 | API source UID `10001` 소유권·PostgreSQL·Redis·API·Frontend·gateway 기동과 HTTPS/내부 health 실서버 확인 |
 
@@ -91,8 +91,8 @@
 - 키움 모의투자 계정·API 사용신청·고정 출구 IP와 REST 인증·시세·10자리 계좌 일치는 실제 서버 확인 완료
 - NXT/SOR 실거래 검증 환경
 - 외부 LLM Provider SHADOW 호출은 활성화됐지만 모델·Gateway별 실제 응답 편차를 계속 검증해야 한다.
-- OpenDART 실제 키·고정 출구 IP 호출과 삼성전자 최근 3일 공시 6건 수집을 Ubuntu 서버에서 확인했다. 거래소·뉴스의 추가 검증 source는 아직 미선정이다.
-- OpenDART를 활성화한 수동 Compose는 검증했지만 현재 systemd unit에는 DART overlay가 없어 재부팅 자동복구는 미검증이다.
+- OpenDART 실제 키·고정 출구 IP 호출과 삼성전자 최근 3일 공시 6건 수집을 Ubuntu 서버에서 확인했다. KRX 전 거래일 공식 일별매매 Adapter는 구현했지만 KRX 인증키·서비스 승인과 실제 서버 호출은 아직 미검증이며 계약 뉴스 source는 미선정이다.
+- DART·KRX secret을 감지하는 선택 overlay 부팅 조정은 구현했지만 실제 Ubuntu 재부팅 자동복구 인수시험은 미검증이다.
 
 ## 6. 다음 구현 작업
 
@@ -145,13 +145,20 @@
 - backend 전체 회귀·Ruff와 frontend TypeScript·12개 component 시험 통과
 - 모든 DIAGNOSTIC 경로의 Decision·Approval·OrderIntent·TradingOrder 0건 유지
 
-### 6.3 다음 — 검증된 외부 증거 coverage
+### 6.3 진행 중 — 검증된 외부 증거 coverage
 
 범위:
 
 - OpenDART 외에 뉴스와 시장·업종의 공식 또는 계약된 source Adapter 선정
 - Provider citation은 계속 `UNRATED`로 보존하고 독립 검증을 통과한 항목만 EvidenceBundle에 편입
 - 출처별 freshness, 중복 제거, 장애와 quota 정책 확정
+
+현재 결과:
+
+- 공식 KRX OPEN API의 KOSPI·KOSDAQ 일별매매정보를 최근 전 거래일 증거로 수집하는 선택 Adapter를 구현했다.
+- 정확한 종목코드 매칭, 7일 freshness 상한, 일자·시장 cache, 정상 무자료와 장애 분리, DART와의 복합 EvidenceBundle 편입 경계를 적용했다.
+- DART·KRX secret 존재 여부에 따라 선택 overlay를 포함하는 boot reconcile 스크립트와 systemd unit을 구현했다.
+- 계약 뉴스 source 선정, KRX 실제 키 호출, DART·KRX 재부팅 인수시험은 남아 있다.
 
 완료 gate:
 
@@ -254,8 +261,8 @@
 - `agent-dag-v3`에서 선택형 OpenDART 공시검색 Adapter를 `INTEL_COLLECTOR`에 연결했다. 공식 endpoint, KST 최근 3일, 최대 page와 정확한 종목코드 필터를 적용한다.
 - 검증된 공시는 공식 viewer URL과 안전한 메타데이터만 `DART_DISCLOSURE/PRIMARY`로 저장하며 키와 원문 응답은 보존하지 않는다.
 - `000`과 `013`을 정상 처리하고 인증·IP·한도·HTTP·timeout·page cap 오류는 `DART_*` code로 fail-closed 처리한다.
-- 검증 evidence ID는 Scout allowlist에 전달하지만 뉴스·거래소 coverage가 없으므로 Bundle과 run은 `PARTIAL`, 주문은 0건으로 유지한다.
-- 선택형 `deploy/compose.dart.yaml`과 secret 권한 준비 절차를 추가했다. 활성화 상태에서 secret이 유효하지 않으면 run admission을 409로 차단한다. 로컬 회귀시험과 Ubuntu 실제 OpenDART 호출·공시 6건 수집을 확인했다. 현재 systemd boot unit의 DART overlay 포함은 후속 작업이다.
+- 검증 evidence ID는 Scout allowlist에 전달하지만 계약 뉴스 coverage가 없으므로 Bundle과 run은 `PARTIAL`, 주문은 0건으로 유지한다.
+- 선택형 `deploy/compose.dart.yaml`과 secret 권한 준비 절차를 추가했다. 활성화 상태에서 secret이 유효하지 않으면 run admission을 409로 차단한다. 로컬 회귀시험과 Ubuntu 실제 OpenDART 호출·공시 6건 수집을 확인했다. 이후 선택 overlay 감지 boot reconcile을 구현했으며 실제 재부팅 인수시험은 남아 있다.
 
 ## 2026-08-11 구조화 LLM 응답 이력
 
@@ -270,3 +277,10 @@
 - 진입금액·1회/종목/전체 금액·최대 보유종목·일일진입·고정손절·시세 지연·spread·가격편차 범위와 금액 순서를 서버에서 검증한다. 활성 버전이 없으면 `entry_order_amount=null`로 BUY 차단을 유지한다.
 - Guard SHADOW 평가와 execution에 사용한 risk version ID를 기록하고, Console에서 source·active version·미설정 차단을 표시하며 변경안 검증·확정을 수행한다.
 - backend 전체 209개 테스트·Ruff, frontend TypeScript·12개 component 테스트·production build가 통과했다. 전체 계좌 노출 계산·영향 미리보기·종목별 override는 후속 구현이다.
+
+## 2026-08-11 KRX PRIMARY 전 거래일 시장 증거 Adapter
+
+- 공식 KRX OPEN API의 유가증권·코스닥 일별매매정보를 선택형 `INTEL_COLLECTOR` source로 추가했다. KST 실행일 이전 최근 7일, 정확한 6자리 종목코드와 공식 응답 필드만 채택한다.
+- KRX 행은 `KRX_DAILY_MARKET/PRIMARY`로 저장하며 인증키·원문 응답은 보존하지 않는다. 일자·시장·credential fingerprint별 메모리 cache로 key당 일 10,000회 한도를 보호한다.
+- 정상 무자료와 HTTP·timeout·형식 장애를 구분하고, 활성 secret이 잘못되면 run admission을 409로 차단한다. DART와 KRX 증거는 같은 불변 Bundle에 들어가지만 계약 뉴스 coverage 전까지 `PARTIAL`, 주문 0건을 유지한다.
+- DART·KRX secret 존재 여부로 선택 overlay를 조합하는 `boot-reconcile.sh`와 systemd unit을 추가했다. Ruff와 backend 전체 회귀시험을 통과했으며 KRX 실제 키 호출과 Ubuntu 재부팅 인수시험은 남아 있다.

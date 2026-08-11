@@ -63,4 +63,14 @@ if [ -e "$dart_secret_path" ]; then
   chmod 0400 "$dart_secret_path"
 fi
 
+krx_secret_path="$PROJECT_ROOT/secrets/krx_api_key"
+if [ -e "$krx_secret_path" ]; then
+  if [ ! -s "$krx_secret_path" ]; then
+    echo "Missing or empty secret file: $krx_secret_path" >&2
+    exit 1
+  fi
+  chown "$APP_UID:$APP_GID" "$krx_secret_path"
+  chmod 0400 "$krx_secret_path"
+fi
+
 echo "Cresta secret ownership and permissions are ready for UID/GID 10001:10001."

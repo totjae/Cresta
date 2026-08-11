@@ -35,3 +35,6 @@ coverage/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local provider reference fixture (never commit)
+provider-manager-v1.12.3.js

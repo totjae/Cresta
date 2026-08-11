@@ -41,14 +41,21 @@ def test_user_facing_services_have_health_gated_startup() -> None:
     assert "frontend:\n        condition: service_healthy" in gateway
 
 
-def test_boot_unit_reconciles_both_compose_files_and_waits_for_health() -> None:
+def test_boot_unit_uses_optional_source_overlay_reconciler() -> None:
     unit = (ROOT / "deploy" / "cresta-boot.service").read_text(encoding="utf-8")
+    script = (ROOT / "deploy" / "boot-reconcile.sh").read_text(encoding="utf-8")
 
     assert "After=network-online.target docker.service" in unit
     assert "Requires=docker.service" in unit
     assert "WorkingDirectory=/home/totquf4171/cresta" in unit
-    assert unit.count("-f deploy/compose.yaml -f deploy/compose.kiwoom.yaml") == 2
-    assert "config --quiet" in unit
-    assert "up -d --wait --wait-timeout 180" in unit
+    assert "boot-reconcile.sh --check" in unit
+    assert "boot-reconcile.sh --up" in unit
+    assert "-f deploy/compose.yaml -f deploy/compose.kiwoom.yaml" in script
+    assert "[ -s secrets/dart_api_key ]" in script
+    assert "-f deploy/compose.dart.yaml" in script
+    assert "[ -s secrets/krx_api_key ]" in script
+    assert "-f deploy/compose.krx.yaml" in script
+    assert "config --quiet" in script
+    assert "up -d --wait --wait-timeout 180" in script
     assert "Restart=on-failure" in unit
     assert "StartLimitBurst=5" in unit

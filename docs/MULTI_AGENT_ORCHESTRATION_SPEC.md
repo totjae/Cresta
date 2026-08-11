@@ -333,6 +333,11 @@ app/llm/*                     Provider/Gateway 호출 계층
 - `MAO-122`: 채택한 공시는 접수번호 14자리, 고유번호 8자리, 종목코드 6자리와 접수일을 검증하고 공식 DART viewer URL, 안전한 필드, 수신시각과 canonical hash만 `DART_DISCLOSURE/PRIMARY` EvidenceItem으로 저장한다. API key와 원문 응답은 DB·로그·hash에 저장하지 않는다.
 - `MAO-123`: DART 수집이 성공해도 뉴스·거래소·기업 IR coverage가 없으므로 v1 Bundle은 `PARTIAL`을 유지한다. 검증된 DART evidence ID는 Scout allowlist에 포함하되 DART 빈 결과는 `DART_QUERY_COMPLETE_NO_MATCHES`로 구분한다.
 - `MAO-124`: DART 활성 여부·설정 상태·source policy version은 run input hash에 포함한다. 같은 snapshot이라도 source 설정이 바뀌면 과거 run을 재사용하지 않는다.
+- `MAO-141`: 선택형 KRX OPEN API Adapter는 공식 `https://data-dbg.krx.co.kr`의 유가증권·코스닥 일별매매정보만 호출한다. 인증키는 `AUTH_KEY` 헤더로만 전달하고 조회일은 KST 실행일 이전 최근 7개 달력일로 제한한다.
+- `MAO-142`: Adapter는 KOSPI와 KOSDAQ 응답에서 6자리 `ISU_CD`가 run 종목코드와 정확히 일치하는 한 행만 채택한다. `BAS_DD`, 시장, 종목명, OHLC, 등락률, 거래량·거래대금·시가총액만 `KRX_DAILY_MARKET/PRIMARY` EvidenceItem으로 저장하며 원문 응답과 인증키는 저장하지 않는다.
+- `MAO-143`: KRX 일별 응답은 거래일·시장 endpoint별로 프로세스 메모리에 캐시하여 같은 날짜 전체 종목 응답을 run마다 재호출하지 않는다. 정상 빈 날짜는 이전 날짜 조회로 진행하고, 7일 안에 종목을 찾지 못하면 `KRX_QUERY_COMPLETE_NO_MATCH`로 구분한다.
+- `MAO-144`: HTTP·timeout·인증·quota·형식 오류는 안정적인 `KRX_*` 오류로 INTEL stage를 fail-closed 처리한다. 정상 빈 결과와 장애를 서로 바꾸지 않으며, 채택 데이터의 기준일이 7일을 초과하면 bundle의 허용 evidence에 포함하지 않는다.
+- `MAO-145`: INTEL은 활성화된 OpenDART와 KRX Adapter를 모두 실행하고 source별 결과·policy version·evidence ID를 기록한다. EvidenceBundle은 검증된 DART·KRX ID만 Scout allowlist에 포함하되 계약된 뉴스 coverage가 없으므로 계속 `PARTIAL`이다. Provider citation은 별도 `UNRATED` 후보로 유지한다.
 
 ### Agent Runtime v4 SHADOW 의미 계약
 

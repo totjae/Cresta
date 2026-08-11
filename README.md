@@ -71,11 +71,11 @@ Agent 응답 이력은 Provider 원문이 아니라 Adapter가 추출한 서버 
 
 `deploy/.env.example`은 키 이름과 비밀 파일 경로만 제공하며 실제 값은 `secrets/`에 생성해야 합니다. secret 생성 또는 교체 후 `sudo deploy/prepare-secrets.sh`를 실행해 비밀값을 출력하지 않고 API 고정 UID/GID `10001:10001`과 읽기 전용 권한을 적용합니다. 이 준비 없이 migration이나 API를 시작하지 않습니다.
 
-OpenDART 공시 수집은 기본적으로 비활성화되어 있다. 40자리 키를 `secrets/dart_api_key`에 준비한 뒤 `deploy/compose.dart.yaml`을 기본·키움 Compose와 함께 적용해야 활성화된다. 공시 evidence는 공식 메타데이터만 PRIMARY로 저장하며 뉴스·거래소 coverage가 없으므로 Bundle은 계속 `PARTIAL`이다.
+OpenDART 공시와 KRX 전 거래일 공식 시장 증거 수집은 기본적으로 비활성화되어 있다. 각 40자리 키를 `secrets/dart_api_key`, `secrets/krx_api_key`에 준비한 뒤 선택형 `deploy/compose.dart.yaml`, `deploy/compose.krx.yaml`을 적용해야 활성화된다. 검증된 공식 메타데이터만 PRIMARY로 저장하며 계약 뉴스 coverage가 없으므로 Bundle은 계속 `PARTIAL`이다.
 
 운영 Web 진입점은 `https://trade.mihoservice.xyz`이며, Compose gateway는 `127.0.0.1:7788`에만 바인딩됩니다. 호스트 Nginx 예시는 `deploy/host-nginx.example.conf`에 있으며 7788 포트는 인터넷에 직접 개방하지 않습니다.
 
-서버 재부팅 후 기본·키움 Compose 스택을 자동 복구하려면 최초 1회 `deploy/cresta-boot.service`를 systemd에 설치하고 활성화합니다. 현재 unit은 선택형 DART overlay를 포함하지 않으므로 OpenDART 상시 운영의 재부팅 자동복구는 별도 후속 작업이다. unit 변경이 포함된 업데이트 뒤에는 파일을 다시 설치하고 `daemon-reload`해야 하며, 정확한 절차는 [배포·운영·장애복구 명세](docs/OPERATIONS_RUNBOOK.md)의 3.2절과 4.2절을 따릅니다.
+서버 재부팅 후 Compose 스택을 자동 복구하려면 최초 1회 `deploy/cresta-boot.service`를 systemd에 설치하고 활성화합니다. `deploy/boot-reconcile.sh`가 비어 있지 않은 DART·KRX secret을 감지해 선택 overlay를 자동 포함한다. unit 변경이 포함된 업데이트 뒤에는 파일을 다시 설치하고 `daemon-reload` 및 실제 재부팅 인수시험을 해야 하며, 정확한 절차는 [배포·운영·장애복구 명세](docs/OPERATIONS_RUNBOOK.md)의 3.2절과 4절을 따릅니다.
 
 ## 문서
 

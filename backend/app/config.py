@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     dart_timeout_seconds: int = Field(default=5, ge=1, le=15)
     dart_max_pages: int = Field(default=10, ge=1, le=50)
     dart_lookback_days: int = Field(default=3, ge=1, le=7)
+    krx_enabled: bool = False
+    krx_api_key_file: str | None = None
+    krx_base_url: str = "https://data-dbg.krx.co.kr"
+    krx_timeout_seconds: int = Field(default=10, ge=1, le=30)
+    krx_lookback_days: int = Field(default=7, ge=1, le=10)
     llm_secret_directory: str = "./secrets/llm"
     database_url: str = "sqlite:///./cresta.db"
     database_password_file: str | None = None
@@ -97,6 +102,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Agent worker poll must be less than half the lease duration")
         if self.dart_base_url.rstrip("/") != "https://opendart.fss.or.kr":
             raise RuntimeError("Only the official OpenDART endpoint is allowed")
+        if self.krx_base_url.rstrip("/") != "https://data-dbg.krx.co.kr":
+            raise RuntimeError("Only the official KRX OPEN API endpoint is allowed")
         if self.kiwoom_rest_base_url.rstrip("/") != "https://mockapi.kiwoom.com":
             raise RuntimeError("Only the Kiwoom MOCK REST endpoint is allowed in the first release")
         if self.kiwoom_ws_base_url.rstrip("/") != "wss://mockapi.kiwoom.com:10000":
@@ -151,6 +158,24 @@ class Settings(BaseSettings):
             raise RuntimeError("OpenDART API key is not configured")
         assert self.dart_api_key_file
         return Path(self.dart_api_key_file).read_text(encoding="utf-8").strip()
+
+    def krx_configuration_status(self) -> str:
+        if not self.krx_enabled:
+            return "DISABLED"
+        if not self.krx_api_key_file:
+            return "NOT_CONFIGURED"
+        try:
+            key = Path(self.krx_api_key_file).read_text(encoding="utf-8").strip()
+        except OSError:
+            return "NOT_CONFIGURED"
+        valid = len(key) == 40 and all(char in "0123456789abcdefABCDEF" for char in key)
+        return "CONFIGURED" if valid else "INVALID"
+
+    def load_krx_api_key(self) -> str:
+        if self.krx_configuration_status() != "CONFIGURED":
+            raise RuntimeError("KRX OPEN API key is not configured")
+        assert self.krx_api_key_file
+        return Path(self.krx_api_key_file).read_text(encoding="utf-8").strip()
 
 
 @lru_cache

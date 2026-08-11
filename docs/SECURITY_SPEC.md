@@ -133,6 +133,7 @@ Argon2id 초기 최소값은 memory 64 MiB, iterations 3, parallelism 1로 한�
 | SEC-087 | 공식 Provider 모델 조회는 서버 고정 HTTPS endpoint, redirect 금지, 15초 timeout, 5 MiB 응답 제한을 적용하며 원문 upstream 오류를 UI·API·로그에 전달하지 않는다. |
 | SEC-088 | OpenDART API key는 Docker secret 파일로만 API·Agent에 주입하고 query log, DB, stage 출력, evidence facts·hash와 오류에 포함하지 않는다. endpoint는 공식 HTTPS host로 고정한다. |
 | SEC-089 | 프롬프트 개선 이력은 구조화 model output만 저장한다. key 이름에 secret·token·credential·authorization·password·TOTP가 포함되거나 64 KiB를 넘으면 저장과 채택을 모두 거부한다. |
+| SEC-090 | KRX OPEN API 인증키는 Docker secret 파일로만 API·Agent에 주입하고 `AUTH_KEY` header, DB, stage 출력, evidence facts·hash와 오류에 포함하지 않는다. endpoint는 공식 HTTPS host와 승인된 일별매매 path로 고정한다. |
 
 ## 4. 오류·예외 또는 경계 조건
 
