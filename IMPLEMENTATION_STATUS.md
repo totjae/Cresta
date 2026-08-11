@@ -4,6 +4,13 @@
 
 명세된 요구사항의 계획, 구현, 검증 상태를 구분해 관리한다. `명세 완료`는 코드 구현이나 시험 완료를 의미하지 않는다.
 
+### 2026-08-11 불완전 Scout의 결정론적 Core 축소
+
+- 신규 `agent-dag-v6`에서 필수 Scout가 하나라도 불완전하면 Core Provider를 호출하지 않고 서버가 `WAIT/UNKNOWN`, confidence 0, HIGH risk와 정확한 incomplete roles를 기록한다. 기존 v5 run은 당시 의미와 idempotency key로 보존한다.
+- Scout 원본 상태와 Provider 응답은 치환하지 않으며, 완전한 입력에서는 기존 Core Provider 호출을 유지한다.
+- 실서버에서 확인된 `LLM_CORE_SHADOW_ASSESSMENT_MISMATCH` 재현 조건을 외부 Provider fixture로 고정하고 `PARTIAL` 종료·Core invocation 0건·주문 0건을 검증했다.
+- Backend 집중시험·전체 회귀·Ruff와 Frontend TypeScript·12개 component 시험·production build가 통과했다. 실서버 재배포 후 동일 종목 수동 재검증은 대기 중이다.
+
 ### 2026-08-11 서버 소유 Agent 판단 입력 v1
 
 - 신규 DIAGNOSTIC admission을 `agent-dag-v5`와 `agent-server-input-v1`로 전환했다.
@@ -60,9 +67,9 @@
 | 인증·세션·TOTP | `docs/SECURITY_SPEC.md` | 구현 중 | 로그인 TOTP·세션·CSRF·실패제한 구현; 현재 개발 단계의 로그인 이후 설정·Provider·역할 배정·MOCK 시험 재인증은 제거하고 향후 위험 분석 시 선택적 재도입 예정, 복구·운영 검증 미완료 |
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 감시 종목·키움 `0B`·`0D`, 1분봉과 v2 VWAP·SMA5·상대 거래량·실현 변동성·고점 하락률·spread 영속화 로컬 검증 완료; 체결강도와 v2 실제 장중 수신 미검증 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 구현 중 | 불변 `scout-input-v1`과 `deterministic-mock-v2`, 외부 Provider DIAGNOSTIC 판단, context별 v2 출력 계약과 `agent-server-input-v1` 포지션 파생값을 로컬 검증 완료; 실서버 v5 검증 대기 |
-| 다중 에이전트 오케스트레이션 | `docs/MULTI_AGENT_ORCHESTRATION_SPEC.md` | 구현 중 | Agent Runtime v5의 Intel·Verify·4개 Scout·Candidate Auditor·Core, ENTRY/POSITION snapshot·검증 Market Context·OpenDART PRIMARY 구현; v5 로컬 회귀 완료, 실서버 검증 대기 |
+| 다중 에이전트 오케스트레이션 | `docs/MULTI_AGENT_ORCHESTRATION_SPEC.md` | 구현 중 | Agent Runtime v6의 Intel·Verify·4개 Scout·Candidate Auditor·Core, 서버 입력과 불완전 Scout의 결정론적 Core 축소 구현; v6 로컬 회귀 완료, 실서버 검증 대기 |
 | LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | 40개 Provider template, 35개 단일-key 등록, Native·OpenAI-compatible Adapter, 모델 동기화·역할·Prompt·FAIL_STOP/단일 FAILOVER·service tier·웹 검색·호출 이력 구현; OpenAI·LLM Gateway 실제 SHADOW 호출 검증 완료, 복합 인증 5종·가격 기반 비용 집계 미구현 |
-| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·Scout 입력, LLM Foundation·Agent Runtime v5, 역할 배정·Agent lease·Provider tombstone·Prompt·Evidence Auditor·Market Context와 제한된 구조화 응답 이력을 `20260811_0027`까지 로컬 왕복 완료; Ubuntu는 `0025` 적용 확인, `0026`·`0027` 대기 |
+| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·Scout 입력, LLM Foundation·Agent Runtime v6, 역할 배정·Agent lease·Provider tombstone·Prompt·Evidence Auditor·Market Context와 제한된 구조화 응답 이력을 `20260811_0027`까지 로컬 왕복 완료; Ubuntu는 `0027` 적용 확인 |
 | 판단 실행·승인 | `docs/DECISION_EXECUTION_SPEC.md` | 구현 중 | DIAGNOSTIC/TRADING 경계, scheduler 인계, 멱등 SHADOW execution, 불변 Guard 평가와 안전 차단 구현; 승인·주문 생성은 미구현 |
 | 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 기본·키움 Compose 부팅 조정 unit 구현; 2026-08-05 Ubuntu 재부팅 후 전체 health·worker READY 복구 통과, DART overlay 부팅 자동복구·백업·경보·복구훈련 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 역사적 검토 | 2026-08-06 Foundation·Agent Runtime v1 착수 게이트 기록이며 현재 상태는 이 문서를 기준으로 한다. |
@@ -103,7 +110,7 @@
 
 완료 gate:
 
-- `T-AGENT-SHADOW-001`~`009` 통과
+- `T-AGENT-SHADOW-001`~`010` 통과
 - migration `20260811_0026_agent_shadow_contract_v2` 왕복 검증
 - 기존 v1~v3 run 조회·멱등성 회귀 통과
 - DIAGNOSTIC run의 Decision·Approval·OrderIntent·TradingOrder 0건 확인

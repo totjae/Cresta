@@ -358,3 +358,4 @@ app/llm/*                     Provider/Gateway 호출 계층
 | MAO-137 | Market Context가 없거나 stale·불완전하면 MARKET_SECTOR_SCOUT는 Provider 호출 입력에 null과 결측 reason을 명시하고 결과를 `INSUFFICIENT_DATA`로 강제한다. Provider 웹 검색 결과만으로 서버 Market Context를 대체하지 않는다. |
 | MAO-138 | Position·Market Context 파생 입력은 역할별 Provider 요청의 `allowed_input_refs`에 포함하고 Core에는 Scout가 채택한 assessment와 hash만 전달한다. Provider가 새 source ref나 파생값을 생성해 입력 provenance로 승격할 수 없다. |
 | MAO-139 | v5 DIAGNOSTIC의 실행 action은 계속 WAIT이며 Decision·Approval·OrderIntent·TradingOrder를 생성하지 않는다. 서버 입력 확장은 거래 권한을 변경하지 않는다. |
+| MAO-140 | 신규 admission은 `agent-dag-v6`로 분리한다. v6의 필수 Scout가 불완전하면 Core stage는 LLM invocation을 만들지 않고 서버 축소 결과로 성공 종료한다. run은 Scout 상태에 따라 `PARTIAL` 또는 `FAILED`로 집계하되 Core 자체를 Provider 계약 오류로 실패시키지 않으며, 모든 필수 Scout가 완전할 때만 Core Provider를 호출한다. 기존 v5 run과 idempotency key는 재작성하거나 재사용하지 않는다. |

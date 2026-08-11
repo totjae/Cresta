@@ -460,7 +460,7 @@ describe("Agent Worker v2", () => {
     const run = {
       schema_version: "1.0", request_id: "agent-1", run_id: "run-1", created: true,
       purpose: "DIAGNOSTIC", execution_stage: "SHADOW", market: "KRX", symbol: "005930",
-      market_snapshot_id: "snapshot-1", input_hash: "a".repeat(64), dag_version: "agent-dag-v5",
+      market_snapshot_id: "snapshot-1", input_hash: "a".repeat(64), dag_version: "agent-dag-v6",
       analysis_context: "ENTRY", position_snapshot_hash: "f".repeat(64),
       server_input_policy_version: "agent-server-input-v1", market_context_snapshot_id: null, market_context_snapshot_hash: null,
       assessment_schema_version: "agent-assessment-v2", core_schema_version: "agent-core-v2", score_policy_version: "score-policy-v1",

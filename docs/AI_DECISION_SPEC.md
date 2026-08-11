@@ -256,3 +256,4 @@ core_output:
 | AI-113 | Position freshness는 position `updated_at`과 market snapshot 기준시각의 차이, 적용한 stale threshold와 상태를 함께 기록한다. stale·누락·hash 불일치는 점수를 만들지 않고 `INSUFFICIENT_DATA` 또는 `CONFLICTED`로 축소한다. |
 | AI-114 | MARKET_SECTOR_SCOUT는 서버가 선택해 run에 고정한 `market-context-v1` snapshot만 사용한다. 유효한 snapshot이 없으면 개별 종목 quote를 시장·업종 흐름으로 오인하지 않고 `INSUFFICIENT_DATA`, null 점수와 `MARKET_DATA_INSUFFICIENT`를 반환한다. |
 | AI-115 | 서버 입력의 모든 Decimal은 canonical 문자열로 직렬화하고 계산 version, source reference, observed/received/valid 시각과 freshness를 포함한다. 같은 원시 입력과 정책 version은 같은 canonical hash와 파생값을 생성해야 한다. |
+| AI-116 | 신규 `agent-dag-v6`의 v2 Core 필수 Scout 목록에 `INSUFFICIENT_DATA`, `CONFLICTED`, 실패 또는 검증 불가 역할이 하나라도 있으면 Core Provider를 호출하지 않는다. 서버는 원본 Scout 상태를 바꾸거나 모델 출력을 치환하지 않고 `action=WAIT`, `shadow_assessment=UNKNOWN`, `confidence=0`, `risk_level=HIGH`와 정확한 `incomplete_roles`를 결정론적으로 기록한다. 기존 v5 run은 당시 실행 의미를 유지한다. |

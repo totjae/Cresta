@@ -52,8 +52,9 @@ from app.models import (
     User,
 )
 
-DAG_VERSION = "agent-dag-v5"
-V2_DAG_VERSIONS = frozenset({"agent-dag-v4", DAG_VERSION})
+DAG_VERSION = "agent-dag-v6"
+V2_DAG_VERSIONS = frozenset({"agent-dag-v4", "agent-dag-v5", DAG_VERSION})
+SERVER_INPUT_DAG_VERSIONS = frozenset({"agent-dag-v5", DAG_VERSION})
 ASSESSMENT_SCHEMA_VERSION = "agent-assessment-v2"
 CORE_SCHEMA_VERSION = "agent-core-v2"
 SCORE_POLICY_VERSION = "score-policy-v1"
@@ -132,6 +133,10 @@ class InvocationOutcome:
 
 def uses_v2_contract(dag_version: str) -> bool:
     return dag_version in V2_DAG_VERSIONS
+
+
+def uses_server_inputs(dag_version: str) -> bool:
+    return dag_version in SERVER_INPUT_DAG_VERSIONS
 
 
 def _canonical(value: object) -> str:

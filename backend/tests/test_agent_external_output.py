@@ -24,7 +24,12 @@ from app.models import (
     LlmRoleRoute,
     TradingOrder,
 )
-from tests.test_agent_runtime import _login, _market_fixture, _routes
+from tests.test_agent_runtime import (
+    _login,
+    _market_context_fixture,
+    _market_fixture,
+    _routes,
+)
 
 
 class ExternalFixtureAdapter:
@@ -161,6 +166,7 @@ def test_external_outputs_are_server_validated_and_adopted_without_trading(
     client: TestClient, db: Session, monkeypatch
 ) -> None:
     _market_fixture(db)
+    _market_context_fixture(db)
     route_ids, adapter, csrf = _external_routes(client, db, monkeypatch)
     response = client.post(
         "/api/v1/ai/agent-runs/diagnostic",
@@ -230,6 +236,43 @@ def test_external_outputs_are_server_validated_and_adopted_without_trading(
     assert len(output_body["model_output_hash"]) == 64
     assert output_body["captured_at"] is not None
     assert "model_output" not in technical["invocation"]
+    assert db.scalar(select(func.count()).select_from(Decision)) == 0
+    assert db.scalar(select(func.count()).select_from(Approval)) == 0
+    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
+
+
+def test_incomplete_required_scout_skips_external_core_and_reduces_to_unknown(
+    client: TestClient, db: Session, monkeypatch
+) -> None:
+    _market_fixture(db)
+    route_ids, adapter, csrf = _external_routes(client, db, monkeypatch)
+    response = client.post(
+        "/api/v1/ai/agent-runs/diagnostic",
+        headers={"Origin": "https://testserver", "X-CSRF-Token": csrf},
+        json={
+            "schema_version": "1.0",
+            "market": "KRX",
+            "symbol": "005930",
+            "route_ids": route_ids,
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    run = _run_until_terminal(db, response.json()["run_id"])
+    assert run.state == "PARTIAL"
+    assert run.core_action == "WAIT"
+    assert run.shadow_assessment == "UNKNOWN"
+    assert all(request.role != "CORE" for request in adapter.requests)
+
+    completed = client.get(f"/api/v1/ai/agent-runs/{run.id}").json()
+    core = next(stage for stage in completed["stages"] if stage["role"] == "CORE")
+    assert core["state"] == "SUCCEEDED"
+    assert core["invocation"] is None
+    assert core["output"]["shadow_assessment"] == "UNKNOWN"
+    assert core["output"]["confidence"] == 0
+    assert core["output"]["risk_level"] == "HIGH"
+    assert core["output"]["incomplete_roles"] == ["MARKET_SECTOR_SCOUT"]
+    assert "REQUIRED_SCOUT_INCOMPLETE" in core["output"]["reason_codes"]
     assert db.scalar(select(func.count()).select_from(Decision)) == 0
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0

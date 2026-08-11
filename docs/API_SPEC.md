@@ -384,7 +384,7 @@ POST /api/v1/ai/providers/{provider_id}/credential
 
 | ID | 요구사항 |
 | --- | --- |
-| API-149 | `POST /api/v1/ai/agent-runs/diagnostic`은 서버가 결정한 `analysis_context`, 고정된 position snapshot reference와 현행 `dag_version=agent-dag-v5`를 응답한다. 클라이언트가 context나 position 존재 여부를 임의 지정하지 않는다. 기존 v4 run은 당시 계약으로 조회·처리한다. |
+| API-149 | `POST /api/v1/ai/agent-runs/diagnostic`은 서버가 결정한 `analysis_context`, 고정된 position snapshot reference와 현행 `dag_version=agent-dag-v6`를 응답한다. 클라이언트가 context나 position 존재 여부를 임의 지정하지 않는다. 기존 v4/v5 run은 당시 계약과 idempotency key로 조회·처리한다. |
 | API-150 | run 상세는 stage의 `NOT_APPLICABLE`을 별도 상태로 반환하고 Core의 `action=WAIT`와 nullable `shadow_assessment`를 분리해 반환한다. 기존 v1~v3 응답은 기존 필드 의미를 유지한다. |
 | API-151 | 목록·상세 응답은 사용한 assessment/core/score policy version을 노출하되 position 원문, prompt, credential과 Provider raw response는 노출하지 않는다. 신규 API는 판단·승인·주문 mutation을 제공하지 않는다. |
 

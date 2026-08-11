@@ -28,7 +28,7 @@ Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript
 ### 현행 검증 기록 해석 원칙 (2026-08-11)
 
 - 아래 표의 `계획`, `부분 통과`와 과거 evidence 문구는 해당 테스트가 마지막으로 갱신된 시점의 기록이다. 이후 날짜가 붙은 회귀시험·Ubuntu 실서버 evidence가 같은 항목을 검증했다면 최신 기록이 우선한다.
-- 현재 구현 기준선은 migration `20260811_0027`, Agent Runtime `agent-dag-v5`, 외부 LLM `DIAGNOSTIC/SHADOW`, OpenDART PRIMARY evidence다.
+- 현재 구현 기준선은 migration `20260811_0027`, Agent Runtime `agent-dag-v6`, 외부 LLM `DIAGNOSTIC/SHADOW`, OpenDART PRIMARY evidence다.
 - OpenDART 실제 호출은 삼성전자 최근 3일 공시 6건 수집까지 확인했다. 외부 LLM은 OpenAI와 LLM Gateway를 통한 역할별 구조화 응답 성공·실패 이력을 확인했다.
 - 이 문서의 과거 미구현 문구만으로 기능 완료를 판정하지 않는다. 최종 상태는 [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md)와 해당 날짜의 실행 evidence를 함께 확인한다.
 
@@ -548,8 +548,9 @@ Local evidence: SAFE_DEFAULT의 null 진입금액, 서버 수치·금액 순서 
 - `T-AGENT-SHADOW-007`: 성공·실패·NOT_APPLICABLE 모든 DIAGNOSTIC 경로에서 Decision·Approval·OrderIntent·TradingOrder가 0건인지 확인한다.
 - `T-AGENT-SHADOW-008`: Console이 WAIT와 shadow assessment를 분리하고 NOT_APPLICABLE과 null 점수를 각각 `해당 없음`과 `-`로 표시하는지 확인한다.
 - `T-AGENT-SHADOW-009`: 기존 v1 schema 선언 route를 v4에서 사용할 때 run snapshot에 선언 schema와 실제 v2 검증 schema가 함께 기록되고 route row는 변경되지 않는지 확인한다.
+- `T-AGENT-SHADOW-010`: 필수 Scout가 불완전하면 Core Provider 호출 없이 WAIT/UNKNOWN·confidence 0·정확한 incomplete roles를 서버가 기록하고, 모든 필수 Scout가 완전한 경로에서는 Core Provider 호출을 유지하는지 확인한다.
 
-Local evidence: `T-AGENT-SHADOW-001`~`009` 집중시험, backend 전체 회귀와 Ruff, migration `20260811_0026` upgrade/downgrade/upgrade, frontend TypeScript·12개 component 시험·production build가 통과했다. Ubuntu PostgreSQL migration과 실제 Console 표시는 다음 배포에서 확인한다.
+Local evidence: `T-AGENT-SHADOW-001`~`010` 집중시험, backend 전체 회귀와 Ruff, migration `20260811_0026` upgrade/downgrade/upgrade, frontend TypeScript·12개 component 시험·production build가 통과했다. 외부 Provider fixture에서 불완전 Scout의 Core 호출 0건·PARTIAL/WAIT/UNKNOWN과 완전 입력의 Core 호출 유지를 검증했다. Ubuntu에서 v5 Console 표시는 확인했고 결정론적 Core 축소 재배포 확인은 대기 중이다.
 
 # 서버 소유 Agent 입력 v1 시험 계획
 

@@ -63,7 +63,7 @@ npm test
 npm run build
 ```
 
-현재 AI 실험 경로는 외부 Provider route와 OpenDART PRIMARY 공시 수집을 선택적으로 사용하는 Agent Runtime v5를 포함한다. Web Console의 AI 판단 화면에서 5개 role route 준비도를 확인하고 ENTRY/POSITION context, 서버 계산 포지션 위험값과 검증된 Market Context가 고정된 DIAGNOSTIC DAG를 실행할 수 있다. Market Context가 없으면 시장·업종 값을 추정하지 않고 결측으로 처리한다. 실행 action `WAIT`와 별도의 SHADOW 평가만 기록하며 승인·주문은 생성하지 않는다.
+현재 AI 실험 경로는 외부 Provider route와 OpenDART PRIMARY 공시 수집을 선택적으로 사용하는 Agent Runtime v6를 포함한다. Web Console의 AI 판단 화면에서 5개 role route 준비도를 확인하고 ENTRY/POSITION context, 서버 계산 포지션 위험값과 검증된 Market Context가 고정된 DIAGNOSTIC DAG를 실행할 수 있다. Market Context가 없으면 시장·업종 값을 추정하지 않고, 불완전한 필수 Scout가 있으면 Core Provider 호출 없이 `WAIT/UNKNOWN`으로 축소한다. 승인·주문은 생성하지 않는다.
 
 AI 설정은 Provider·Model 카탈로그와 역할별 배정을 분리한다. 등록한 모델은 여러 Scout·Core에서 재사용할 수 있고 역할별 generation parameter override와 이력, 5개 역할의 원자적 일괄 활성화를 지원한다.
 

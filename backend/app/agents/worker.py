@@ -39,6 +39,7 @@ from app.agents.runtime import (
     _complete_stage,
     _hash,
     _invoke_model,
+    uses_server_inputs,
     uses_v2_contract,
 )
 from app.config import Settings, get_settings
@@ -619,7 +620,7 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
         market_context: MarketContextSnapshot | None = None
         market_context_payload: dict[str, object] | None = None
         market_context_conflicted = False
-        if run.dag_version == DAG_VERSION and run.market_context_snapshot_id:
+        if uses_server_inputs(run.dag_version) and run.market_context_snapshot_id:
             market_context = db.get(
                 MarketContextSnapshot, run.market_context_snapshot_id
             )
@@ -732,7 +733,7 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
                 market_context if stage.role == "MARKET_SECTOR_SCOUT" else None
             ),
         )
-        if run.dag_version == DAG_VERSION and stage.role == "MARKET_SECTOR_SCOUT":
+        if uses_server_inputs(run.dag_version) and stage.role == "MARKET_SECTOR_SCOUT":
             if market_context_conflicted:
                 assessment_v2 = AgentAssessmentV2(
                     stage_run_id=stage.id,
@@ -804,7 +805,7 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
             )
             return
         if (
-            run.dag_version == DAG_VERSION
+            uses_server_inputs(run.dag_version)
             and stage.role == "POSITION_RISK_SCOUT"
             and isinstance(position, dict)
             and (
@@ -961,7 +962,10 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
             raise AgentRuntimeError("AGENT_EVIDENCE_CANDIDATE_AUDIT_NOT_FOUND")
         candidate_audit = json.loads(candidate_audit_stage.output_json)
         candidate_audit_ref = candidate_audit_stage.id
-    if uses_v2_contract(run.dag_version) and invalid_assessment_roles:
+    if uses_v2_contract(run.dag_version) and (
+        invalid_assessment_roles
+        or (run.dag_version == DAG_VERSION and incomplete)
+    ):
         core = AgentCoreOutputV2(
             shadow_assessment="UNKNOWN",
             confidence=0,

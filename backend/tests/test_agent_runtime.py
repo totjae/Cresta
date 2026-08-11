@@ -237,7 +237,7 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     assert body["created"] is True
     assert body["purpose"] == "DIAGNOSTIC"
     assert body["execution_stage"] == "SHADOW"
-    assert body["dag_version"] == "agent-dag-v5"
+    assert body["dag_version"] == "agent-dag-v6"
     assert body["analysis_context"] == "ENTRY"
     assert len(body["position_snapshot_hash"]) == 64
     assert body["server_input_policy_version"] == "agent-server-input-v1"
@@ -309,7 +309,7 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
         auditor["output"]["evidence_bundle_hash"]
         == completed_body["evidence_bundle"]["bundle_hash"]
     )
-    assert sum(stage["invocation"] is not None for stage in completed_body["stages"]) == 3
+    assert sum(stage["invocation"] is not None for stage in completed_body["stages"]) == 2
     news = next(
         stage
         for stage in completed_body["stages"]
@@ -335,10 +335,21 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     assert market_sector["state"] == "INSUFFICIENT_DATA"
     assert market_sector["invocation"] is None
     assert "MARKET_DATA_INSUFFICIENT" in market_sector["output"]["reason_codes"]
+    core = next(stage for stage in completed_body["stages"] if stage["role"] == "CORE")
+    assert core["state"] == "SUCCEEDED"
+    assert core["invocation"] is None
+    assert core["output"]["action"] == "WAIT"
+    assert core["output"]["shadow_assessment"] == "UNKNOWN"
+    assert core["output"]["confidence"] == 0
+    assert core["output"]["risk_level"] == "HIGH"
+    assert core["output"]["incomplete_roles"] == [
+        "MARKET_SECTOR_SCOUT",
+        "NEWS_DISCLOSURE_SCOUT",
+    ]
     assert db.scalar(select(func.count()).select_from(AgentRun)) == 1
     assert db.scalar(select(func.count()).select_from(AgentStageRun)) == 8
     assert db.scalar(select(func.count()).select_from(EvidenceBundle)) == 1
-    assert db.scalar(select(func.count()).select_from(LlmInvocation)) == 3
+    assert db.scalar(select(func.count()).select_from(LlmInvocation)) == 2
     assert db.scalar(select(func.count()).select_from(Decision)) == 0
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0

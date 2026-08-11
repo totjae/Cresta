@@ -145,7 +145,7 @@ SELECTED -> PRECHECK -> ENTRY_WATCH -> ENTRY_READY -> BUY_PENDING
 - 모델에는 API 키, 계좌번호, 개인정보를 전달하지 않는다.
 - 프롬프트 버전, 모델 버전, 입력 시점, 시세 최신성, 출력 및 검증 실패를 기록한다.
 - `valid_until`이 지났거나 입력 가격이 허용 편차를 벗어나면 재판단한다.
-- Agent Runtime v5는 포지션 파생값과 적용 Risk Policy provenance를 admission 시 서버에서 계산해 불변 입력으로 고정하며 stage 실행 시 재계산하지 않는다.
+- Agent Runtime v5 이상은 포지션 파생값과 적용 Risk Policy provenance를 admission 시 서버에서 계산해 불변 입력으로 고정하며 stage 실행 시 재계산하지 않는다.
 - 지수·업종·시장 breadth는 공식 또는 계약된 내부 Adapter의 `market-context-v1` snapshot만 사용한다. 유효한 source가 없으면 모델 추정을 허용하지 않고 결측으로 축소한다.
 
 ## 7. 장애 및 보안 설계
