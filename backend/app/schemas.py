@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
@@ -104,6 +104,68 @@ class ExecutionPolicyHistoryResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str
     items: list[ExecutionPolicyVersionResponse]
+
+
+class RiskPolicyPayload(StrictModel):
+    entry_order_amount: int | None = Field(default=None, ge=10_000, le=100_000_000)
+    max_single_order_amount: int = Field(ge=10_000, le=100_000_000)
+    max_position_amount_per_symbol: int = Field(ge=10_000, le=100_000_000)
+    max_total_position_amount: int = Field(ge=10_000, le=100_000_000)
+    max_open_positions: int = Field(ge=1, le=3)
+    max_daily_entries: int = Field(ge=1, le=20)
+    fixed_stop_loss_pct: Decimal = Field(ge=Decimal("-20.0"), le=Decimal("-0.1"))
+    quote_stale_seconds: int = Field(ge=1, le=30)
+    max_spread_pct: Decimal = Field(ge=Decimal("0.01"), le=Decimal("5.00"))
+    max_price_deviation_pct: Decimal = Field(ge=Decimal("0.01"), le=Decimal("5.00"))
+
+    @model_validator(mode="after")
+    def validate_amount_order(self) -> RiskPolicyPayload:
+        entry = self.entry_order_amount
+        if entry is not None and entry > self.max_single_order_amount:
+            raise ValueError("entry_order_amount exceeds max_single_order_amount")
+        if self.max_single_order_amount > self.max_position_amount_per_symbol:
+            raise ValueError("max_single_order_amount exceeds symbol limit")
+        if self.max_position_amount_per_symbol > self.max_total_position_amount:
+            raise ValueError("symbol limit exceeds total limit")
+        return self
+
+
+class RiskPolicyDraftRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    policy: RiskPolicyPayload
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class RiskPolicyActivateRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+
+
+class RiskPolicyVersionResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    version_id: str
+    sequence: int
+    state: str
+    source: str = "USER_DEFAULT"
+    policy: RiskPolicyPayload
+    reason: str
+    created_at: datetime
+    validated_at: datetime | None
+    activated_at: datetime | None
+
+
+class RiskPolicyResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    active_version_id: str | None
+    source: str
+    policy: RiskPolicyPayload
+
+
+class RiskPolicyHistoryResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[RiskPolicyVersionResponse]
 
 
 class MockDecisionRequest(StrictModel):
@@ -782,6 +844,21 @@ class AgentInvocationResponse(StrictModel):
     runtime_context_at: datetime | None
     web_search_enabled: bool
     created_at: datetime
+
+
+class AgentInvocationOutputResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    run_id: str
+    stage_run_id: str
+    invocation_id: str
+    state: str
+    validation_status: str
+    error_code: str | None
+    output_available: bool
+    model_output: dict[str, object] | None
+    model_output_hash: str | None
+    captured_at: datetime | None
 
 
 class AgentStageRunResponse(StrictModel):

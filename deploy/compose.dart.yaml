@@ -1,0 +1,17 @@
+services:
+  api:
+    environment:
+      CRESTA_DART_ENABLED: "true"
+      CRESTA_DART_API_KEY_FILE: /run/secrets/dart_api_key
+    secrets:
+      - dart_api_key
+  agent:
+    environment:
+      CRESTA_DART_ENABLED: "true"
+      CRESTA_DART_API_KEY_FILE: /run/secrets/dart_api_key
+    secrets:
+      - dart_api_key
+
+secrets:
+  dart_api_key:
+    file: ../secrets/dart_api_key

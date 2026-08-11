@@ -16,6 +16,11 @@ from app.agents.contracts import (
     AgentCoreOutput,
     AgentScoutModelOutput,
 )
+from app.agents.dart import (
+    DART_SOURCE_POLICY_VERSION,
+    collect_dart_disclosures,
+    receipt_date_as_utc,
+)
 from app.agents.runtime import (
     EVIDENCE_POLICY_VERSION,
     ROUTE_ROLES,
@@ -27,7 +32,7 @@ from app.agents.runtime import (
     _hash,
     _invoke_model,
 )
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.db import SessionLocal
 from app.ids import uuid7
 from app.models import (
@@ -371,6 +376,57 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
     if snapshot is None:
         raise AgentRuntimeError("AGENT_MARKET_SNAPSHOT_NOT_FOUND")
     if stage.role == "INTEL_COLLECTOR":
+        settings = get_settings()
+        if settings.dart_enabled:
+            collection = collect_dart_disclosures(
+                settings,
+                symbol=run.symbol,
+                now=now,
+            )
+            evidence_ids: list[str] = []
+            for disclosure in collection.disclosures:
+                facts = disclosure.facts()
+                record = {
+                    "source_policy_version": DART_SOURCE_POLICY_VERSION,
+                    "receipt_number": disclosure.receipt_number,
+                    "facts": facts,
+                }
+                evidence = EvidenceItem(
+                    run_id=run.id,
+                    market=run.market,
+                    symbol=run.symbol,
+                    source_type="DART_DISCLOSURE",
+                    source_tier="PRIMARY",
+                    source_name="OPENDART",
+                    source_url=disclosure.source_url,
+                    title=disclosure.report_name or disclosure.corporation_name,
+                    facts_json=_canonical(facts),
+                    content_hash=_hash(record),
+                    extraction_method="RULE",
+                    published_at=receipt_date_as_utc(disclosure.receipt_date),
+                    event_at=receipt_date_as_utc(disclosure.receipt_date),
+                    received_at=now,
+                )
+                db.add(evidence)
+                db.flush()
+                evidence_ids.append(evidence.id)
+            _complete_stage(
+                stage,
+                state="SUCCEEDED",
+                output={
+                    "schema_version": "intel-opendart-v1",
+                    "status": "SUCCEEDED",
+                    "source_mode": "OPENDART_PRIMARY",
+                    "source_policy_version": DART_SOURCE_POLICY_VERSION,
+                    "query_start_date": collection.start_date,
+                    "query_end_date": collection.end_date,
+                    "pages_fetched": collection.pages_fetched,
+                    "evidence_count": len(evidence_ids),
+                    "evidence_ids": evidence_ids,
+                },
+                now=now,
+            )
+            return
         _complete_stage(
             stage,
             state="SUCCEEDED",
@@ -384,6 +440,32 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
         )
         return
     if stage.role == "EVIDENCE_VERIFIER":
+        intel = db.scalar(
+            select(AgentStageRun).where(
+                AgentStageRun.run_id == run.id,
+                AgentStageRun.role == "INTEL_COLLECTOR",
+            )
+        )
+        intel_output = json.loads(intel.output_json or "{}") if intel else {}
+        verified_items = list(
+            db.scalars(
+                select(EvidenceItem)
+                .where(
+                    EvidenceItem.run_id == run.id,
+                    EvidenceItem.source_tier == "PRIMARY",
+                    EvidenceItem.source_type == "DART_DISCLOSURE",
+                )
+                .order_by(EvidenceItem.created_at, EvidenceItem.id)
+            )
+        )
+        evidence_ids = [item.id for item in verified_items]
+        reason_codes = (
+            ["DART_PRIMARY_EVIDENCE_VERIFIED"]
+            if evidence_ids
+            else ["DART_QUERY_COMPLETE_NO_MATCHES"]
+            if intel_output.get("source_mode") == "OPENDART_PRIMARY"
+            else ["NO_EXTERNAL_EVIDENCE_FIXTURE"]
+        )
         record = {
             "schema_version": "evidence-bundle-v1",
             "market": run.market,
@@ -391,8 +473,8 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
             "market_snapshot_id": snapshot.id,
             "policy_version": EVIDENCE_POLICY_VERSION,
             "state": "PARTIAL",
-            "evidence_ids": [],
-            "reason_codes": ["NO_EXTERNAL_EVIDENCE_FIXTURE"],
+            "evidence_ids": evidence_ids,
+            "reason_codes": reason_codes,
         }
         bundle = EvidenceBundle(
             owner_id=run.owner_id,
@@ -402,10 +484,10 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
             as_of=now,
             policy_version=EVIDENCE_POLICY_VERSION,
             state="PARTIAL",
-            evidence_ids_json="[]",
+            evidence_ids_json=_canonical(evidence_ids),
             contradiction_groups_json="[]",
             stale_evidence_ids_json="[]",
-            reason_codes_json=_canonical(["NO_EXTERNAL_EVIDENCE_FIXTURE"]),
+            reason_codes_json=_canonical(reason_codes),
             bundle_hash=_hash(record),
         )
         db.add(bundle)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.config import Settings
 
 
@@ -78,3 +80,21 @@ def test_kiwoom_live_endpoint_is_rejected() -> None:
         assert "MOCK" in str(exc)
     else:  # pragma: no cover - assertion branch
         raise AssertionError("Kiwoom live endpoint must be rejected")
+
+
+def test_dart_configuration_requires_enabled_40_character_secret(tmp_path: Path) -> None:
+    key_file = tmp_path / "dart_api_key"
+    key_file.write_text("k" * 40, encoding="utf-8")
+    disabled = Settings(dart_api_key_file=str(key_file))
+    configured = Settings(dart_enabled=True, dart_api_key_file=str(key_file))
+    assert disabled.dart_configuration_status() == "DISABLED"
+    assert configured.dart_configuration_status() == "CONFIGURED"
+    assert configured.load_dart_api_key() == "k" * 40
+    key_file.write_text("short", encoding="utf-8")
+    assert configured.dart_configuration_status() == "INVALID"
+
+
+def test_non_official_dart_endpoint_is_rejected() -> None:
+    settings = Settings(dart_base_url="https://example.com")
+    with pytest.raises(RuntimeError, match="official OpenDART"):
+        settings.validate_safety()

@@ -244,7 +244,7 @@ describe("execution policy settings", () => {
     render(<CrestaConsole />);
 
     await user.click(await screen.findByRole("button", { name: /전략·설정/ }));
-    expect(await screen.findByText("안전 기본값 · 미저장")).toBeInTheDocument();
+    expect((await screen.findAllByText("안전 기본값 · 미저장")).length).toBeGreaterThan(0);
     await user.selectOptions(screen.getByLabelText("일반 매수 실행 모드"), "AUTOMATIC");
     await user.type(screen.getByLabelText("변경 사유"), "모의 자동화");
     await user.click(screen.getByRole("button", { name: "변경안 검증" }));
@@ -252,6 +252,47 @@ describe("execution policy settings", () => {
     await user.click(screen.getByRole("button", { name: "활성화" }));
     expect(await screen.findByText(/새 활성 버전으로 적용/)).toBeInTheDocument();
     expect(await screen.findByText("policy-1")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/auth/reauth/totp")).toBe(false);
+  });
+
+  it("validates and activates Guard risk settings without opening the BUY gate", async () => {
+    const safePolicy = {
+      buy: "MANUAL_APPROVAL", partial_sell: "MANUAL_APPROVAL", full_sell: "MANUAL_APPROVAL",
+      take_profit: "MANUAL_APPROVAL", fixed_stop_loss: "AUTOMATIC", trailing_stop: "AUTOMATIC",
+      end_of_day_liquidation: "AUTOMATIC", emergency_exit: "AUTOMATIC",
+    };
+    const riskPolicy = {
+      entry_order_amount: null, max_single_order_amount: 1000000,
+      max_position_amount_per_symbol: 1000000, max_total_position_amount: 3000000,
+      max_open_positions: 3, max_daily_entries: 5, fixed_stop_loss_pct: "-2.0",
+      quote_stale_seconds: 2, max_spread_pct: "0.30", max_price_deviation_pct: "0.50",
+    };
+    let active = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-risk", login_id: "admin", expires_at: "2026-08-11T09:00:00Z", csrf_token: "csrf-risk" });
+      if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
+      if (path === "/api/v1/settings/execution-policy") return jsonResponse({ active_version_id: null, source: "SAFE_DEFAULT", policy: safePolicy });
+      if (path === "/api/v1/settings/risk-policy" && !init?.method) return jsonResponse({ active_version_id: active ? "risk-1" : null, source: active ? "USER_DEFAULT" : "SAFE_DEFAULT", policy: { ...riskPolicy, entry_order_amount: active ? 500000 : null } });
+      if (path === "/api/v1/settings/risk-policy/drafts") return jsonResponse({ version_id: "risk-1", sequence: 1, state: "DRAFT", policy: { ...riskPolicy, entry_order_amount: 500000 }, reason: "모의 위험 설정", created_at: "2026-08-11T01:00:00Z", validated_at: null, activated_at: null });
+      if (path === "/api/v1/settings/risk-policy/risk-1/validate") return jsonResponse({ version_id: "risk-1", sequence: 1, state: "VALIDATED", policy: { ...riskPolicy, entry_order_amount: 500000 }, reason: "모의 위험 설정", created_at: "2026-08-11T01:00:00Z", validated_at: "2026-08-11T01:01:00Z", activated_at: null });
+      if (path === "/api/v1/settings/risk-policy/risk-1/activate") { active = true; return jsonResponse({ version_id: "risk-1", sequence: 1, state: "ACTIVE", policy: { ...riskPolicy, entry_order_amount: 500000 }, reason: "모의 위험 설정", created_at: "2026-08-11T01:00:00Z", validated_at: "2026-08-11T01:01:00Z", activated_at: "2026-08-11T01:02:00Z" }); }
+      if (path.startsWith("/api/v1/ai/")) return jsonResponse({ items: [] });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CrestaConsole />);
+
+    await user.click(await screen.findByRole("button", { name: /전략·설정/ }));
+    expect(await screen.findByText(/진입금액 미설정/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("신규진입 목표금액"), "500000");
+    await user.type(screen.getByLabelText("위험 설정 변경 사유"), "모의 위험 설정");
+    await user.click(screen.getByRole("button", { name: "위험 설정 검증" }));
+    expect(await screen.findByRole("dialog", { name: "Guard 위험 설정 활성화" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "활성화" }));
+    expect(await screen.findByText(/Guard 위험 설정이 새 활성 버전/)).toBeInTheDocument();
+    expect(await screen.findByText("risk-1")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/auth/reauth/totp")).toBe(false);
   });
 
@@ -438,6 +479,12 @@ describe("Agent Worker v2", () => {
       if (path === "/api/v1/ai/agent-runs" && !init?.method) return jsonResponse({ schema_version: "1.0", request_id: "runs-1", items: [] });
       if (path === "/api/v1/ai/routes") return jsonResponse({ schema_version: "1.0", request_id: "routes-1", items: routes });
       if (path === "/api/v1/ai/agent-runs/diagnostic") return jsonResponse(run, 201);
+      if (path === "/api/v1/ai/agent-runs/run-1/invocations/inv-0/output") return jsonResponse({
+        schema_version: "1.0", request_id: "output-1", run_id: "run-1", stage_run_id: "stage-0",
+        invocation_id: "inv-0", state: "SUCCEEDED", validation_status: "PASSED", error_code: null,
+        output_available: true, model_output: { assessment: "CAUTION", reason_codes: ["PRICE_BELOW_VWAP"] },
+        model_output_hash: "e".repeat(64), captured_at: "2026-08-06T01:00:00Z",
+      });
       return jsonResponse({}, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -450,6 +497,9 @@ describe("Agent Worker v2", () => {
     await user.click(screen.getByRole("button", { name: "DIAGNOSTIC DAG 등록" }));
     expect(await screen.findByText(/Worker가 비동기로 실행/)).toBeInTheDocument();
     expect(await screen.findByText("WAIT")).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "구조화 응답 보기" })[0]);
+    expect(await screen.findByText(/Provider 원문이 아니라 Adapter가 추출한/)).toBeInTheDocument();
+    expect(await screen.findByText(/PRICE_BELOW_VWAP/)).toBeInTheDocument();
 
     const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/ai/agent-runs/diagnostic");
     expect(call?.[1]).toEqual(expect.objectContaining({ headers: expect.objectContaining({ "X-CSRF-Token": "csrf-agent" }) }));

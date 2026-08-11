@@ -23,6 +23,8 @@
 - PostgreSQL 단일 lease·fencing, 키움 WebSocket LOGIN·`00`/`04` 구독, PING echo와 주기·이벤트 기반 재동기화를 수행하는 별도 Broker worker
 - KST 평일 08:00~20:00에 감시 종목을 5분·10분 슬롯으로 평가하고 TRADING 판단을 SHADOW Guard에 인계하는 별도 AI scheduler
 - ACTIVE 역할 배정 snapshot으로 DIAGNOSTIC DAG를 등록하고 stage claim·lease·fencing·만료 복구를 수행하는 별도 Agent worker
+- Agent 호출별 Adapter 추출 구조화 JSON을 검증 전 단계에서 제한적으로 보관하고 Console에서 필요할 때만 조회하는 응답 이력
+- `USER_DEFAULT / RISK_POLICY`의 진입금액·투자한도·보유/진입 횟수·고정손절·시세·spread·가격편차를 버전으로 검증·활성화하는 Guard 위험 설정 UI/API
 - `scout-input-v1` canonical 입력·hash와 지표 provenance를 저장하고 이를 사용하는 `deterministic-mock-v2` Scout/Core
 - 인증된 `GET /api/v1/system/broker`와 `kiwoom-worker-status` 안전 상태 조회
 - N100·16GiB 서버용 Docker Compose 자원 제한 초안
@@ -61,11 +63,15 @@ npm test
 npm run build
 ```
 
-현재 AI 실험 경로는 검증된 Mock Provider route만 사용하는 Agent Runtime v1을 포함한다. Web Console의 AI 판단 화면에서 5개 role route 준비도를 확인하고 DIAGNOSTIC DAG를 실행할 수 있으며 외부 웹·LLM·승인·주문은 연결되지 않는다.
+현재 AI 실험 경로는 외부 Provider route와 OpenDART PRIMARY 공시 수집을 선택적으로 사용하는 Agent Runtime v3을 포함한다. Web Console의 AI 판단 화면에서 5개 role route 준비도를 확인하고 DIAGNOSTIC DAG를 실행할 수 있으며 결과는 계속 SHADOW이고 승인·주문은 생성하지 않는다.
 
-AI 설정은 Provider·Model 카탈로그와 역할별 배정을 분리한다. 등록한 모델은 여러 Scout·Core에서 재사용할 수 있고 역할별 generation parameter override와 이력, 5개 역할의 TOTP 일괄 활성화를 지원한다.
+AI 설정은 Provider·Model 카탈로그와 역할별 배정을 분리한다. 등록한 모델은 여러 Scout·Core에서 재사용할 수 있고 역할별 generation parameter override와 이력, 5개 역할의 원자적 일괄 활성화를 지원한다.
+
+Agent 응답 이력은 Provider 원문이 아니라 Adapter가 추출한 서버 검증 전 구조화 JSON이다. 목록 조회에는 포함하지 않으며 Console에서 개별 호출의 `구조화 응답 보기`를 선택할 때만 가져온다. 64 KiB를 넘거나 민감한 key 이름을 포함한 응답은 저장하지 않고 해당 호출을 fail-closed 처리한다.
 
 `deploy/.env.example`은 키 이름과 비밀 파일 경로만 제공하며 실제 값은 `secrets/`에 생성해야 합니다. secret 생성 또는 교체 후 `sudo deploy/prepare-secrets.sh`를 실행해 비밀값을 출력하지 않고 API 고정 UID/GID `10001:10001`과 읽기 전용 권한을 적용합니다. 이 준비 없이 migration이나 API를 시작하지 않습니다.
+
+OpenDART 공시 수집은 기본적으로 비활성화되어 있다. 40자리 키를 `secrets/dart_api_key`에 준비한 뒤 `deploy/compose.dart.yaml`을 기본·키움 Compose와 함께 적용해야 활성화된다. 공시 evidence는 공식 메타데이터만 PRIMARY로 저장하며 뉴스·거래소 coverage가 없으므로 Bundle은 계속 `PARTIAL`이다.
 
 운영 Web 진입점은 `https://trade.mihoservice.xyz`이며, Compose gateway는 `127.0.0.1:7788`에만 바인딩됩니다. 호스트 Nginx 예시는 `deploy/host-nginx.example.conf`에 있으며 7788 포트는 인터넷에 직접 개방하지 않습니다.
 

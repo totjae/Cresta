@@ -6,7 +6,12 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agents.runtime import create_diagnostic_run, get_agent_run, list_agent_runs
+from app.agents.runtime import (
+    AgentRuntimeError,
+    create_diagnostic_run,
+    get_agent_run,
+    list_agent_runs,
+)
 from app.api.dependencies import AuthContext, get_auth_context, require_csrf
 from app.db import get_db
 from app.models import (
@@ -19,6 +24,7 @@ from app.models import (
 from app.schemas import (
     AgentDiagnosticRunRequest,
     AgentEvidenceBundleResponse,
+    AgentInvocationOutputResponse,
     AgentInvocationResponse,
     AgentRunListResponse,
     AgentRunResponse,
@@ -162,6 +168,41 @@ def get_run(
     db: Session = Depends(get_db),
 ) -> AgentRunResponse:
     return _response(db, request.state.request_id, get_agent_run(db, context.user.id, run_id))
+
+
+@router.get(
+    "/{run_id}/invocations/{invocation_id}/output",
+    response_model=AgentInvocationOutputResponse,
+)
+def get_invocation_output(
+    run_id: str,
+    invocation_id: str,
+    request: Request,
+    context: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+) -> AgentInvocationOutputResponse:
+    run = get_agent_run(db, context.user.id, run_id)
+    invocation = db.get(LlmInvocation, invocation_id)
+    stage = db.get(AgentStageRun, invocation.stage_run_id) if invocation else None
+    if invocation is None or stage is None or stage.run_id != run.id:
+        raise AgentRuntimeError("AGENT_INVOCATION_NOT_FOUND", 404)
+    return AgentInvocationOutputResponse(
+        request_id=request.state.request_id,
+        run_id=run.id,
+        stage_run_id=stage.id,
+        invocation_id=invocation.id,
+        state=invocation.state,
+        validation_status=invocation.validation_status,
+        error_code=invocation.error_code,
+        output_available=invocation.model_output_json is not None,
+        model_output=(
+            json.loads(invocation.model_output_json)
+            if invocation.model_output_json is not None
+            else None
+        ),
+        model_output_hash=invocation.model_output_hash,
+        captured_at=invocation.model_output_captured_at,
+    )
 
 
 @router.post("/diagnostic", response_model=AgentRunResponse, status_code=status.HTTP_201_CREATED)

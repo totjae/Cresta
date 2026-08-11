@@ -201,7 +201,7 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     assert body["created"] is True
     assert body["purpose"] == "DIAGNOSTIC"
     assert body["execution_stage"] == "SHADOW"
-    assert body["dag_version"] == "agent-dag-v2"
+    assert body["dag_version"] == "agent-dag-v3"
     assert body["state"] == "CREATED"
     assert body["core_action"] is None
     assert body["evidence_bundle"] is None

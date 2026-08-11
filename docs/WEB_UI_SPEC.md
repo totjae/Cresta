@@ -274,6 +274,8 @@ EMERGENCY_LIQUIDATE
 | UI-074 | 비상정지 정책 편집과 실제 비상정지 실행을 같은 토글로 합치지 않는다. |
 | UI-075 | 위험 설정 화면은 `entry_order_amount`와 1회·종목·전체 한도의 관계를 함께 표시하며 진입금액 미설정 시 신규매수 차단 영향을 미리보기로 보여준다. |
 | UI-076 | Guard 결과는 `PASSED/BLOCKED`, 평가 단계·시각, rule code의 한국어 설명, severity와 중지 범위를 표시하고 사용자가 결과를 직접 수정하지 못하게 한다. |
+| UI-077 | 전략·설정 화면은 실행 권한과 별도인 `Guard 위험 설정` 영역에서 진입금액·금액 한도·보유/진입 횟수·고정손절·시세 지연·spread·가격편차를 편집한다. |
+| UI-078 | 활성 위험 설정이 없으면 `SAFE_DEFAULT`, `entry_order_amount 미설정`과 신규매수 차단을 명확히 표시한다. 변경안은 사유 입력 후 검증하고 별도 확인에서 활성화한다. |
 
 ### 3.9 시스템 상태와 재동기화
 
@@ -411,6 +413,8 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 | UI-127 | DIAGNOSTIC DAG 버튼은 run admission 완료 즉시 다시 활성화한다. `CREATED/RUNNING` run이 있으면 1~2초 간격으로 목록을 갱신하고 stage 상태·attempt를 표시하되 HTTP 요청을 DAG 완료까지 유지하지 않는다. |
 | UI-130 | 역할별 배정은 기본 `FAIL_STOP`과 선택적 `FAILOVER`를 제공한다. `FAILOVER`일 때만 기본 모델과 다른 예비 모델 하나를 요구하고, route 이력과 Agent run 카드에 기본·예비 모델의 시도 순서·상태·오류 코드를 표시한다. |
 | UI-131 | Agent run 카드는 stage별 채택 결과(action/stance/status와 reason code), 실제 provider/model, schema 검증 상태, latency와 오류 코드를 표시한다. raw provider 응답·prompt·credential은 표시하지 않는다. |
+| UI-136 | Agent run의 각 LLM 시도에는 `구조화 응답 보기`를 제공한다. 사용자가 펼칠 때만 전용 API를 호출해 model output JSON, hash와 검증 결과를 표시하며 목록 polling payload에는 포함하지 않는다. |
+| UI-137 | 응답이 캡처되지 않은 Provider/parse 오류는 `구조화 응답 없음`으로 표시한다. UI는 raw response가 아니라 Adapter 추출 후 서버 검증 전 구조화 output임을 명시한다. |
 # Provider management revision (2026-08-07)
 
 - Provider registration selects one of 40 server catalog entries, shows unavailable authentication types as disabled, and renders template-specific configuration fields.

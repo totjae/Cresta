@@ -142,6 +142,22 @@ agent_assessment:
 | MAO-032 | `evidence_refs`는 해당 run 입력에 포함된 증거만 참조할 수 있고 존재하지 않는 출처나 URL을 생성하면 출력을 거부한다. |
 | MAO-033 | 자연어 설명은 실행에 사용하지 않는다. Core와 UI는 허용된 reason code, 점수, stance와 검증된 증거 참조만 사용한다. |
 | MAO-034 | 필수 입력이 누락되면 점수를 추정하지 않고 `INSUFFICIENT_DATA`와 null 점수를 반환한다. |
+| MAO-035 | 외부 Scout와 Core의 `reason_codes`는 서버 소유 `reason-code-policy-v1`의 역할별 allowlist만 허용한다. 허용 목록은 runtime 입력과 JSON Schema enum에 함께 포함하며 모델이나 prompt가 확장할 수 없다. |
+| MAO-036 | 서버는 Provider의 schema 성공 표시와 별개로 reason code allowlist를 다시 검사한다. 미등록 code가 하나라도 있으면 invocation을 `INVALID_OUTPUT`, validation을 `FAILED`, 오류를 `LLM_REASON_CODE_NOT_ALLOWED`로 기록하고 stage는 fail-closed 처리한다. |
+
+### 6.1 `reason-code-policy-v1`
+
+모든 Scout가 공통으로 사용할 수 있는 코드는 `DATA_SUFFICIENT`, `INPUT_DATA_MISSING`, `INPUT_DATA_STALE`, `INPUT_DATA_CONFLICTED`, `NO_VERIFIED_EVIDENCE`, `VERIFIED_EVIDENCE_AVAILABLE`이다. 여기에 역할별로 다음 코드만 추가 허용한다.
+
+| 역할 | 추가 허용 reason code |
+| --- | --- |
+| `TECHNICAL_SCOUT` | `PRICE_ABOVE_VWAP`, `PRICE_AT_VWAP`, `PRICE_BELOW_VWAP`, `SMA5_RISING`, `SMA5_FLAT`, `SMA5_FALLING`, `RELATIVE_VOLUME_HIGH`, `RELATIVE_VOLUME_NORMAL`, `RELATIVE_VOLUME_LOW`, `VOLATILITY_ELEVATED`, `VOLATILITY_NORMAL`, `DRAWDOWN_FROM_RECENT_HIGH`, `SPREAD_ACCEPTABLE`, `SPREAD_WIDE`, `MARKET_DATA_QUALITY_DEGRADED`, `INDICATOR_DATA_MISSING`, `TECHNICAL_SIGNALS_MIXED`, `MOMENTUM_SUPPORTIVE`, `MOMENTUM_WEAKENING` |
+| `NEWS_DISCLOSURE_SCOUT` | `MATERIAL_POSITIVE_DISCLOSURE`, `MATERIAL_NEGATIVE_DISCLOSURE`, `MATERIAL_NEUTRAL_DISCLOSURE`, `RECENT_POSITIVE_NEWS`, `RECENT_NEGATIVE_NEWS`, `NEWS_IMPACT_NEUTRAL`, `DISCLOSURE_AND_NEWS_CONFLICT`, `EVIDENCE_STALE`, `EVIDENCE_NOT_SYMBOL_RELEVANT`, `NEWS_DATA_INSUFFICIENT` |
+| `MARKET_SECTOR_SCOUT` | `MARKET_TREND_SUPPORTIVE`, `MARKET_TREND_NEUTRAL`, `MARKET_TREND_WEAK`, `SECTOR_MOMENTUM_SUPPORTIVE`, `SECTOR_MOMENTUM_NEUTRAL`, `SECTOR_MOMENTUM_WEAK`, `MARKET_BREADTH_POSITIVE`, `MARKET_BREADTH_NEUTRAL`, `MARKET_BREADTH_NEGATIVE`, `MARKET_RISK_OFF`, `MARKET_VOLATILITY_ELEVATED`, `MARKET_SECTOR_SIGNALS_MIXED`, `MARKET_DATA_INSUFFICIENT`, `MARKET_DATA_QUALITY_DEGRADED` |
+| `POSITION_RISK_SCOUT` | `OPEN_POSITION_NOT_FOUND`, `POSITION_DATA_STALE`, `POSITION_DATA_CONFLICTED`, `POSITION_PROFITABLE`, `POSITION_LOSING`, `DRAWDOWN_LOW`, `DRAWDOWN_MODERATE`, `DRAWDOWN_HIGH`, `FIXED_STOP_NEAR`, `FIXED_STOP_TRIGGERED`, `TRAILING_STOP_NEAR`, `TRAILING_STOP_TRIGGERED`, `BREAK_EVEN_STOP_ACTIVE`, `TIME_STOP_NEAR`, `TIME_STOP_TRIGGERED`, `LIQUIDITY_EXIT_RISK`, `POSITION_RISK_NORMAL`, `POSITION_RISK_ELEVATED`, `POSITION_RISK_CRITICAL` |
+| `CORE` | `AGENT_RUNTIME_SHADOW_ONLY`, `DIAGNOSTIC_WAIT_ONLY`, `REQUIRED_SCOUT_INCOMPLETE`, `SCOUT_SIGNALS_SUPPORTIVE`, `SCOUT_SIGNALS_NEUTRAL`, `SCOUT_SIGNALS_CAUTION`, `SCOUT_SIGNALS_CONFLICTED`, `NO_VERIFIED_EVIDENCE`, `MATERIAL_EVENT_RISK`, `MARKET_RISK_ELEVATED`, `POSITION_RISK_ELEVATED`, `POSITION_RISK_CRITICAL`, `DATA_QUALITY_INSUFFICIENT`, `HIGH_UNCERTAINTY`, `ENTRY_CONDITIONS_INCOMPLETE`, `RISK_REWARD_UNFAVORABLE` |
+
+정책 버전은 run의 route·prompt 버전과 별도로 runtime 입력에 기록한다. allowlist 변경은 새 정책 버전, 회귀시험과 SHADOW 비교를 요구하며 기존 run의 출력 의미를 소급 변경하지 않는다.
 
 ## 7. Core 종합 계약
 
@@ -153,6 +169,7 @@ agent_assessment:
 | MAO-043 | 보유 중 Scout 또는 Core 장애가 발생해도 실시간 손절·비상정지·장마감 규칙은 Guard가 독립 실행한다. |
 | MAO-044 | Core는 Scout가 참조하지 않은 새 사실, 가격, 뉴스 또는 증거를 출력 근거로 추가할 수 없다. |
 | MAO-045 | 동일 run에서 Core 모델이나 route를 fallback으로 변경하려면 활성 fallback 정책이 명시적으로 허용해야 하며 실제 경로를 기록한다. 기본 정책은 fail-closed다. |
+| MAO-046 | Core 입력에는 `reason_code_policy_version`과 Core 허용 code 목록을 포함하고 `reason_codes`는 해당 목록의 부분집합이어야 한다. `incomplete_roles` 일치 검사는 reason code 검사와 독립적으로 유지한다. |
 
 ## 8. Run 상태와 멱등성
 
@@ -231,15 +248,15 @@ app/llm/*                     Provider/Gateway 호출 계층
 5. run·stage·invocation 조회 UI
 6. 승인·주문 리소스가 0건임을 검증하는 시험
 
-### 12.1 Agent Runtime v1 고정 계약
+### 12.1 Agent Runtime v3 고정 계약
 
-이번 구현은 외부 웹·LLM을 연결하기 전 영속성·DAG·안전 경계를 검증하는 동기식 DIAGNOSTIC runtime이다.
+현재 구현은 영속성·DAG·안전 경계를 검증하는 비동기 DIAGNOSTIC runtime이며, 외부 LLM과 선택형 OpenDART PRIMARY 공시 수집을 SHADOW 경계에서만 연결한다.
 
 | ID | 요구사항 |
 | --- | --- |
-| MAO-090 | `POST /ai/agent-runs/diagnostic`은 로그인 사용자, KRX/NXT 종목, 최신 영속 market snapshot, `dag_version=agent-dag-v2`와 명시적인 role별 route ID를 입력으로 받는다. v1 진행 run은 Candidate Audit 없음으로 안전하게 마무리하되 신규 admission에는 재사용하지 않는다. |
+| MAO-090 | `POST /ai/agent-runs/diagnostic`은 로그인 사용자, KRX/NXT 종목, 최신 영속 market snapshot, `dag_version=agent-dag-v3`와 명시적인 role별 route ID를 입력으로 받는다. v1/v2 진행 run은 기존 snapshot으로 안전하게 마무리하되 신규 admission에는 재사용하지 않는다. |
 | MAO-091 | route가 필요한 역할은 `TECHNICAL_SCOUT`, `NEWS_DISCLOSURE_SCOUT`, `MARKET_SECTOR_SCOUT`, `POSITION_RISK_SCOUT`, `CORE`이다. 각 route는 요청 사용자 소유, `VALIDATED`, `SHADOW`, 해당 role 일치, 검증된 model이어야 한다. 실패 정책은 MAO-110~113의 `FAIL_STOP` 또는 단일 `FAILOVER`만 허용하며 하나라도 준비되지 않으면 run을 만들지 않는다. |
-| MAO-092 | `INTEL_COLLECTOR`는 외부 네트워크 없이 빈 fixture를 만들고 `EVIDENCE_VERIFIER`는 이를 `PARTIAL` 빈 bundle로 고정한다. 외부 정보 없음은 긍정 신호로 해석하지 않는다. |
+| MAO-092 | `INTEL_COLLECTOR`는 OpenDART가 설정되면 MAO-120~124에 따라 PRIMARY 공시를 수집하고, 비활성 상태에서는 빈 fixture를 만든다. `EVIDENCE_VERIFIER`는 두 경우 모두 다른 출처 coverage가 없으므로 `PARTIAL` bundle로 고정하며 외부 정보 없음은 긍정 신호로 해석하지 않는다. |
 | MAO-093 | 실행 순서는 Intel → Verify → 4개 Scout → Candidate Audit → Core로 고정한다. 각 Scout는 Verify 이후 실행하고 Candidate Audit은 네 Scout 이후, Core는 Audit 이후 실행한다. stage dependency를 저장해 worker가 동일 DAG를 재현할 수 있어야 한다. |
 | MAO-094 | 각 route stage는 Provider 호출 전 `RUNNING` invocation을 저장하고 완료 후 실제 provider/model, 입력·응답 hash, latency와 서버 측 schema 검증 결과를 기록한다. 외부 Adapter는 `DIAGNOSTIC/SHADOW`에서만 허용하고 도구 사용은 거부한다. |
 | MAO-095 | Technical은 최신 Watch 지표가 없으면, News는 검증된 외부 증거가 없으면, Position Risk는 열린 position이 없으면 `INSUFFICIENT_DATA`를 출력한다. Market은 정상·최신 snapshot만 평가한다. |
@@ -298,7 +315,7 @@ app/llm/*                     Provider/Gateway 호출 계층
 ### Provider 검색과 현재 시각 경계 (2026-08-11)
 
 - `MAO-075`: 현재 SHADOW 구현에서 Provider 내장 web search는 `NEWS_DISCLOSURE_SCOUT`와 `MARKET_SECTOR_SCOUT`의 명시적 role route에만 허용하며 Core에는 계속 제공하지 않는다.
-- `MAO-076`: Provider 검색 결과는 `UNTRUSTED_EXTERNAL_DATA`이며 검증된 EvidenceBundle로 자동 승격하지 않는다. Evidence 수집 Adapter가 구현되기 전에는 주문·승인 근거가 될 수 없다.
+- `MAO-076`: Provider 검색 결과는 `UNTRUSTED_EXTERNAL_DATA`이며 검증된 EvidenceBundle로 자동 승격하지 않는다. OpenDART처럼 독립 source Adapter의 검증 정책을 통과하지 않은 Provider citation은 주문·승인 근거가 될 수 없다.
 - `MAO-077`: 각 LLM invocation은 UTC와 Asia/Seoul 현재 시각을 서버 소유 runtime context로 받으며 해당 시각은 invocation 이력에 저장한다.
 
 ### 역할 비종속 Provider 출처 수집 경계 (2026-08-11)
@@ -311,3 +328,8 @@ app/llm/*                     Provider/Gateway 호출 계층
 - `MAO-087`: 후보 감사 출력은 후보 ID, 총개수, Provider별 개수와 `NO_PROVIDER_SOURCE_CANDIDATES` 또는 `UNRATED_SOURCE_CANDIDATES_PRESENT` reason code만 포함한다. URL 원문과 모델 응답 원문은 Core 입력에 전달하지 않는다.
 - `MAO-088`: Candidate Auditor는 기존 불변 EvidenceBundle을 수정하거나 후보를 `PRIMARY`, `SECONDARY`, `VERIFIED`로 승격하지 않는다. Core에는 후보 감사 ref·개수·reason code만 전달하며 후보 ID는 `evidence_refs`로 취급하지 않는다.
 - `MAO-089`: EvidenceBundle이 `VERIFIED`가 아닌 run은 모든 stage가 기술적으로 성공해도 최종 상태를 `PARTIAL`로 유지한다. 출처별 수집·검증 정책이 구현되기 전에는 후보 존재만으로 완전한 판단이 되지 않는다.
+- `MAO-120`: `agent-dag-v3`의 `INTEL_COLLECTOR`는 OpenDART가 설정된 경우 공식 `corpCode.xml`에서 6자리 종목코드를 8자리 고유번호로 해석·24시간 메모리 캐시한 뒤 `list.json`을 해당 회사로 제한한다. KST 실행일을 끝 날짜로 최근 3일을 조회하고 응답의 `stock_code`가 run 종목코드와 정확히 같은 공시만 채택한다.
+- `MAO-121`: OpenDART `status=000`은 성공, `013`은 정상적인 빈 결과다. 인증·IP·한도·점검·형식 오류, HTTP 오류, timeout, 설정된 최대 page 초과는 안정적인 `DART_*` 오류로 INTEL stage를 fail-closed 처리하며 빈 성공으로 바꾸지 않는다.
+- `MAO-122`: 채택한 공시는 접수번호 14자리, 고유번호 8자리, 종목코드 6자리와 접수일을 검증하고 공식 DART viewer URL, 안전한 필드, 수신시각과 canonical hash만 `DART_DISCLOSURE/PRIMARY` EvidenceItem으로 저장한다. API key와 원문 응답은 DB·로그·hash에 저장하지 않는다.
+- `MAO-123`: DART 수집이 성공해도 뉴스·거래소·기업 IR coverage가 없으므로 v1 Bundle은 `PARTIAL`을 유지한다. 검증된 DART evidence ID는 Scout allowlist에 포함하되 DART 빈 결과는 `DART_QUERY_COMPLETE_NO_MATCHES`로 구분한다.
+- `MAO-124`: DART 활성 여부·설정 상태·source policy version은 run input hash에 포함한다. 같은 snapshot이라도 source 설정이 바뀌면 과거 run을 재사용하지 않는다.

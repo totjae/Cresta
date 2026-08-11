@@ -20,6 +20,8 @@ from app.models import (
     User,
     WatchlistItem,
 )
+from app.risk_policy import active_risk_policy, risk_policy_payload
+from app.schemas import RiskPolicyPayload
 
 ACCOUNT_ALIAS = "KIWOOM_MOCK_PRIMARY"
 NO_ACTIONS = {"WAIT", "REJECT", "RISK_BLOCK", "HOLD"}
@@ -41,8 +43,16 @@ def _mode_for(action: str, policy: object) -> str:
     return str(getattr(policy, field)) if field else "DISABLED"
 
 
-def _key(decision: Decision, action: str, policy_version_id: str | None) -> str:
-    raw = f"{decision.id}:{action}:{policy_version_id or 'SAFE_DEFAULT'}"
+def _key(
+    decision: Decision,
+    action: str,
+    policy_version_id: str | None,
+    risk_policy_version_id: str | None,
+) -> str:
+    raw = (
+        f"{decision.id}:{action}:{policy_version_id or 'SAFE_DEFAULT'}:"
+        f"{risk_policy_version_id or 'SAFE_RISK_DEFAULT'}"
+    )
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -51,7 +61,12 @@ def _rule(code: str, passed: bool) -> dict[str, object]:
 
 
 def _buy_guard_rules(
-    db: Session, decision: Decision, user: User, settings: Settings, now: datetime
+    db: Session,
+    decision: Decision,
+    user: User,
+    settings: Settings,
+    risk_policy: RiskPolicyPayload,
+    now: datetime,
 ) -> list[dict[str, object]]:
     snapshot = db.get(MarketSnapshot, decision.input_snapshot_id)
     stream = db.get(MarketStreamState, (decision.market, decision.symbol))
@@ -69,7 +84,8 @@ def _buy_guard_rules(
         and stream.current_snapshot_id == snapshot.id
         and snapshot.quality == "NORMAL"
         and stream.quality == "NORMAL"
-        and (now - _utc(snapshot.received_at)).total_seconds() <= settings.quote_stale_seconds
+        and (now - _utc(snapshot.received_at)).total_seconds()
+        <= risk_policy.quote_stale_seconds
     )
     return [
         _rule("ENVIRONMENT_NOT_MOCK", settings.environment.upper() == "MOCK"),
@@ -78,8 +94,10 @@ def _buy_guard_rules(
         _rule("MARKET_DATA_STALE", fresh),
         _rule("SYMBOL_NOT_WATCHED", watched is not None),
         _rule("BROKER_NOT_READY", gate is not None and gate.status == "READY"),
-        # Risk configuration is deliberately absent in this vertical slice.
-        _rule("ORDER_SIZE_NOT_CONFIGURED", False),
+        _rule(
+            "ORDER_SIZE_NOT_CONFIGURED",
+            risk_policy.entry_order_amount is not None,
+        ),
     ]
 
 
@@ -99,10 +117,17 @@ def route_trading_decision(
     current = now or datetime.now(UTC)
     config = active_policy(db, user.id)
     policy = policy_payload(config)
+    risk_config = active_risk_policy(db, user.id)
+    risk_policy = risk_policy_payload(risk_config)
     action = decision.action
     normalized_action = "NO_ACTION" if action in NO_ACTIONS else action
     mode = _mode_for(action, policy)
-    execution_key = _key(decision, normalized_action, config.id if config else None)
+    execution_key = _key(
+        decision,
+        normalized_action,
+        config.id if config else None,
+        risk_config.id if risk_config else None,
+    )
     existing = db.scalar(
         select(DecisionExecution).where(DecisionExecution.execution_key == execution_key)
     )
@@ -121,6 +146,7 @@ def route_trading_decision(
         stage=settings.execution_stage,
         state="ROUTING",
         execution_policy_version_id=config.id if config else None,
+        risk_policy_version_id=risk_config.id if risk_config else None,
         correlation_id=correlation_id,
     )
     db.add(execution)
@@ -137,7 +163,7 @@ def route_trading_decision(
         if action not in SUPPORTED_ACTIONS:
             rules = [_rule("ACTION_NOT_IMPLEMENTED", False)]
         elif action == "BUY":
-            rules = _buy_guard_rules(db, decision, user, settings, current)
+            rules = _buy_guard_rules(db, decision, user, settings, risk_policy, current)
         else:
             rules = [_rule("ACTION_NOT_IMPLEMENTED", False)]
         blocked = [item for item in rules if item["result"] == "BLOCKED"]
@@ -151,6 +177,7 @@ def route_trading_decision(
             halt_scope="ENTRY_HALT" if blocked and action == "BUY" else None,
             snapshot_id=decision.input_snapshot_id,
             execution_policy_version_id=config.id if config else None,
+            risk_policy_version_id=risk_config.id if risk_config else None,
             evaluated_at=current,
             valid_until=decision.valid_until,
         )

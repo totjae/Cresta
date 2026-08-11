@@ -333,6 +333,35 @@ Docker Compose에서 API 또는 Frontend 컨테이너만 재생성하면 고정 
 | OPS-074 | provider profile·route·prompt·schema 변경 배포는 SHADOW rollback 경로와 이전 ACTIVE version을 보존하고 진행 중 Core run의 model을 중간에 변경하지 않는다. |
 | OPS-075 | LLM 장애 대응은 신규 AI 매수 판단을 중지하되 Broker worker·재동기화·실시간 Guard를 재시작하거나 중단시키지 않는다. |
 | OPS-076 | `backend/app/agents`, 공통 LLM Adapter 또는 Agent migration 변경 배포는 `api`, `scheduler`뿐 아니라 Compose `agent` 이미지를 반드시 build·recreate한다. 배포 후 `agent` 컨테이너의 source marker와 신규 DAG stage 수를 확인한다. |
+| OPS-077 | OpenDART는 선택형 `deploy/compose.dart.yaml`로만 활성화한다. `secrets/dart_api_key`가 없거나 유효하지 않으면 기본 Compose는 계속 기동하되 DART 활성 run은 생성·수집하지 않는다. |
+
+### 4.2 OpenDART 공시 수집 활성화
+
+공식 OpenDART에서 발급한 40자리 키를 `/home/totquf4171/cresta/secrets/dart_api_key`에 저장한다. 값은 터미널 출력, Git, 문서 또는 채팅에 남기지 않는다. `vi`로 저장한 뒤 다음과 같이 권한만 적용·확인한다.
+
+```bash
+cd /home/totquf4171/cresta
+sudo deploy/prepare-secrets.sh
+sudo stat -c '%u:%g %a %s-byte %n' secrets/dart_api_key
+```
+
+정상 기대값은 `10001:10001 400 41-byte`이며 마지막 1 byte는 줄바꿈일 수 있다. 활성 배포에는 기본·키움·DART Compose 파일을 모두 사용한다.
+
+```bash
+sudo docker compose \
+  -f deploy/compose.yaml \
+  -f deploy/compose.kiwoom.yaml \
+  -f deploy/compose.dart.yaml \
+  build api agent
+
+sudo docker compose \
+  -f deploy/compose.yaml \
+  -f deploy/compose.kiwoom.yaml \
+  -f deploy/compose.dart.yaml \
+  up -d --force-recreate api agent nginx
+```
+
+새 DIAGNOSTIC run의 `INTEL_COLLECTOR`가 `source_mode=OPENDART_PRIMARY`, `source_policy_version=opendart-list-v1`을 기록하면 활성화된 것이다. 공시가 없으면 `DART_QUERY_COMPLETE_NO_MATCHES`, 있으면 Bundle에 `DART_PRIMARY_EVIDENCE_VERIFIED`와 `DART_DISCLOSURE/PRIMARY` evidence ID가 나타난다. Bundle은 다른 출처 coverage가 없으므로 계속 `PARTIAL`이다. `DART_STATUS_010/011/012/020`, `DART_TIMED_OUT`, `DART_PROVIDER_ERROR`가 발생하면 키·출구 IP·호출 한도·네트워크를 확인하고 빈 성공으로 우회하지 않는다.
 
 ## 5. 검증·인수 조건
 

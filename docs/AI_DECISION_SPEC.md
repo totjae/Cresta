@@ -228,3 +228,5 @@ core_output:
 | AI-097 | 모델과 Gateway가 반환한 실제 provider/model, request ID, 사용량, 지연, 비용과 fallback 경로를 비밀 제거 후 기록한다. |
 | AI-098 | 복수 Scout의 confidence 평균이나 다수결만으로 행동을 정하지 않으며 Guard 우선순위와 기존 Core 행동 계약을 유지한다. |
 | AI-099 | 외부 LLM이 비활성 또는 장애여도 결정론적 Mock·Guard·Broker의 현재 검증 경계를 깨지 않고 명시된 SHADOW/실패 상태를 기록한다. |
+| AI-100 | 외부 Scout와 Core는 서버가 주입한 versioned 역할별 reason code allowlist만 출력할 수 있다. Provider의 structured output 성공 여부와 별도로 서버가 부분집합을 검사하며 미등록 code는 판단 근거로 저장하지 않는다. |
+| AI-101 | OpenDART PRIMARY evidence는 공시 존재와 메타데이터의 검증 근거일 뿐 긍정·부정 방향을 규칙으로 추정하지 않는다. 방향 평가는 NEWS_DISCLOSURE_SCOUT가 허용 evidence를 사용해 수행한다. |

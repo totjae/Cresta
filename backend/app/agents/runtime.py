@@ -16,6 +16,12 @@ from app.agents.contracts import (
     AgentCoreModelOutput,
     AgentScoutModelOutput,
 )
+from app.agents.reason_codes import (
+    REASON_CODE_POLICY_VERSION,
+    invalid_reason_codes,
+    output_schema_for_role,
+    reason_code_context,
+)
 from app.config import get_settings
 from app.llm.contracts import LlmRequest
 from app.llm.discovery import get_template
@@ -37,14 +43,25 @@ from app.models import (
     User,
 )
 
-DAG_VERSION = "agent-dag-v2"
-EVIDENCE_POLICY_VERSION = "fixture-none-v1"
+DAG_VERSION = "agent-dag-v3"
+EVIDENCE_POLICY_VERSION = "opendart-primary-v1"
 ROUTE_ROLES = (
     "TECHNICAL_SCOUT",
     "NEWS_DISCLOSURE_SCOUT",
     "MARKET_SECTOR_SCOUT",
     "POSITION_RISK_SCOUT",
     "CORE",
+)
+MAX_MODEL_OUTPUT_BYTES = 64 * 1024
+SENSITIVE_MODEL_OUTPUT_KEY_PARTS = (
+    "api_key",
+    "authorization",
+    "credential",
+    "password",
+    "secret",
+    "totp",
+    "access_token",
+    "refresh_token",
 )
 STAGES = (
     ("INTEL_COLLECTOR", 10, ()),
@@ -106,6 +123,19 @@ def _canonical(value: object) -> str:
 
 def _hash(value: object) -> str:
     return hashlib.sha256(_canonical(value).encode()).hexdigest()
+
+
+def _contains_sensitive_output_key(value: object) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if any(part in normalized for part in SENSITIVE_MODEL_OUTPUT_KEY_PARTS):
+                return True
+            if _contains_sensitive_output_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_sensitive_output_key(item) for item in value)
+    return False
 
 
 def _candidate_timestamp(value: str | None) -> datetime | None:
@@ -317,6 +347,7 @@ def _invoke_once(
     role_input: dict[str, object],
     now: datetime,
 ) -> InvocationOutcome | None:
+    effective_role_input = {**role_input, **reason_code_context(stage.role)}
     stage.state = "RUNNING"
     stage.started_at = now
     invocation = LlmInvocation(
@@ -373,11 +404,12 @@ def _invoke_once(
                         if stage.role != "CORE"
                         else "Use only the supplied Scout results and verified evidence references."
                     ),
+                    "Use only reason codes listed in allowed_reason_codes.",
                 ]
             ),
         }
     )
-    messages.append({"role": "user", "content": _canonical(role_input)})
+    messages.append({"role": "user", "content": _canonical(effective_role_input)})
     request = LlmRequest(
         invocation_id=invocation.id,
         role=stage.role,
@@ -386,11 +418,7 @@ def _invoke_once(
         input_schema_version="agent-runtime-input-v1",
         input_hash=stage.input_hash,
         messages=messages,
-        output_json_schema=(
-            AgentCoreModelOutput.model_json_schema()
-            if stage.role == "CORE"
-            else AgentScoutModelOutput.model_json_schema()
-        ),
+        output_json_schema=output_schema_for_role(stage.role),
         timeout_ms=binding.route.timeout_ms,
         service_tier=binding.route.service_tier,
         max_output_tokens=binding.route.max_output_tokens_override or model.max_output_tokens,
@@ -461,6 +489,21 @@ def _invoke_once(
     )
     invocation.validation_status = result.schema_validation
     invocation.completed_at = datetime.now(UTC)
+    if result.output_json is not None:
+        if _contains_sensitive_output_key(result.output_json):
+            invocation.state = "INVALID_OUTPUT"
+            invocation.validation_status = "FAILED"
+            invocation.error_code = "LLM_MODEL_OUTPUT_SENSITIVE_FIELD"
+            return None
+        model_output_json = _canonical(result.output_json)
+        if len(model_output_json.encode("utf-8")) > MAX_MODEL_OUTPUT_BYTES:
+            invocation.state = "INVALID_OUTPUT"
+            invocation.validation_status = "FAILED"
+            invocation.error_code = "LLM_MODEL_OUTPUT_TOO_LARGE"
+            return None
+        invocation.model_output_json = model_output_json
+        invocation.model_output_hash = hashlib.sha256(model_output_json.encode()).hexdigest()
+        invocation.model_output_captured_at = invocation.completed_at
     if binding.route.web_search_enabled:
         _persist_source_candidates(
             db,
@@ -476,6 +519,11 @@ def _invoke_once(
         try:
             if stage.role == "CORE":
                 output = AgentCoreModelOutput.model_validate(result.output_json)
+                if invalid_reason_codes(stage.role, output.reason_codes):
+                    invocation.state = "INVALID_OUTPUT"
+                    invocation.validation_status = "FAILED"
+                    invocation.error_code = "LLM_REASON_CODE_NOT_ALLOWED"
+                    return None
                 expected_incomplete = sorted(
                     str(item)
                     for item in role_input.get("required_incomplete_roles", [])
@@ -487,6 +535,11 @@ def _invoke_once(
                     return None
             else:
                 output = AgentScoutModelOutput.model_validate(result.output_json)
+                if invalid_reason_codes(stage.role, output.reason_codes):
+                    invocation.state = "INVALID_OUTPUT"
+                    invocation.validation_status = "FAILED"
+                    invocation.error_code = "LLM_REASON_CODE_NOT_ALLOWED"
+                    return None
                 allowed_refs = {
                     str(item) for item in role_input.get("allowed_evidence_refs", [])
                 }
@@ -568,7 +621,7 @@ def _assessment(
                 stance="UNKNOWN",
                 confidence=0,
                 uncertainty=1,
-                reason_codes=["INDICATOR_SNAPSHOT_MISSING"],
+                reason_codes=["INDICATOR_DATA_MISSING"],
                 evidence_refs=[],
             )
         supportive = indicator.price_vs_vwap_pct is not None and indicator.price_vs_vwap_pct >= 0
@@ -580,7 +633,7 @@ def _assessment(
             exit_risk_score=30 if supportive else 60,
             confidence=0.7,
             uncertainty=0.3,
-            reason_codes=["PRICE_AT_OR_ABOVE_VWAP" if supportive else "PRICE_BELOW_VWAP"],
+            reason_codes=["PRICE_ABOVE_VWAP" if supportive else "PRICE_BELOW_VWAP"],
             evidence_refs=[],
         )
     if role == "NEWS_DISCLOSURE_SCOUT":
@@ -590,7 +643,7 @@ def _assessment(
             stance="UNKNOWN",
             confidence=0,
             uncertainty=1,
-            reason_codes=["NO_EXTERNAL_EVIDENCE_FIXTURE"],
+            reason_codes=["NO_VERIFIED_EVIDENCE"],
             evidence_refs=[],
         )
     if role == "MARKET_SECTOR_SCOUT":
@@ -603,7 +656,11 @@ def _assessment(
             exit_risk_score=50 if normal else None,
             confidence=0.5 if normal else 0,
             uncertainty=0.5 if normal else 1,
-            reason_codes=["MARKET_SNAPSHOT_NORMAL" if normal else "MARKET_SNAPSHOT_DEGRADED"],
+            reason_codes=[
+                "MARKET_TREND_NEUTRAL"
+                if normal
+                else "MARKET_DATA_QUALITY_DEGRADED"
+            ],
             evidence_refs=[],
         )
     if position is None:
@@ -623,7 +680,7 @@ def _assessment(
         exit_risk_score=50,
         confidence=0.5,
         uncertainty=0.5,
-        reason_codes=["OPEN_POSITION_PRESENT"],
+        reason_codes=["POSITION_RISK_NORMAL"],
         evidence_refs=[],
     )
 
@@ -638,6 +695,9 @@ def create_diagnostic_run(
     now: datetime | None = None,
 ) -> tuple[AgentRun, bool]:
     observed = now or datetime.now(UTC)
+    settings = get_settings()
+    if settings.dart_enabled and settings.dart_configuration_status() != "CONFIGURED":
+        raise AgentRuntimeError("AGENT_DART_NOT_CONFIGURED", 409)
     snapshot = _snapshot(db, market, symbol)
     bindings = _load_routes(db, owner_id=user.id, route_ids=route_ids)
     route_versions = {
@@ -691,6 +751,11 @@ def create_diagnostic_run(
         "market_snapshot_id": snapshot.id,
         "payload_hash": snapshot.payload_hash,
         "dag_version": DAG_VERSION,
+        "reason_code_policy_version": REASON_CODE_POLICY_VERSION,
+        "evidence_source_policy": {
+            "version": EVIDENCE_POLICY_VERSION,
+            "dart_status": settings.dart_configuration_status(),
+        },
         "route_versions": route_versions,
     }
     input_hash = _hash(input_record)

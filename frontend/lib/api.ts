@@ -31,6 +31,33 @@ export type ExecutionPolicyVersion = {
   validated_at: string | null;
   activated_at: string | null;
 };
+export type RiskPolicy = {
+  entry_order_amount: number | null;
+  max_single_order_amount: number;
+  max_position_amount_per_symbol: number;
+  max_total_position_amount: number;
+  max_open_positions: number;
+  max_daily_entries: number;
+  fixed_stop_loss_pct: string;
+  quote_stale_seconds: number;
+  max_spread_pct: string;
+  max_price_deviation_pct: string;
+};
+export type RiskPolicyCurrent = {
+  active_version_id: string | null;
+  source: "SAFE_DEFAULT" | "USER_DEFAULT";
+  policy: RiskPolicy;
+};
+export type RiskPolicyVersion = {
+  version_id: string;
+  sequence: number;
+  state: string;
+  policy: RiskPolicy;
+  reason: string;
+  created_at: string;
+  validated_at: string | null;
+  activated_at: string | null;
+};
 export type DecisionData = {
   decision_id: string;
   purpose: "DIAGNOSTIC" | "TRADING";
@@ -82,6 +109,21 @@ export type AgentInvocationData = {
   runtime_context_at: string | null;
   web_search_enabled: boolean;
   created_at: string;
+};
+
+export type AgentInvocationOutputData = {
+  schema_version: "1.0";
+  request_id: string;
+  run_id: string;
+  stage_run_id: string;
+  invocation_id: string;
+  state: string;
+  validation_status: string;
+  error_code: string | null;
+  output_available: boolean;
+  model_output: Record<string, unknown> | null;
+  model_output_hash: string | null;
+  captured_at: string | null;
 };
 
 export type AgentStageData = {
@@ -518,6 +560,26 @@ export const settingsApi = {
       body: JSON.stringify({ schema_version: "1.0" }),
     });
   },
+  riskPolicy(signal?: AbortSignal) {
+    return request<RiskPolicyCurrent>("/api/v1/settings/risk-policy", { signal });
+  },
+  createRiskDraft(csrfToken: string, policy: RiskPolicy, reason: string) {
+    return request<RiskPolicyVersion>("/api/v1/settings/risk-policy/drafts", {
+      method: "POST", headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({ schema_version: "1.0", policy, reason }),
+    });
+  },
+  validateRisk(csrfToken: string, versionId: string) {
+    return request<RiskPolicyVersion>(`/api/v1/settings/risk-policy/${encodeURIComponent(versionId)}/validate`, {
+      method: "POST", headers: { "X-CSRF-Token": csrfToken },
+    });
+  },
+  activateRisk(csrfToken: string, versionId: string) {
+    return request<RiskPolicyVersion>(`/api/v1/settings/risk-policy/${encodeURIComponent(versionId)}/activate`, {
+      method: "POST", headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({ schema_version: "1.0" }),
+    });
+  },
 };
 
 export const llmApi = {
@@ -821,6 +883,12 @@ export const agentApi = {
         route_ids: routeIds,
       }),
     });
+  },
+  invocationOutput(runId: string, invocationId: string, signal?: AbortSignal) {
+    return request<AgentInvocationOutputData>(
+      `/api/v1/ai/agent-runs/${encodeURIComponent(runId)}/invocations/${encodeURIComponent(invocationId)}/output`,
+      { signal },
+    );
   },
 };
 

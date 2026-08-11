@@ -39,6 +39,7 @@
 | GET/POST | `/watchlist` | 감시 종목 조회/등록 |
 | DELETE | `/watchlist/{id}` | 감시 해제 |
 | GET/PATCH | `/settings/execution-policy` | 행동별 자동·승인·비활성 정책 조회/수정 |
+| GET/POST | `/settings/risk-policy*` | Guard 사용자 기본 위험 설정 조회·초안·검증·활성화·이력 |
 | GET/PATCH | `/settings/execution-stage` | SHADOW·승인형·MOCK 자동 실행 단계 조회/변경 |
 | GET/PATCH | `/settings/trading-session` | 감시·분석·신규매수·장 마감 시간 조회/수정 |
 | GET/PATCH | `/settings/overnight-policy` | 익일 보유 정책 조회/수정 |
@@ -245,6 +246,8 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | ID | 요구사항 |
 | --- | --- |
 | API-043 | 실행 권한은 `GET /settings/execution-policy`, `POST /settings/execution-policy/drafts`, `POST /settings/execution-policy/{id}/validate`, `POST /settings/execution-policy/{id}/activate`, `GET /settings/execution-policy/history`로 관리한다. |
+| API-044 | 위험 설정은 `GET /settings/risk-policy`, `POST /settings/risk-policy/drafts`, `POST /settings/risk-policy/{id}/validate`, `POST /settings/risk-policy/{id}/activate`, `GET /settings/risk-policy/history`로 관리한다. write 요청은 로그인 세션·CSRF를 요구한다. |
+| API-045 | 활성 위험 설정이 없으면 조회는 `source=SAFE_DEFAULT`, `active_version_id=null`, `entry_order_amount=null`을 반환한다. 검증·활성화 응답은 version ID·sequence·state·정규화 policy·reason·시각을 반환한다. |
 | API-044 | 실행 권한 활성화 요청은 CSRF, 공백이 아닌 변경 사유, 대상 버전에 결합된 TOTP 재인증 증명을 요구한다. |
 | API-045 | API는 활성 버전이 없을 때 안전 기본값과 `active_version_id=null`을 반환하며 이를 영속 활성화로 표현하지 않는다. |
 
@@ -329,6 +332,9 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-143 | `POST /api/v1/ai/agent-runs/diagnostic`은 비동기 admission API다. 신규 run은 `CREATED`와 8개 `PENDING` stage를 반환하며 동일 멱등 입력은 기존 run을 반환한다. 내부 `EVIDENCE_CANDIDATE_AUDITOR`는 외부 invocation 없이 Scout 이후 Core 전에 실행한다. |
 | API-144 | Agent run 조회 응답은 stage별 `attempt_count`, `max_attempts`, `fencing_token`, `lease_expires_at`, `timeout_at`을 포함하되 worker owner 식별자는 노출하지 않는다. |
 | API-145 | role route 생성은 `failure_policy=FAIL_STOP|FAILOVER`와 선택적 `fallback_model_profile_id`를 받는다. `FAILOVER`는 기본 모델과 다른 검증 모델 하나를 요구하며 run 조회는 stage의 기본·예비 invocation을 시도 순서, 실제 모델, 상태와 안전한 오류 코드로 반환한다. |
+| API-146 | Agent runtime은 역할별 JSON Schema의 `reason_codes.items`를 현재 reason code 정책 enum으로 제한하고 같은 목록과 정책 버전을 구조화 입력에 제공한다. 미등록 code는 안전한 `LLM_REASON_CODE_NOT_ALLOWED`로 조회할 수 있다. |
+| API-147 | 인증된 run 소유자는 `GET /api/v1/ai/agent-runs/{run_id}/invocations/{invocation_id}/output`으로 해당 invocation의 캡처된 구조화 model output과 hash·검증 상태를 조회한다. 목록 API에는 output을 포함하지 않는다. |
+| API-148 | model output이 없거나 금지·크기 초과로 폐기된 경우 output 조회는 `output_available=false`와 안전한 상태·오류만 반환하며 Provider 원문이나 prompt로 대체하지 않는다. |
 
 Foundation v1의 기존 수동 profile API와 역할 배정 API는 호환을 위해 유지한다. 간편 등록 단계에서는 공식 OpenAI·Anthropic·Gemini 카탈로그, TOTP 결합 등록, 실제 모델 발견·재동기화와 모델 사용/사용 안 함 API를 추가했다. 일반 단일 route `/activate`와 외부 Agent runtime 활성화는 아직 제공하지 않는다.
 

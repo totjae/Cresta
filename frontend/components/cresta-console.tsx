@@ -30,6 +30,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   agentApi,
+  AgentInvocationOutputData,
   AgentRunData,
   AgentStageData,
   authApi,
@@ -50,6 +51,7 @@ import {
   OrderSummary,
   positionApi,
   PositionSummary,
+  RiskPolicy,
   SessionData,
   settingsApi,
   systemApi,
@@ -406,6 +408,96 @@ const executionActions: Array<[keyof ExecutionPolicy, string, string]> = [
   ["emergency_exit", "긴급 청산", "Guard 긴급 위험 청산"],
 ];
 
+function RiskPolicyPanel({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {
+  const [policy, setPolicy] = useState<RiskPolicy | null>(null);
+  const [source, setSource] = useState("");
+  const [activeVersion, setActiveVersion] = useState<string | null>(null);
+  const [pendingVersion, setPendingVersion] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const loadPolicy = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const result = await settingsApi.riskPolicy(signal);
+      setPolicy(result.policy);
+      setSource(result.source);
+      setActiveVersion(result.active_version_id);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("Guard 위험 설정을 불러오지 못했습니다.");
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadPolicy(controller.signal);
+    return () => controller.abort();
+  }, [loadPolicy]);
+
+  function setNumber<K extends keyof RiskPolicy>(key: K, value: string, nullable = false) {
+    if (!policy) return;
+    setPolicy({ ...policy, [key]: value === "" && nullable ? null : Number(value) });
+  }
+
+  function setDecimal(key: "fixed_stop_loss_pct" | "max_spread_pct" | "max_price_deviation_pct", value: string) {
+    if (policy) setPolicy({ ...policy, [key]: value });
+  }
+
+  async function validateChanges(event: FormEvent) {
+    event.preventDefault();
+    if (!policy) return;
+    setBusy(true); setMessage("");
+    try {
+      const draft = await settingsApi.createRiskDraft(session.csrf_token, policy, reason);
+      const validated = await settingsApi.validateRisk(session.csrf_token, draft.version_id);
+      setPendingVersion(validated.version_id);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("위험 설정을 검증하지 못했습니다. 금액 순서와 허용 범위를 확인해 주세요.");
+    } finally { setBusy(false); }
+  }
+
+  async function activate(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setMessage("");
+    try {
+      await settingsApi.activateRisk(session.csrf_token, pendingVersion);
+      setPendingVersion(""); setReason("");
+      await loadPolicy();
+      setMessage("Guard 위험 설정이 새 활성 버전으로 적용되었습니다.");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("위험 설정을 활성화하지 못했습니다. 버전 충돌을 확인해 주세요.");
+    } finally { setBusy(false); }
+  }
+
+  return <section className="panel execution-policy-panel" aria-labelledby="risk-policy-title">
+    <div className="panel-head"><div><ShieldCheck size={18} /><span id="risk-policy-title">Guard 위험 설정</span></div><span className={`status-pill ${source === "USER_DEFAULT" ? "ok" : "neutral"}`}>{source || "LOADING"}</span></div>
+    <div className="policy-version-note">활성 버전: <b className="mono">{activeVersion ?? "안전 기본값 · 미저장"}</b></div>
+    {source === "SAFE_DEFAULT" && <div className="console-alert decision-warning" role="note"><CircleAlert size={17} /> 진입금액 미설정 · 위험 설정을 활성화하기 전에는 신규매수가 차단됩니다.</div>}
+    {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
+    {policy && <form onSubmit={validateChanges}>
+      <div className="risk-policy-grid">
+        <label>신규진입 목표금액<input aria-label="신규진입 목표금액" type="number" min="10000" max="100000000" step="10000" value={policy.entry_order_amount ?? ""} onChange={(event) => setNumber("entry_order_amount", event.target.value, true)} placeholder="필수 설정" required /></label>
+        <label>1회 최대 주문금액<input aria-label="1회 최대 주문금액" type="number" min="10000" max="100000000" step="10000" value={policy.max_single_order_amount} onChange={(event) => setNumber("max_single_order_amount", event.target.value)} required /></label>
+        <label>종목당 최대 투자금<input aria-label="종목당 최대 투자금" type="number" min="10000" max="100000000" step="10000" value={policy.max_position_amount_per_symbol} onChange={(event) => setNumber("max_position_amount_per_symbol", event.target.value)} required /></label>
+        <label>전체 최대 투자금<input aria-label="전체 최대 투자금" type="number" min="10000" max="100000000" step="10000" value={policy.max_total_position_amount} onChange={(event) => setNumber("max_total_position_amount", event.target.value)} required /></label>
+        <label>최대 동시 보유종목<input aria-label="최대 동시 보유종목" type="number" min="1" max="3" value={policy.max_open_positions} onChange={(event) => setNumber("max_open_positions", event.target.value)} required /></label>
+        <label>일일 최대 신규진입<input aria-label="일일 최대 신규진입" type="number" min="1" max="20" value={policy.max_daily_entries} onChange={(event) => setNumber("max_daily_entries", event.target.value)} required /></label>
+        <label>고정 손절률 (%)<input aria-label="고정 손절률" type="number" min="-20" max="-0.1" step="0.1" value={policy.fixed_stop_loss_pct} onChange={(event) => setDecimal("fixed_stop_loss_pct", event.target.value)} required /></label>
+        <label>시세 지연 한도 (초)<input aria-label="시세 지연 한도" type="number" min="1" max="30" value={policy.quote_stale_seconds} onChange={(event) => setNumber("quote_stale_seconds", event.target.value)} required /></label>
+        <label>최대 spread (%)<input aria-label="최대 spread" type="number" min="0.01" max="5" step="0.01" value={policy.max_spread_pct} onChange={(event) => setDecimal("max_spread_pct", event.target.value)} required /></label>
+        <label>최대 가격편차 (%)<input aria-label="최대 가격편차" type="number" min="0.01" max="5" step="0.01" value={policy.max_price_deviation_pct} onChange={(event) => setDecimal("max_price_deviation_pct", event.target.value)} required /></label>
+      </div>
+      <label className="reason-field" htmlFor="risk-policy-reason">위험 설정 변경 사유<input id="risk-policy-reason" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required placeholder="위험 설정을 변경하는 이유" /></label>
+      <button className="primary-button" disabled={busy || !reason.trim()}>{busy ? "검증 중" : "위험 설정 검증"}</button>
+    </form>}
+    {pendingVersion && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="risk-confirm-title"><span className="section-kicker">RISK SETTING CONFIRMATION</span><h2 id="risk-confirm-title">Guard 위험 설정 활성화</h2><p>검증된 사용자 기본 위험 설정을 활성화합니다. 종목별 재정의와 현재 포지션 영향 미리보기는 아직 지원하지 않습니다.</p><form onSubmit={activate}><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setPendingVersion("")} disabled={busy}>취소</button><button type="submit" className="primary-button" disabled={busy}>{busy ? "적용 중" : "활성화"}</button></div></form></section></div>}
+  </section>;
+}
+
 function SettingsPage({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {
   const [policy, setPolicy] = useState<ExecutionPolicy | null>(null);
   const [source, setSource] = useState("");
@@ -468,6 +560,7 @@ function SettingsPage({ session, onSessionExpired }: { session: SessionData; onS
         <button className="primary-button" disabled={busy || !reason.trim()}>{busy ? "검증 중" : "변경안 검증"}</button>
       </form>}
     </section>
+    <RiskPolicyPanel session={session} onSessionExpired={onSessionExpired} />
     <LlmFoundationPanel session={session} onSessionExpired={onSessionExpired} />
     {pendingVersion && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="policy-confirm-title"><span className="section-kicker">SETTING CONFIRMATION</span><h2 id="policy-confirm-title">실행 권한 활성화</h2><p>검증된 버전을 운영 설정에 적용합니다. 활성화 전 선택한 실행 모드를 다시 확인해 주세요.</p><form onSubmit={activate}><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setPendingVersion("")} disabled={busy}>취소</button><button type="submit" className="primary-button" disabled={busy}>{busy ? "적용 중" : "활성화"}</button></div></form></section></div>}
   </>;
@@ -836,6 +929,9 @@ function AgentRuntimePanel({
   const [market, setMarket] = useState<"KRX" | "NXT">("KRX");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [invocationOutputs, setInvocationOutputs] = useState<Record<string, AgentInvocationOutputData>>({});
+  const [outputErrors, setOutputErrors] = useState<Record<string, string>>({});
+  const [outputLoadingId, setOutputLoadingId] = useState<string | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -885,6 +981,24 @@ function AgentRuntimePanel({
     } finally { setBusy(false); }
   }
 
+  async function loadInvocationOutput(runId: string, invocationId: string) {
+    if (invocationOutputs[invocationId] || outputLoadingId === invocationId) return;
+    setOutputLoadingId(invocationId);
+    setOutputErrors((current) => ({ ...current, [invocationId]: "" }));
+    try {
+      const output = await agentApi.invocationOutput(runId, invocationId);
+      setInvocationOutputs((current) => ({ ...current, [invocationId]: output }));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setOutputErrors((current) => ({
+        ...current,
+        [invocationId]: "구조화 응답을 불러오지 못했습니다.",
+      }));
+    } finally {
+      setOutputLoadingId((current) => current === invocationId ? null : current);
+    }
+  }
+
   return <section className="panel execution-policy-panel" aria-labelledby="agent-runtime-title">
     <div className="panel-head"><div><Bot size={18} /><span id="agent-runtime-title">Agent Worker v2</span></div><span className="status-pill neutral">비동기 · SHADOW · 주문 없음</span></div>
     <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> Intel → Verify → 4 Scout → Core 고정 DAG를 영속 queue에서 실행합니다. 검증된 외부 LLM 응답도 역할별 계약을 통과한 경우에만 SHADOW 결과로 저장하며 승인·주문은 생성하지 않습니다.</div>
@@ -902,6 +1016,31 @@ function AgentRuntimePanel({
       <p className="reason-codes">{run.stages.map((stage) => `${stage.role}: ${stage.state}${stage.attempt_count ? ` (${stage.attempt_count}/${stage.max_attempts})` : ""}`).join(" · ")}</p>
       <p className="reason-codes">{run.stages.filter((stage) => stage.output).map(agentStageOutputSummary).join(" · ") || "Stage 결과 없음"}</p>
       <p className="reason-codes">{run.stages.flatMap((stage) => stage.invocations.map((invocation) => `${stage.role} #${invocation.attempt_number}: ${invocation.actual_provider ?? "Provider 미확인"} / ${invocation.actual_model ?? invocation.requested_model_alias ?? invocation.requested_model_profile_id ?? "모델 미확인"} · ${invocation.state} · schema ${invocation.validation_status} · ${invocation.latency_ms}ms${invocation.error_code ? ` · ${invocation.error_code}` : ""}`)).join(" · ") || "LLM 호출 이력 없음"}</p>
+      <div className="invocation-history">
+        {run.stages.flatMap((stage) => stage.invocations.map((invocation) => {
+          const output = invocationOutputs[invocation.invocation_id];
+          const error = outputErrors[invocation.invocation_id];
+          return <div className="invocation-output-row" key={invocation.invocation_id}>
+            <div className="invocation-output-head">
+              <span>{stage.role} #{invocation.attempt_number} · {invocation.state}</span>
+              {!output && <button
+                className="secondary-button"
+                type="button"
+                disabled={outputLoadingId === invocation.invocation_id}
+                onClick={() => void loadInvocationOutput(run.run_id, invocation.invocation_id)}
+              >{outputLoadingId === invocation.invocation_id ? "불러오는 중" : "구조화 응답 보기"}</button>}
+            </div>
+            {error && <p className="invocation-output-error">{error}</p>}
+            {output && <div className="invocation-output-body">
+              <p>Provider 원문이 아니라 Adapter가 추출한 서버 검증 전 구조화 JSON입니다.</p>
+              {output.output_available && output.model_output
+                ? <pre>{JSON.stringify(output.model_output, null, 2)}</pre>
+                : <p>보관된 구조화 응답이 없습니다. · {output.error_code ?? output.state}</p>}
+              <small>schema {output.validation_status} · hash {output.model_output_hash?.slice(0, 12) ?? "없음"} · {output.captured_at ? formatDateTime(output.captured_at) : "캡처 없음"}</small>
+            </div>}
+          </div>;
+        }))}
+      </div>
       <small>{formatDateTime(run.created_at)} · {run.run_id}</small>
     </article>)}</div>
   </section>;

@@ -52,6 +52,7 @@ risk_limits:
 | 연속 손실 횟수 | 1 | 20 |
 | 추적 손절 활성 수익률·거리 | 0.1% | 20.0% |
 | 시간 손절 | 1분 | 600분 |
+| 최대 spread·가격편차 | 0.01% | 5.00% |
 
 금액 상한은 사용자 설정 상한이며 실제 주문은 예수금·계좌·종목 한도 중 가장 작은 값으로 제한한다. 상한 변경은 코드와 명세 변경 및 회귀시험을 요구한다.
 
@@ -234,6 +235,16 @@ PARTIAL_SELL | FULL_SELL | FIXED_STOP
 | GRD-086 | Guard 결과에는 안정된 reason code, severity, halt scope, 사용한 snapshot·position·실행권한·위험설정 version과 유효시간을 기록한다. |
 | GRD-087 | 첫 구현 미지원 trigger와 행동은 `ACTION_NOT_IMPLEMENTED`로 차단하며 다른 청산·보유 행동으로 자동 변환하지 않는다. |
 | GRD-088 | 자동 또는 승인형 `BUY` 기능 gate는 신규진입 Guard, 고정손절 trigger, `PAUSE_ENTRY` 비상정지와 관련 장애시험이 모두 준비되기 전 열지 않는다. |
+
+### 3.10 Guard 위험 설정 1차 API·UI 경계
+
+| ID | 요구사항 |
+| --- | --- |
+| GRD-090 | `USER_DEFAULT / RISK_POLICY`는 기존 `configuration_versions` 생명주기를 재사용하며 실행 권한과 독립된 sequence·ACTIVE version을 가진다. |
+| GRD-091 | 안전 기본값 조회는 금액·보유·횟수·손절·시세·spread·가격편차 기준을 제공하되 `entry_order_amount=null`, `active_version_id=null`을 반환한다. |
+| GRD-092 | 초안 생성 시 모든 수치 범위와 금액 순서를 서버에서 검증하고 공백이 아닌 변경 사유를 요구한다. 잘못된 값을 보정해 저장하지 않는다. |
+| GRD-093 | 활성화는 초안 생성 당시의 active version과 현재 version이 같을 때만 원자적으로 수행하며 이전 ACTIVE는 `SUPERSEDED`로 보존한다. |
+| GRD-094 | 첫 UI는 사용자 기본 위험 설정만 편집한다. 종목별 override·현재 포지션 영향 미리보기·장중 위험 완화 재인증은 별도 후속 단계 전까지 제공하지 않으며 이를 활성화된 기능으로 표시하지 않는다. |
 
 ## 4. 오류·예외 또는 경계 조건
 

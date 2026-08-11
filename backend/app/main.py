@@ -15,6 +15,7 @@ from app.api.llm import router as llm_router
 from app.api.orders import router as orders_router
 from app.api.positions import router as positions_router
 from app.api.quotes import router as quotes_router
+from app.api.risk_settings import router as risk_settings_router
 from app.api.settings import router as settings_router
 from app.api.system import router as system_router
 from app.api.watchlist import router as watchlist_router
@@ -26,6 +27,7 @@ from app.ids import uuid7
 from app.llm.profiles import LlmProfileError
 from app.llm.prompts import LlmPromptError
 from app.mock_ai import MockDecisionError
+from app.risk_policy import RiskPolicyError
 from app.watchlist import WatchlistError
 
 logger = logging.getLogger("cresta.api")
@@ -112,6 +114,20 @@ def create_app() -> FastAPI:
                 "error": {
                     "code": exc.code,
                     "message": "실행 권한 설정을 처리할 수 없습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": False,
+                }
+            },
+        )
+
+    @application.exception_handler(RiskPolicyError)
+    async def risk_policy_error(request: Request, exc: RiskPolicyError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": "Guard 위험 설정을 처리할 수 없습니다.",
                     "correlation_id": request.state.request_id,
                     "retryable": False,
                 }
@@ -243,6 +259,7 @@ def create_app() -> FastAPI:
     application.include_router(positions_router, prefix="/api/v1")
     application.include_router(quotes_router, prefix="/api/v1")
     application.include_router(settings_router, prefix="/api/v1")
+    application.include_router(risk_settings_router, prefix="/api/v1")
     application.include_router(system_router, prefix="/api/v1")
     application.include_router(watchlist_router, prefix="/api/v1")
     return application

@@ -53,4 +53,14 @@ if [ "$kiwoom_secret_count" -eq 3 ]; then
   done
 fi
 
+dart_secret_path="$PROJECT_ROOT/secrets/dart_api_key"
+if [ -e "$dart_secret_path" ]; then
+  if [ ! -s "$dart_secret_path" ]; then
+    echo "Missing or empty secret file: $dart_secret_path" >&2
+    exit 1
+  fi
+  chown "$APP_UID:$APP_GID" "$dart_secret_path"
+  chmod 0400 "$dart_secret_path"
+fi
+
 echo "Cresta secret ownership and permissions are ready for UID/GID 10001:10001."

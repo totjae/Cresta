@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.agents.reason_codes import (
+    REASON_CODE_POLICY_VERSION,
+    allowed_reason_codes,
+)
 from app.agents.worker import process_agent_work_once
 from app.llm.contracts import EvidenceSourceCandidate, LlmRequest, LlmResult
 from app.llm.registry import provider_registry
@@ -28,10 +33,16 @@ class ExternalFixtureAdapter:
         *,
         invalid_role: str | None = None,
         invalid_evidence_role: str | None = None,
+        invalid_reason_role: str | None = None,
+        sensitive_output_role: str | None = None,
+        oversized_output_role: str | None = None,
         source_candidates: list[EvidenceSourceCandidate] | None = None,
     ) -> None:
         self.invalid_role = invalid_role
         self.invalid_evidence_role = invalid_evidence_role
+        self.invalid_reason_role = invalid_reason_role
+        self.sensitive_output_role = sensitive_output_role
+        self.oversized_output_role = oversized_output_role
         self.source_candidates = source_candidates or []
         self.requests: list[LlmRequest] = []
 
@@ -45,7 +56,11 @@ class ExternalFixtureAdapter:
                 "action": "WAIT",
                 "confidence": 0.6,
                 "risk_level": "MEDIUM",
-                "reason_codes": ["EXTERNAL_SHADOW_WAIT"],
+                "reason_codes": [
+                    "UNREGISTERED_TEST_REASON"
+                    if request.role == self.invalid_reason_role
+                    else "DIAGNOSTIC_WAIT_ONLY"
+                ],
                 "incomplete_roles": role_input["required_incomplete_roles"],
             }
         else:
@@ -56,13 +71,21 @@ class ExternalFixtureAdapter:
                 "exit_risk_score": 50,
                 "confidence": 0.6,
                 "uncertainty": 0.4,
-                "reason_codes": ["EXTERNAL_SHADOW_ASSESSMENT"],
+                "reason_codes": [
+                    "UNREGISTERED_TEST_REASON"
+                    if request.role == self.invalid_reason_role
+                    else allowed_reason_codes(request.role)[0]
+                ],
                 "evidence_refs": (
                     ["https://example.com/not-an-evidence-id"]
                     if request.role == self.invalid_evidence_role
                     else []
                 ),
             }
+        if request.role == self.sensitive_output_role:
+            output["api_key"] = "must-never-be-stored"
+        if request.role == self.oversized_output_role:
+            output["padding"] = "x" * 70000
         return LlmResult(
             invocation_id=request.invocation_id,
             status="SUCCEEDED",
@@ -86,6 +109,9 @@ def _external_routes(
     *,
     invalid_role: str | None = None,
     invalid_evidence_role: str | None = None,
+    invalid_reason_role: str | None = None,
+    sensitive_output_role: str | None = None,
+    oversized_output_role: str | None = None,
     source_candidates: list[EvidenceSourceCandidate] | None = None,
 ) -> tuple[dict[str, str], ExternalFixtureAdapter, str]:
     csrf = _login(client)
@@ -105,6 +131,9 @@ def _external_routes(
     adapter = ExternalFixtureAdapter(
         invalid_role=invalid_role,
         invalid_evidence_role=invalid_evidence_role,
+        invalid_reason_role=invalid_reason_role,
+        sensitive_output_role=sensitive_output_role,
+        oversized_output_role=oversized_output_role,
         source_candidates=source_candidates,
     )
     monkeypatch.setattr(provider_registry, "resolve", lambda *args, **kwargs: adapter)
@@ -152,7 +181,7 @@ def test_external_outputs_are_server_validated_and_adopted_without_trading(
     assert technical["output"]["schema_version"] == "agent-assessment-v1"
     assert technical["output"]["stage_run_id"] == technical["stage_run_id"]
     assert technical["output"]["symbol"] == "005930"
-    assert technical["output"]["reason_codes"] == ["EXTERNAL_SHADOW_ASSESSMENT"]
+    assert technical["output"]["reason_codes"] == ["DATA_SUFFICIENT"]
     assert technical["invocation"]["actual_provider"] == "EXTERNAL_FIXTURE"
     assert technical["invocation"]["validation_status"] == "PASSED"
     assert technical["invocation"]["web_search_enabled"] is False
@@ -162,11 +191,19 @@ def test_external_outputs_are_server_validated_and_adopted_without_trading(
         request for request in adapter.requests if request.role == "TECHNICAL_SCOUT"
     )
     assert scout_request.output_json_schema["additionalProperties"] is False
+    reason_code_schema = scout_request.output_json_schema["properties"]["reason_codes"]
+    assert reason_code_schema["items"]["enum"] == list(
+        allowed_reason_codes("TECHNICAL_SCOUT")
+    )
     scout_input = json.loads(scout_request.messages[-1]["content"])
     assert scout_input["market_snapshot"]["last_price"] == "70000.0000"
     assert scout_input["indicator_snapshot"]["price_vs_vwap_pct"] == "0.143062"
     assert "credential" not in scout_input
     assert scout_input["allowed_evidence_refs"] == []
+    assert scout_input["reason_code_policy_version"] == REASON_CODE_POLICY_VERSION
+    assert scout_input["allowed_reason_codes"] == list(
+        allowed_reason_codes("TECHNICAL_SCOUT")
+    )
     assert scout_request.tool_policy == "NONE"
     runtime_context = scout_request.messages[-2]["content"]
     assert "[Cresta runtime context v1]" in runtime_context
@@ -179,6 +216,17 @@ def test_external_outputs_are_server_validated_and_adopted_without_trading(
     assert core_input["evidence_candidate_audit"]["candidate_count"] == 0
     assert core_input["evidence_candidate_audit"]["verified_evidence_count"] == 0
     assert "candidate_ids" not in core_input["evidence_candidate_audit"]
+    invocation_id = technical["invocation"]["invocation_id"]
+    output_response = client.get(
+        f"/api/v1/ai/agent-runs/{run.id}/invocations/{invocation_id}/output"
+    )
+    assert output_response.status_code == 200
+    output_body = output_response.json()
+    assert output_body["output_available"] is True
+    assert output_body["model_output"]["reason_codes"] == ["DATA_SUFFICIENT"]
+    assert len(output_body["model_output_hash"]) == 64
+    assert output_body["captured_at"] is not None
+    assert "model_output" not in technical["invocation"]
     assert db.scalar(select(func.count()).select_from(Decision)) == 0
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
@@ -298,4 +346,91 @@ def test_external_url_as_evidence_ref_is_rejected_with_specific_error(
         stage for stage in completed["stages"] if stage["role"] == "NEWS_DISCLOSURE_SCOUT"
     )
     assert news["invocation"]["error_code"] == "LLM_EVIDENCE_REF_NOT_ALLOWED"
+    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
+
+
+def test_external_unregistered_reason_code_fails_closed(
+    client: TestClient, db: Session, monkeypatch
+) -> None:
+    _market_fixture(db)
+    route_ids, _, csrf = _external_routes(
+        client,
+        db,
+        monkeypatch,
+        invalid_reason_role="TECHNICAL_SCOUT",
+    )
+    response = client.post(
+        "/api/v1/ai/agent-runs/diagnostic",
+        headers={"Origin": "https://testserver", "X-CSRF-Token": csrf},
+        json={
+            "schema_version": "1.0",
+            "market": "KRX",
+            "symbol": "005930",
+            "route_ids": route_ids,
+        },
+    )
+    run = _run_until_terminal(db, response.json()["run_id"])
+    assert run.state == "FAILED"
+    completed = client.get(f"/api/v1/ai/agent-runs/{run.id}").json()
+    technical = next(
+        stage for stage in completed["stages"] if stage["role"] == "TECHNICAL_SCOUT"
+    )
+    assert technical["invocation"]["state"] == "INVALID_OUTPUT"
+    assert technical["invocation"]["validation_status"] == "FAILED"
+    assert technical["invocation"]["error_code"] == "LLM_REASON_CODE_NOT_ALLOWED"
+    output_response = client.get(
+        f"/api/v1/ai/agent-runs/{run.id}/invocations/"
+        f"{technical['invocation']['invocation_id']}/output"
+    ).json()
+    assert output_response["output_available"] is True
+    assert output_response["model_output"]["reason_codes"] == [
+        "UNREGISTERED_TEST_REASON"
+    ]
+    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
+
+
+@pytest.mark.parametrize(
+    ("fixture_option", "error_code"),
+    [
+        ("sensitive_output_role", "LLM_MODEL_OUTPUT_SENSITIVE_FIELD"),
+        ("oversized_output_role", "LLM_MODEL_OUTPUT_TOO_LARGE"),
+    ],
+)
+def test_unsafe_model_output_is_not_stored_and_fails_closed(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+    fixture_option: str,
+    error_code: str,
+) -> None:
+    _market_fixture(db)
+    route_ids, _, csrf = _external_routes(
+        client,
+        db,
+        monkeypatch,
+        **{fixture_option: "TECHNICAL_SCOUT"},
+    )
+    response = client.post(
+        "/api/v1/ai/agent-runs/diagnostic",
+        headers={"Origin": "https://testserver", "X-CSRF-Token": csrf},
+        json={
+            "schema_version": "1.0",
+            "market": "KRX",
+            "symbol": "005930",
+            "route_ids": route_ids,
+        },
+    )
+    run = _run_until_terminal(db, response.json()["run_id"])
+    completed = client.get(f"/api/v1/ai/agent-runs/{run.id}").json()
+    technical = next(
+        stage for stage in completed["stages"] if stage["role"] == "TECHNICAL_SCOUT"
+    )
+    assert technical["invocation"]["error_code"] == error_code
+    output_response = client.get(
+        f"/api/v1/ai/agent-runs/{run.id}/invocations/"
+        f"{technical['invocation']['invocation_id']}/output"
+    ).json()
+    assert output_response["output_available"] is False
+    assert output_response["model_output"] is None
+    assert output_response["model_output_hash"] is None
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0

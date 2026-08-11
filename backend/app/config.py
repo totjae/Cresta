@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     analysis_scheduler_lease_seconds: int = Field(default=30, ge=15, le=120)
     agent_worker_poll_seconds: int = Field(default=1, ge=1, le=10)
     agent_worker_lease_seconds: int = Field(default=30, ge=10, le=120)
+    dart_enabled: bool = False
+    dart_api_key_file: str | None = None
+    dart_base_url: str = "https://opendart.fss.or.kr"
+    dart_timeout_seconds: int = Field(default=5, ge=1, le=15)
+    dart_max_pages: int = Field(default=10, ge=1, le=50)
+    dart_lookback_days: int = Field(default=3, ge=1, le=7)
     llm_secret_directory: str = "./secrets/llm"
     database_url: str = "sqlite:///./cresta.db"
     database_password_file: str | None = None
@@ -89,6 +95,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Analysis scheduler poll must be less than half the lease duration")
         if self.agent_worker_poll_seconds * 2 >= self.agent_worker_lease_seconds:
             raise RuntimeError("Agent worker poll must be less than half the lease duration")
+        if self.dart_base_url.rstrip("/") != "https://opendart.fss.or.kr":
+            raise RuntimeError("Only the official OpenDART endpoint is allowed")
         if self.kiwoom_rest_base_url.rstrip("/") != "https://mockapi.kiwoom.com":
             raise RuntimeError("Only the Kiwoom MOCK REST endpoint is allowed in the first release")
         if self.kiwoom_ws_base_url.rstrip("/") != "wss://mockapi.kiwoom.com:10000":
@@ -126,6 +134,23 @@ class Settings(BaseSettings):
                 self.kiwoom_account_id_file,
             )
         )
+
+    def dart_configuration_status(self) -> str:
+        if not self.dart_enabled:
+            return "DISABLED"
+        if not self.dart_api_key_file:
+            return "NOT_CONFIGURED"
+        try:
+            key = Path(self.dart_api_key_file).read_text(encoding="utf-8").strip()
+        except OSError:
+            return "NOT_CONFIGURED"
+        return "CONFIGURED" if len(key) == 40 and not any(char.isspace() for char in key) else "INVALID"
+
+    def load_dart_api_key(self) -> str:
+        if self.dart_configuration_status() != "CONFIGURED":
+            raise RuntimeError("OpenDART API key is not configured")
+        assert self.dart_api_key_file
+        return Path(self.dart_api_key_file).read_text(encoding="utf-8").strip()
 
 
 @lru_cache

@@ -471,3 +471,40 @@ Local evidence: OpenAI 호환·Responses Adapter와 parameter policy 집중 시�
 - `T-EVIDENCE-006`: Provider 후보가 없는 run은 `NO_PROVIDER_SOURCE_CANDIDATES`, 후보가 있는 run은 중복 제거된 ID·Provider별 개수와 `UNRATED_SOURCE_CANDIDATES_PRESENT`를 감사 출력에 기록하는지 확인한다.
 - `T-EVIDENCE-007`: Candidate Auditor가 invocation을 만들거나 EvidenceBundle의 hash·evidence IDs를 수정하지 않고 Core 입력에는 후보 개수와 reason code만 전달하는지 확인한다.
 - `T-EVIDENCE-008`: EvidenceBundle이 `PARTIAL`이면 모든 LLM stage가 성공해도 run 최종 상태가 `PARTIAL`이며 Decision·Approval·TradingOrder가 0건인지 확인한다.
+
+# 역할별 reason code 계약 시험 (2026-08-11)
+
+- `T-REASON-001`: Scout와 Core 요청에 `reason-code-policy-v1`과 역할별 허용 목록이 포함되고 JSON Schema `reason_codes.items.enum`이 같은 목록인지 확인한다.
+- `T-REASON-002`: 역할에 등록되지 않은 reason code를 반환하면 Provider가 schema 성공을 표시했더라도 invocation을 `INVALID_OUTPUT/FAILED`, `LLM_REASON_CODE_NOT_ALLOWED`로 종료하는지 확인한다.
+- `T-REASON-003`: 허용된 역할별 code는 server-owned provenance와 함께 stage 출력에 채택되고 기존 evidence reference 및 Core incomplete-role 검사가 그대로 적용되는지 확인한다.
+- `T-REASON-004`: Mock fixture, 외부 FAIL_STOP/FAILOVER와 SHADOW 주문 0건 경계를 회귀 검증한다.
+
+Local evidence: 역할별 allowlist의 중복·schema enum·입력 정책 버전, 허용 code 채택, 미등록 code의 전용 오류 및 주문 0건을 검증했다. backend 전체 196개 테스트와 Ruff lint가 통과했다. 실제 Provider가 enum을 준수하는지는 Ubuntu SHADOW 호출에서 추가 확인한다.
+
+# OpenDART PRIMARY evidence 수집 시험 (2026-08-11)
+
+- `T-DART-001`: 공식 endpoint와 40자리 file secret만 허용하며 secret은 DB·stage 출력·오류에 포함하지 않는다.
+- `T-DART-002`: `corpCode.xml`의 안전한 ZIP/XML에서 6자리 종목코드를 8자리 고유번호로 해석하고, KST 최근 3일 회사별 공시검색 pagination에서 정확히 같은 종목코드만 채택하며 접수번호 중복을 제거한다.
+- `T-DART-003`: `000` 성공과 `013` 빈 성공을 구분하고 인증·IP·한도·HTTP·timeout·page cap 오류는 안정적인 `DART_*` code로 fail-closed 처리한다.
+- `T-DART-004`: 검증한 공시를 `DART_DISCLOSURE/PRIMARY` EvidenceItem과 Scout allowlist에 포함하되 Bundle은 `PARTIAL`, 주문은 0건으로 유지한다.
+
+Local evidence: MockTransport 고유번호 해석·pagination·필터·빈 결과·Provider 오류, 잘못된 secret의 admission 차단과 Agent DAG 통합을 검증했다. backend 전체 205개 테스트와 Ruff lint가 통과했다. 실제 OpenDART key·출구 IP·응답은 Ubuntu에서 별도 검증한다.
+
+# 구조화 LLM 응답 이력 시험 (2026-08-11)
+
+- `T-LLM-OUTPUT-001`: 성공 output과 server contract 실패 output을 validation 전에 canonical JSON·hash·capture 시각으로 저장한다.
+- `T-LLM-OUTPUT-002`: 64 KiB 초과 또는 민감 key 포함 output은 저장하지 않고 전용 오류로 fail-closed 처리한다.
+- `T-LLM-OUTPUT-003`: run 소유자만 개별 invocation output을 조회하고 run 목록에는 model output을 포함하지 않는다.
+- `T-LLM-OUTPUT-004`: Console은 사용자 요청 시에만 구조화 응답을 불러와 JSON·hash·검증 상태 또는 응답 없음 안내를 표시한다.
+
+Local evidence: 성공 및 미등록 reason code 응답의 validation 전 저장·hash·전용 조회, 목록 비노출, 민감 key·64 KiB 초과 fail-closed를 검증했다. `20260811_0023` upgrade→downgrade→upgrade, backend 전체 207개 시험·Ruff, frontend TypeScript·11개 component 시험·production build가 통과했다. 실제 외부 Provider 응답의 Ubuntu 조회는 배포 후 검증한다.
+
+# Guard 위험 설정 1차 시험 (2026-08-11)
+
+- `T-RISK-CONFIG-001`: 활성 버전이 없으면 SAFE_DEFAULT와 `entry_order_amount=null`을 반환하며 이를 DB ACTIVE로 오인하지 않는지 확인한다.
+- `T-RISK-CONFIG-002`: 금액·손절·시세·spread·가격편차 범위와 `entry≤single≤symbol≤total` 관계를 서버가 거부하고 자동 보정하지 않는지 확인한다.
+- `T-RISK-CONFIG-003`: DRAFT→VALIDATED→ACTIVE와 기존 ACTIVE→SUPERSEDED가 category별 원자 전환되고 stale base version은 충돌로 거부되는지 확인한다.
+- `T-RISK-CONFIG-004`: 모든 write가 로그인·CSRF를 요구하고 활성화 감사에 비밀 없이 version·hash만 남는지 확인한다.
+- `T-RISK-CONFIG-005`: Console이 위험 설정 source·active version·미설정 진입금액 차단을 표시하고 검증·활성화 흐름을 수행하는지 확인한다.
+
+Local evidence: SAFE_DEFAULT의 null 진입금액, 서버 수치·금액 순서 검증, category별 version 생명주기·stale 충돌·감사, Console 검증·활성화와 TOTP 재인증 미사용을 자동 검증했다. backend 전체 209개 테스트·Ruff, frontend TypeScript·12개 component 테스트·production build가 통과했다.
