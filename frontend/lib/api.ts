@@ -221,6 +221,43 @@ export type WatchlistData = {
   items: WatchlistItem[];
 };
 
+export type VenueSelectionQuote = {
+  market: "KRX" | "NXT";
+  snapshot_id: string;
+  bid_price: string | null;
+  bid_quantity: number | null;
+  ask_price: string | null;
+  ask_quantity: number | null;
+  event_at: string;
+  valid: boolean;
+};
+
+export type VenueSelectionData = {
+  schema_version: "1.0";
+  request_id: string;
+  selection_id: string;
+  policy_version: string;
+  execution_stage: "SHADOW";
+  order_creation_allowed: false;
+  environment: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  order_type: "LIMIT" | "MARKET";
+  urgency: "NORMAL" | "EMERGENCY";
+  session: string;
+  nxt_eligible: boolean;
+  nxt_eligibility_status: "VERIFIED" | "INELIGIBLE" | "UNKNOWN";
+  sor_supported: boolean;
+  selected_venue: "KRX" | "NXT" | "SOR" | "WAIT";
+  state: "SELECTED" | "WAIT";
+  reason_codes: string[];
+  quotes: Record<"KRX" | "NXT", VenueSelectionQuote | null>;
+  input_hash: string;
+  evaluated_at: string;
+  created_at: string;
+};
+
 export type SystemHealth = {
   schema_version: "1.0";
   request_id: string;
@@ -937,6 +974,39 @@ export const watchlistApi = {
     return request<{ status: "DELETED" }>(`/api/v1/watchlist/${encodeURIComponent(itemId)}`, {
       method: "DELETE",
       headers: { "X-CSRF-Token": csrfToken },
+    });
+  },
+};
+
+export const venueSelectionApi = {
+  list(symbol?: string, signal?: AbortSignal) {
+    const query = symbol ? `?symbol=${encodeURIComponent(symbol)}&limit=20` : "?limit=20";
+    return request<{ schema_version: "1.0"; request_id: string; items: VenueSelectionData[] }>(
+      `/api/v1/venue-selections${query}`,
+      { signal },
+    );
+  },
+  diagnostic(
+    csrfToken: string,
+    input: {
+      symbol: string;
+      side: "BUY" | "SELL";
+      quantity: number;
+      orderType: "LIMIT" | "MARKET";
+      urgency: "NORMAL" | "EMERGENCY";
+    },
+  ) {
+    return request<VenueSelectionData>("/api/v1/venue-selections/diagnostic", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        schema_version: "1.0",
+        symbol: input.symbol,
+        side: input.side,
+        quantity: input.quantity,
+        order_type: input.orderType,
+        urgency: input.urgency,
+      }),
     });
   },
 };

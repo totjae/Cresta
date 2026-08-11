@@ -594,3 +594,7 @@ Local evidence: 서버 입력·Market Context 집중시험, backend 전체 회�
 | T-VENUE-008 | NXT snapshot이 없는 상태를 미지원으로 단정하지 않고 `UNKNOWN`으로 기록하며, NXT 단독 세션에서는 `WAIT/NXT_ELIGIBILITY_UNVERIFIED`로 종료한다. |
 | T-VENUE-009 | 정상 NXT quote는 `instrument_venue_states`에 `VERIFIED/QUOTE_OBSERVED`로 저장되고 이후 SHADOW 평가가 해당 상태를 사용한다. |
 | T-VENUE-010 | migration `20260812_0029`의 upgrade→downgrade→upgrade가 통과하며 market snapshot과 기존 0028 평가 원장은 보존된다. |
+| T-VENUE-011 | Console 감시 화면은 등록 종목으로 SHADOW 진단을 실행하고 선택 venue·세션·NXT 적격성·양 시장 호가·reason code를 표시하며 주문 생성 컨트롤을 제공하지 않는다. |
+| T-VENUE-012 | 진단 실패와 401에서 기존 평가 이력을 보존하고 각각 안전한 오류·세션 만료로 처리한다. |
+
+Local evidence (2026-08-12): Frontend TypeScript, 12개 component 시험과 Next.js production build가 통과했다. Ubuntu 배포 후 NXT 장중 snapshot을 사용한 실제 카드 표시는 대기 중이다.

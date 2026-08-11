@@ -124,12 +124,27 @@ describe("CrestaConsole authentication", () => {
         created_at: "2026-08-04T01:00:00Z",
       }],
     };
+    const venueSelection = {
+      schema_version: "1.0", request_id: "venue-1", selection_id: "selection-1",
+      policy_version: "venue-selection-v1", execution_stage: "SHADOW",
+      order_creation_allowed: false, environment: "MOCK", symbol: "005930", side: "BUY",
+      quantity: 1, order_type: "LIMIT", urgency: "NORMAL", session: "DUAL_CONTINUOUS",
+      nxt_eligible: true, nxt_eligibility_status: "VERIFIED", sor_supported: false,
+      selected_venue: "NXT", state: "SELECTED", reason_codes: ["BETTER_EXECUTABLE_PRICE_NXT"],
+      quotes: {
+        KRX: { market: "KRX", snapshot_id: "krx-1", bid_price: "70000.0000", bid_quantity: 100, ask_price: "70100.0000", ask_quantity: 100, event_at: "2026-08-12T01:00:00Z", valid: true },
+        NXT: { market: "NXT", snapshot_id: "nxt-1", bid_price: "70050.0000", bid_quantity: 80, ask_price: "70090.0000", ask_quantity: 90, event_at: "2026-08-12T01:00:00Z", valid: true },
+      },
+      input_hash: "a".repeat(64), evaluated_at: "2026-08-12T01:00:00Z", created_at: "2026-08-12T01:00:00Z",
+    };
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "session-watch", login_id: "admin", expires_at: "2026-08-04T09:00:00Z", csrf_token: "csrf-watch" });
       if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
       if (path === "/api/v1/watchlist" && init?.method === "POST") return jsonResponse(populatedWatchlist, 201);
       if (path === "/api/v1/watchlist") return jsonResponse(emptyWatchlist);
+      if (path === "/api/v1/venue-selections/diagnostic" && init?.method === "POST") return jsonResponse(venueSelection);
+      if (path === "/api/v1/venue-selections?limit=20") return jsonResponse({ schema_version: "1.0", request_id: "venue-list", items: [venueSelection] });
       return jsonResponse({}, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -144,10 +159,20 @@ describe("CrestaConsole authentication", () => {
     expect(await screen.findByRole("heading", { name: "005930" })).toBeInTheDocument();
     expect(screen.getByText("69,900원")).toBeInTheDocument();
     expect(screen.getByText("5개")).toBeInTheDocument();
+    expect(await screen.findByText("거래시장 SHADOW 평가")).toBeInTheDocument();
+    expect(screen.getAllByText("SHADOW · 주문 없음").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("BETTER_EXECUTABLE_PRICE_NXT")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "SHADOW 평가" }));
     const createCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/watchlist" && init?.method === "POST");
     expect(createCall?.[1]).toEqual(expect.objectContaining({
       headers: expect.objectContaining({ "X-CSRF-Token": "csrf-watch" }),
     }));
+    const venueCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/venue-selections/diagnostic" && init?.method === "POST");
+    expect(JSON.parse(String(venueCall?.[1]?.body))).toEqual({
+      schema_version: "1.0", symbol: "005930", side: "BUY", quantity: 1,
+      order_type: "LIMIT", urgency: "NORMAL",
+    });
+    expect(screen.queryByRole("button", { name: /주문 생성/ })).not.toBeInTheDocument();
   });
 
   it("shows persisted Paper read models without order creation controls", async () => {

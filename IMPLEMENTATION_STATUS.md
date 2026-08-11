@@ -1,5 +1,12 @@
 # Cresta 구현 상태
 
+### 2026-08-12 거래시장 SHADOW 평가 Console
+
+- 감시 종목 화면에 등록 종목·방향·수량·주문 유형·긴급도를 입력하는 SHADOW 진단과 최근 평가 이력을 추가했다.
+- 결과는 선택 venue, 세션, NXT 적격 상태, KRX·NXT 매수/매도 1호가와 유효성, reason code를 분리 표시한다. 호가·평가 시각·실행 venue는 서버만 결정한다.
+- 화면과 API client는 `SHADOW · 주문 없음`, `order_creation_allowed=false` 경계를 유지하며 Approval·OrderIntent·TradingOrder 생성 컨트롤을 추가하지 않았다.
+- Frontend TypeScript, 12개 component 시험과 production build가 통과했다. 실서버 배포 후 실제 KRX·NXT 평가 카드 확인은 대기 중이다.
+
 ### 2026-08-12 키움 KRX·NXT 시세 stream과 관측 기반 적격 상태
 
 - 활성 감시 종목마다 키움 실시간 KRX item과 NXT `_NX` item을 함께 구독하고 wire item을 6자리 종목과 `KRX/NXT` 시장으로 정규화한다. 체결·호가 cache와 PostgreSQL stream은 시장별로 격리한다.
@@ -77,7 +84,7 @@
 | 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | 인증·snapshot·worker는 실서버 통과; 주문 Adapter·FIFO polling·UNKNOWN 대조·계좌 event gate·Web MOCK 1주 진단 API 자동시험 통과, 실제 모의주문 미검증 |
 | Guard 리스크·비상정지 | `docs/GUARD_RISK_SPEC.md` | 구현 중 | BUY SHADOW 1차 평가와 `USER_DEFAULT / RISK_POLICY` 안전 기본값·검증·활성화 구현; 전체 노출·예수금·일일진입·spread 평가, 손절 trigger·비상정지는 미구현 |
 | 사용자 설정·적용 | `docs/CONFIGURATION_SPEC.md` | 구현 중 | 실행 권한, Guard 사용자 기본 위험 설정과 Provider/Model/역할별 배정 UI/API 구현; 종목별 위험 override·영향 미리보기·예약 적용 미구현 |
-| Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, 감시 종목·Paper 조회·Broker 진단·실행 권한·Guard 위험 설정, Provider 모델·역할·프롬프트·FAILOVER 배정, stage 결과·구조화 응답 조회 구현; 승인 카드·Guard 평가 상세 결과 미구현 |
+| Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, 감시 종목·KRX/NXT SHADOW venue 평가·Paper 조회·Broker 진단·실행 권한·Guard 위험 설정, Provider 모델·역할·프롬프트·FAILOVER 배정, stage 결과·구조화 응답 조회 구현; 승인 카드·Guard 평가 상세 결과 미구현 |
 | 인증·세션·TOTP | `docs/SECURITY_SPEC.md` | 구현 중 | 로그인 TOTP·세션·CSRF·실패제한 구현; 현재 개발 단계의 로그인 이후 설정·Provider·역할 배정·MOCK 시험 재인증은 제거하고 향후 위험 분석 시 선택적 재도입 예정, 복구·운영 검증 미완료 |
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 감시 종목·키움 `0B`·`0D`, 1분봉과 v2 VWAP·SMA5·상대 거래량·실현 변동성·고점 하락률·spread 영속화 로컬 검증 완료; 체결강도와 v2 실제 장중 수신 미검증 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 구현 중 | 불변 `scout-input-v1`과 `deterministic-mock-v2`, 외부 Provider DIAGNOSTIC 판단, context별 v2 출력 계약과 `agent-server-input-v1` 포지션 파생값을 로컬 검증 완료; 실서버 v5 검증 대기 |

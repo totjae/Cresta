@@ -56,6 +56,8 @@ import {
   settingsApi,
   systemApi,
   SystemHealth,
+  venueSelectionApi,
+  VenueSelectionData,
   watchlistApi,
   WatchlistData,
 } from "../lib/api";
@@ -394,7 +396,106 @@ function WatchlistPage({ session, onSessionExpired }: { session: SessionData; on
           <button className="secondary-button watch-remove" disabled={busy} onClick={() => void remove(item.id)}>감시 해제</button>
         </article>)}</div>}
     </section>
+    <VenueSelectionPanel
+      session={session}
+      symbols={data?.items.map((item) => item.symbol) ?? []}
+      onSessionExpired={onSessionExpired}
+    />
   </>;
+}
+
+function VenueSelectionPanel({
+  session,
+  symbols,
+  onSessionExpired,
+}: {
+  session: SessionData;
+  symbols: string[];
+  onSessionExpired: () => void;
+}) {
+  const [items, setItems] = useState<VenueSelectionData[]>([]);
+  const [symbol, setSymbol] = useState("");
+  const [side, setSide] = useState<"BUY" | "SELL">("BUY");
+  const [quantity, setQuantity] = useState(1);
+  const [orderType, setOrderType] = useState<"LIMIT" | "MARKET">("LIMIT");
+  const [urgency, setUrgency] = useState<"NORMAL" | "EMERGENCY">("NORMAL");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await venueSelectionApi.list(undefined, signal);
+      setItems(response.items);
+      setError("");
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      if (caught instanceof ApiError && caught.status === 401) onSessionExpired();
+      else setError("최근 거래시장 평가를 불러오지 못했습니다.");
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+
+  useEffect(() => {
+    if ((!symbol || !symbols.includes(symbol)) && symbols.length) setSymbol(symbols[0]);
+    if (!symbols.length) setSymbol("");
+  }, [symbol, symbols]);
+
+  async function evaluate(event: FormEvent) {
+    event.preventDefault();
+    if (!symbol || quantity < 1) return;
+    setBusy(true);
+    try {
+      await venueSelectionApi.diagnostic(session.csrf_token, {
+        symbol,
+        side,
+        quantity,
+        orderType,
+        urgency,
+      });
+      await load();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) onSessionExpired();
+      else setError("최신 KRX·NXT snapshot과 적격 상태를 확인해 주세요.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <section className="ledger-panel venue-panel">
+    <div className="panel-head">
+      <div><Radio size={18} /><span>거래시장 SHADOW 평가</span></div>
+      <span className="status-pill neutral">SHADOW · 주문 없음</span>
+    </div>
+    <p className="venue-note">서버의 최신 KRX·NXT 호가와 세션으로 비교합니다. 이 진단은 승인이나 주문을 생성하지 않습니다.</p>
+    {error && <div className="console-alert"><CircleAlert size={15} />{error}</div>}
+    <form className="venue-form" onSubmit={evaluate}>
+      <label>종목<select aria-label="거래시장 평가 종목" value={symbol} onChange={(event) => setSymbol(event.target.value)} disabled={!symbols.length}>{symbols.length ? symbols.map((value) => <option key={value} value={value}>{value}</option>) : <option value="">감시 종목 없음</option>}</select></label>
+      <label>방향<select aria-label="거래시장 평가 방향" value={side} onChange={(event) => setSide(event.target.value as "BUY" | "SELL")}><option value="BUY">매수</option><option value="SELL">매도</option></select></label>
+      <label>수량<input aria-label="거래시장 평가 수량" type="number" min={1} max={1_000_000_000} value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></label>
+      <label>주문 유형<select aria-label="거래시장 평가 주문 유형" value={orderType} onChange={(event) => setOrderType(event.target.value as "LIMIT" | "MARKET")}><option value="LIMIT">지정가</option><option value="MARKET">시장가</option></select></label>
+      <label>긴급도<select aria-label="거래시장 평가 긴급도" value={urgency} onChange={(event) => setUrgency(event.target.value as "NORMAL" | "EMERGENCY")}><option value="NORMAL">일반</option><option value="EMERGENCY">긴급</option></select></label>
+      <button className="primary-button" type="submit" disabled={busy || !symbol || quantity < 1}>{busy ? "평가 중" : "SHADOW 평가"}</button>
+    </form>
+    {!items.length ? <div className="empty-state venue-empty"><Radio size={25} /><h3>거래시장 평가 이력이 없습니다.</h3><p>감시 종목을 등록하고 SHADOW 평가를 실행하세요.</p></div> :
+      <div className="venue-history">{items.slice(0, 10).map((item) => <article className="venue-result" key={item.selection_id}>
+        <div className="venue-result-head"><div><strong>{item.symbol}</strong><span>{item.side} {item.quantity.toLocaleString("ko-KR")}주 · {item.session}</span></div><span className={`order-status ${item.selected_venue === "WAIT" ? "risk" : "complete"}`}>{item.selected_venue}</span></div>
+        <dl className="venue-summary">
+          <div><dt>NXT 적격성</dt><dd>{item.nxt_eligibility_status}</dd></div>
+          <div><dt>실행 경계</dt><dd>{item.execution_stage} · 주문 없음</dd></div>
+          {(["KRX", "NXT"] as const).map((market) => {
+            const quote = item.quotes[market];
+            return <div key={market}><dt>{market} 매수/매도 1호가</dt><dd>{quote ? `${quote.bid_price ?? "-"} / ${quote.ask_price ?? "-"} · ${quote.valid ? "유효" : "제외"}` : "시세 없음"}</dd></div>;
+          })}
+          <div><dt>평가 시각</dt><dd>{formatDateTime(item.evaluated_at)}</dd></div>
+        </dl>
+        <p className="reason-codes">{item.reason_codes.join(" · ")}</p>
+      </article>)}</div>}
+  </section>;
 }
 
 const executionActions: Array<[keyof ExecutionPolicy, string, string]> = [
