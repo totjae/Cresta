@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     krx_base_url: str = "https://data-dbg.krx.co.kr"
     krx_timeout_seconds: int = Field(default=10, ge=1, le=30)
     krx_lookback_days: int = Field(default=7, ge=1, le=10)
+    naver_news_enabled: bool = False
+    naver_news_client_id_file: str | None = None
+    naver_news_client_secret_file: str | None = None
+    naver_news_base_url: str = "https://naverapihub.apigw.ntruss.com"
+    naver_news_timeout_seconds: int = Field(default=10, ge=1, le=30)
+    naver_news_display: int = Field(default=20, ge=1, le=20)
+    naver_news_lookback_hours: int = Field(default=72, ge=1, le=168)
+    naver_news_cache_seconds: int = Field(default=300, ge=60, le=1800)
     llm_secret_directory: str = "./secrets/llm"
     database_url: str = "sqlite:///./cresta.db"
     database_password_file: str | None = None
@@ -104,6 +112,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Only the official OpenDART endpoint is allowed")
         if self.krx_base_url.rstrip("/") != "https://data-dbg.krx.co.kr":
             raise RuntimeError("Only the official KRX OPEN API endpoint is allowed")
+        if self.naver_news_base_url.rstrip("/") != "https://naverapihub.apigw.ntruss.com":
+            raise RuntimeError("Only the official NAVER API HUB endpoint is allowed")
         if self.kiwoom_rest_base_url.rstrip("/") != "https://mockapi.kiwoom.com":
             raise RuntimeError("Only the Kiwoom MOCK REST endpoint is allowed in the first release")
         if self.kiwoom_ws_base_url.rstrip("/") != "wss://mockapi.kiwoom.com:10000":
@@ -176,6 +186,34 @@ class Settings(BaseSettings):
             raise RuntimeError("KRX OPEN API key is not configured")
         assert self.krx_api_key_file
         return Path(self.krx_api_key_file).read_text(encoding="utf-8").strip()
+
+    def naver_news_configuration_status(self) -> str:
+        if not self.naver_news_enabled:
+            return "DISABLED"
+        paths = (self.naver_news_client_id_file, self.naver_news_client_secret_file)
+        if not all(paths):
+            return "NOT_CONFIGURED"
+        try:
+            values = tuple(
+                Path(path).read_text(encoding="utf-8").strip() for path in paths if path
+            )
+        except OSError:
+            return "NOT_CONFIGURED"
+        valid = len(values) == 2 and all(
+            8 <= len(value) <= 128 and not any(char.isspace() for char in value)
+            for value in values
+        )
+        return "CONFIGURED" if valid else "INVALID"
+
+    def load_naver_news_credentials(self) -> tuple[str, str]:
+        if self.naver_news_configuration_status() != "CONFIGURED":
+            raise RuntimeError("NAVER API HUB credentials are not configured")
+        assert self.naver_news_client_id_file
+        assert self.naver_news_client_secret_file
+        return (
+            Path(self.naver_news_client_id_file).read_text(encoding="utf-8").strip(),
+            Path(self.naver_news_client_secret_file).read_text(encoding="utf-8").strip(),
+        )
 
 
 @lru_cache

@@ -18,6 +18,7 @@ from app.agents.krx import (
     KrxDailyMarket,
     collect_krx_daily_market,
 )
+from app.agents.naver_news import NaverNewsCollection, NaverNewsItem
 from app.agents.worker import process_agent_work_once
 from app.config import Settings
 from app.models import AgentRun, EvidenceBundle, EvidenceItem, TradingOrder
@@ -221,7 +222,7 @@ def test_krx_enabled_without_valid_secret_rejects_run_admission(
     assert db.scalar(select(AgentRun).limit(1)) is None
 
 
-def test_dart_and_krx_primary_evidence_share_immutable_partial_bundle(
+def test_dart_krx_and_news_create_verified_bundle_without_order(
     client: TestClient,
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -229,10 +230,17 @@ def test_dart_and_krx_primary_evidence_share_immutable_partial_bundle(
 ) -> None:
     dart_key = tmp_path / "dart_api_key"
     dart_key.write_text("d" * 40, encoding="utf-8")
+    naver_client_id = tmp_path / "naver_client_id"
+    naver_client_secret = tmp_path / "naver_client_secret"
+    naver_client_id.write_text("client-id-123456", encoding="utf-8")
+    naver_client_secret.write_text("client-secret-123456", encoding="utf-8")
     settings = _settings(
         tmp_path,
         dart_enabled=True,
         dart_api_key_file=str(dart_key),
+        naver_news_enabled=True,
+        naver_news_client_id_file=str(naver_client_id),
+        naver_news_client_secret_file=str(naver_client_secret),
     )
     disclosure = DartDisclosure(
         receipt_number="20260811000001",
@@ -275,6 +283,25 @@ def test_dart_and_krx_primary_evidence_share_immutable_partial_bundle(
         "app.agents.worker.collect_krx_daily_market",
         lambda settings, *, symbol, now: KrxCollection(market, ("20260810",), 1),
     )
+    news = NaverNewsItem(
+        title="Samsung Electronics update",
+        source_url="https://news.example.com/samsung",
+        source_host="news.example.com",
+        published_at=datetime(2026, 8, 11, 10, tzinfo=UTC),
+        matched_identity="Samsung Electronics",
+        stale=False,
+    )
+    monkeypatch.setattr(
+        "app.agents.worker.collect_naver_news",
+        lambda settings, *, symbol, company_name, now: NaverNewsCollection(
+            items=(news,),
+            query_identity=company_name or symbol,
+            returned_count=1,
+            irrelevant_count=0,
+            unsafe_url_count=0,
+            cache_hit=False,
+        ),
+    )
     _market_fixture(db)
     csrf = _login(client)
     headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
@@ -302,14 +329,16 @@ def test_dart_and_krx_primary_evidence_share_immutable_partial_bundle(
     assert [item.source_type for item in evidence] == [
         "DART_DISCLOSURE",
         "KRX_DAILY_MARKET",
+        "NEWS",
     ]
     bundle = db.scalar(select(EvidenceBundle).where(EvidenceBundle.run_id == run_id))
-    assert bundle is not None and bundle.state == "PARTIAL"
+    assert bundle is not None and bundle.state == "VERIFIED"
     assert set(json.loads(bundle.evidence_ids_json)) == {
         item.id for item in evidence
     }
     assert json.loads(bundle.reason_codes_json) == [
         "DART_PRIMARY_EVIDENCE_VERIFIED",
         "KRX_PRIMARY_EVIDENCE_VERIFIED",
+        "NAVER_NEWS_SECONDARY_EVIDENCE_VERIFIED",
     ]
     assert db.scalar(select(TradingOrder).limit(1)) is None

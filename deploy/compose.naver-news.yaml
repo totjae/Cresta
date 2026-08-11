@@ -1,0 +1,23 @@
+services:
+  api:
+    environment:
+      CRESTA_NAVER_NEWS_ENABLED: "true"
+      CRESTA_NAVER_NEWS_CLIENT_ID_FILE: /run/secrets/naver_api_hub_client_id
+      CRESTA_NAVER_NEWS_CLIENT_SECRET_FILE: /run/secrets/naver_api_hub_client_secret
+    secrets:
+      - naver_api_hub_client_id
+      - naver_api_hub_client_secret
+  agent:
+    environment:
+      CRESTA_NAVER_NEWS_ENABLED: "true"
+      CRESTA_NAVER_NEWS_CLIENT_ID_FILE: /run/secrets/naver_api_hub_client_id
+      CRESTA_NAVER_NEWS_CLIENT_SECRET_FILE: /run/secrets/naver_api_hub_client_secret
+    secrets:
+      - naver_api_hub_client_id
+      - naver_api_hub_client_secret
+
+secrets:
+  naver_api_hub_client_id:
+    file: ../secrets/naver_api_hub_client_id
+  naver_api_hub_client_secret:
+    file: ../secrets/naver_api_hub_client_secret

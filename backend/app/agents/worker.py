@@ -29,6 +29,10 @@ from app.agents.krx import (
     base_date_as_utc,
     collect_krx_daily_market,
 )
+from app.agents.naver_news import (
+    NAVER_NEWS_SOURCE_POLICY_VERSION,
+    collect_naver_news,
+)
 from app.agents.runtime import (
     ASSESSMENT_SCHEMA_VERSION,
     CORE_SCHEMA_VERSION,
@@ -434,7 +438,8 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
     if stage.role == "INTEL_COLLECTOR":
         settings = get_settings()
         evidence_ids: list[str] = []
-        source_results: dict[str, object] = {}
+        source_results: dict[str, dict[str, object]] = {}
+        company_name: str | None = None
         if settings.dart_enabled:
             collection = collect_dart_disclosures(
                 settings,
@@ -467,6 +472,8 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
                 db.add(evidence)
                 db.flush()
                 evidence_ids.append(evidence.id)
+                if disclosure.corporation_name:
+                    company_name = disclosure.corporation_name
             source_results["OPENDART"] = {
                 "source_policy_version": DART_SOURCE_POLICY_VERSION,
                 "query_start_date": collection.start_date,
@@ -482,6 +489,7 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
             )
             if collection.item is not None:
                 item = collection.item
+                company_name = item.name or company_name
                 facts = item.facts()
                 record = {
                     "source_policy_version": KRX_SOURCE_POLICY_VERSION,
@@ -514,13 +522,64 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
                 "requests_made": collection.requests_made,
                 "evidence_count": int(collection.item is not None),
             }
+        if settings.naver_news_enabled:
+            collection = collect_naver_news(
+                settings,
+                symbol=run.symbol,
+                company_name=company_name,
+                now=now,
+            )
+            fresh_ids: list[str] = []
+            stale_ids: list[str] = []
+            for item in collection.items:
+                facts = item.facts()
+                record = {
+                    "source_policy_version": NAVER_NEWS_SOURCE_POLICY_VERSION,
+                    "source_url": item.source_url,
+                    "published_at": item.published_at.isoformat(),
+                    "facts": facts,
+                }
+                evidence = EvidenceItem(
+                    run_id=run.id,
+                    market=run.market,
+                    symbol=run.symbol,
+                    source_type="NEWS",
+                    source_tier="SECONDARY",
+                    source_name="NAVER_API_HUB_NEWS",
+                    source_url=item.source_url,
+                    title=item.title,
+                    facts_json=_canonical(facts),
+                    content_hash=_hash(record),
+                    extraction_method="RULE",
+                    published_at=item.published_at,
+                    event_at=item.published_at,
+                    received_at=now,
+                )
+                db.add(evidence)
+                db.flush()
+                evidence_ids.append(evidence.id)
+                (stale_ids if item.stale else fresh_ids).append(evidence.id)
+            source_results["NAVER_NEWS"] = {
+                "source_policy_version": NAVER_NEWS_SOURCE_POLICY_VERSION,
+                "query_identity": collection.query_identity,
+                "returned_count": collection.returned_count,
+                "evidence_count": len(fresh_ids),
+                "stale_count": len(stale_ids),
+                "irrelevant_count": collection.irrelevant_count,
+                "unsafe_url_count": collection.unsafe_url_count,
+                "cache_hit": collection.cache_hit,
+                "fresh_evidence_ids": fresh_ids,
+                "stale_evidence_ids": stale_ids,
+            }
         if source_results:
             source_mode = (
-                "MULTI_PRIMARY"
+                "MULTI_OFFICIAL"
                 if len(source_results) > 1
                 else "OPENDART_PRIMARY"
                 if "OPENDART" in source_results
                 else "KRX_DAILY_PRIMARY"
+                if "KRX" in source_results
+                else "NAVER_NEWS_SECONDARY"
             )
             _complete_stage(
                 stage,
@@ -561,21 +620,29 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
             )
         )
         intel_output = json.loads(intel.output_json or "{}") if intel else {}
-        verified_items = list(
+        candidate_items = list(
             db.scalars(
                 select(EvidenceItem)
                 .where(
                     EvidenceItem.run_id == run.id,
-                    EvidenceItem.source_tier == "PRIMARY",
                     EvidenceItem.source_type.in_(
-                        ("DART_DISCLOSURE", "KRX_DAILY_MARKET")
+                        ("DART_DISCLOSURE", "KRX_DAILY_MARKET", "NEWS")
                     ),
+                    EvidenceItem.source_tier.in_(("PRIMARY", "SECONDARY")),
                 )
                 .order_by(EvidenceItem.created_at, EvidenceItem.id)
             )
         )
-        evidence_ids = [item.id for item in verified_items]
         source_results = intel_output.get("source_results", {})
+        news_result = (
+            source_results.get("NAVER_NEWS", {})
+            if isinstance(source_results, dict)
+            else {}
+        )
+        stale_ids = set(news_result.get("stale_evidence_ids", []))
+        verified_items = [item for item in candidate_items if item.id not in stale_ids]
+        evidence_ids = [item.id for item in verified_items]
+        stale_evidence_ids = [item.id for item in candidate_items if item.id in stale_ids]
         reason_codes: list[str] = []
         if any(item.source_type == "DART_DISCLOSURE" for item in verified_items):
             reason_codes.append("DART_PRIMARY_EVIDENCE_VERIFIED")
@@ -585,16 +652,33 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
             reason_codes.append("KRX_PRIMARY_EVIDENCE_VERIFIED")
         elif "KRX" in source_results:
             reason_codes.append("KRX_QUERY_COMPLETE_NO_MATCH")
+        fresh_news = [item for item in verified_items if item.source_type == "NEWS"]
+        if fresh_news:
+            reason_codes.append("NAVER_NEWS_SECONDARY_EVIDENCE_VERIFIED")
+        elif "NAVER_NEWS" in source_results:
+            if int(news_result.get("stale_count", 0)) > 0:
+                reason_codes.append("NAVER_NEWS_STALE_ONLY")
+            elif int(news_result.get("returned_count", 0)) == 0:
+                reason_codes.append("NAVER_NEWS_QUERY_COMPLETE_NO_MATCHES")
+            else:
+                reason_codes.append("NAVER_NEWS_NO_RELEVANT_RESULTS")
         if not reason_codes:
             reason_codes.append("NO_EXTERNAL_EVIDENCE_FIXTURE")
+        full_coverage = (
+            isinstance(source_results, dict)
+            and {"OPENDART", "KRX", "NAVER_NEWS"}.issubset(source_results)
+            and any(item.source_type == "KRX_DAILY_MARKET" for item in verified_items)
+        )
+        bundle_state = "VERIFIED" if full_coverage else "PARTIAL"
         record = {
             "schema_version": "evidence-bundle-v1",
             "market": run.market,
             "symbol": run.symbol,
             "market_snapshot_id": snapshot.id,
             "policy_version": EVIDENCE_POLICY_VERSION,
-            "state": "PARTIAL",
+            "state": bundle_state,
             "evidence_ids": evidence_ids,
+            "stale_evidence_ids": stale_evidence_ids,
             "reason_codes": reason_codes,
         }
         bundle = EvidenceBundle(
@@ -604,10 +688,10 @@ def _execute_stage(db: Session, stage: AgentStageRun, run: AgentRun, now: dateti
             symbol=run.symbol,
             as_of=now,
             policy_version=EVIDENCE_POLICY_VERSION,
-            state="PARTIAL",
+            state=bundle_state,
             evidence_ids_json=_canonical(evidence_ids),
             contradiction_groups_json="[]",
-            stale_evidence_ids_json="[]",
+            stale_evidence_ids_json=_canonical(stale_evidence_ids),
             reason_codes_json=_canonical(reason_codes),
             bundle_hash=_hash(record),
         )

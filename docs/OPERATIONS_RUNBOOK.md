@@ -337,7 +337,10 @@ Docker Compose에서 API 또는 Frontend 컨테이너만 재생성하면 고정 
 | OPS-078 | OpenDART를 활성 운영하는 호스트의 부팅 조정 명령에는 `compose.dart.yaml`을 포함해야 한다. `boot-reconcile.sh`가 secret을 감지해 이를 포함하지만 실제 재부팅 인수시험 전에는 DART가 자동복구 검증됐다고 표시하지 않는다. |
 | OPS-079 | `deploy/boot-reconcile.sh`는 기본·키움 Compose를 고정하고, 비어 있지 않은 `secrets/dart_api_key`와 `secrets/krx_api_key`가 존재할 때만 각 선택 overlay를 추가한다. 선택 secret 일부가 없다는 이유로 기본 MOCK 스택을 중단하지 않는다. |
 | OPS-080 | KRX OPEN API는 선택형 `deploy/compose.krx.yaml`로 활성화한다. 인증키와 유가증권·코스닥 일별매매 서비스 승인이 모두 준비되지 않으면 활성화하지 않는다. key당 일 10,000회 한도 보호를 위해 일자·시장 캐시를 사용하며 오류 반복 시 신규 Agent run을 중지한다. |
-| OPS-081 | 부팅 unit 변경 후 `boot-reconcile.sh --check`, systemd daemon-reload, 재부팅 인수시험을 수행한다. DART·KRX secret이 있는 호스트에서는 재부팅 뒤 API와 Agent 컨테이너에 해당 overlay 설정이 모두 복원되어야 한다. |
+| OPS-081 | 부팅 unit 변경 후 `boot-reconcile.sh --check`, systemd daemon-reload, 재부팅 인수시험을 수행한다. DART·KRX secret 또는 완전한 NAVER credential 쌍이 있는 호스트에서는 재부팅 뒤 API와 Agent 컨테이너에 해당 overlay 설정이 모두 복원되어야 한다. |
+| OPS-082 | NAVER API HUB News는 선택형 `deploy/compose.naver-news.yaml`로 활성화한다. Client ID·Secret 두 파일이 모두 존재할 때만 boot reconcile이 overlay를 포함하며 일부만 존재하면 설정 오류로 중단한다. |
+| OPS-083 | 뉴스 검색은 run당 최대 1회·20건, 기본 5분 cache와 72시간 freshness를 사용한다. 공식 일 25,000회 한도 또는 비용 경보가 발생하면 신규 Agent run을 중지하고 DART·KRX·Broker·Guard는 유지한다. |
+| OPS-084 | NAVER News 운영 전 NAVER Cloud에서 NAVER API HUB 신청, News Search 권한, 비용·한도 알림을 설정한다. `401/403`, `429`, timeout·5xx를 각각 인증·한도·Provider 장애로 구분해 대응한다. |
 
 ### 4.2 OpenDART 공시 수집 활성화
 
@@ -374,6 +377,14 @@ sudo docker compose \
 KRX Data Marketplace에서 인증키 발급과 `유가증권 일별매매정보`, `코스닥 일별매매정보` 이용 승인을 완료한 뒤 40자리 키를 `/home/totquf4171/cresta/secrets/krx_api_key`에 저장한다. `sudo deploy/prepare-secrets.sh` 적용 후 `deploy/compose.krx.yaml`을 배포 명령에 추가한다. 이 Adapter는 실시간 시세를 대체하지 않고 최근 전 거래일의 공식 OHLC·거래량·거래대금만 PRIMARY 증거로 제공한다.
 
 새 run의 INTEL 출력에서 `KRX_DAILY_PRIMARY`, `krx-stock-daily-v1`과 `KRX_PRIMARY_EVIDENCE_VERIFIED`를 확인한다. `KRX_QUERY_COMPLETE_NO_MATCH`는 정상 무자료이며 `KRX_TIMED_OUT`, `KRX_PROVIDER_ERROR`, `KRX_RESPONSE_INVALID`는 장애다. 배포 전후 `deploy/boot-reconcile.sh --check`로 선택 overlay 구성을 검증한다.
+
+### 4.4 NAVER API HUB 뉴스 증거 활성화
+
+NAVER Cloud Platform에서 NAVER API HUB와 뉴스 검색 권한을 활성화한 뒤 Client ID와 Client Secret을 각각 `/home/totquf4171/cresta/secrets/naver_api_hub_client_id`, `/home/totquf4171/cresta/secrets/naver_api_hub_client_secret`에 저장한다. `sudo deploy/prepare-secrets.sh` 적용 후 `deploy/compose.naver-news.yaml`을 배포 명령에 추가한다.
+
+새 run의 INTEL 출력에서 `NAVER_NEWS_SECONDARY`와 `naver-api-hub-news-v1`을 확인한다. 72시간 이내 종목 연관 기사만 허용 evidence가 되며 stale 결과는 별도 ID로 감사한다. `NAVER_NEWS_AUTH_FAILED`, `NAVER_NEWS_QUOTA_EXCEEDED`, `NAVER_NEWS_TIMED_OUT`, `NAVER_NEWS_PROVIDER_ERROR`를 빈 검색 결과로 취급하지 않는다.
+
+두 credential 파일 중 하나만 존재하면 설정 오류이므로 배포와 부팅 조정을 중단한다. 둘 다 준비된 호스트에서는 `deploy/boot-reconcile.sh --check` 결과에 `compose.naver-news.yaml`이 포함되어야 한다. 실제 운영 전에는 뉴스가 있는 종목, 정상 빈 결과, stale-only 결과, 401/403, 429와 timeout을 각각 인수시험하고 DB에 기사 본문·검색 요약·credential이 남지 않는지 확인한다.
 
 ## 5. 검증·인수 조건
 

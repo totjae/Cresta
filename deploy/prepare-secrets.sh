@@ -73,4 +73,29 @@ if [ -e "$krx_secret_path" ]; then
   chmod 0400 "$krx_secret_path"
 fi
 
+naver_news_secret_names="naver_api_hub_client_id naver_api_hub_client_secret"
+naver_news_secret_count=0
+for secret_name in $naver_news_secret_names; do
+  if [ -e "$PROJECT_ROOT/secrets/$secret_name" ]; then
+    naver_news_secret_count=$((naver_news_secret_count + 1))
+  fi
+done
+
+if [ "$naver_news_secret_count" -ne 0 ] && [ "$naver_news_secret_count" -ne 2 ]; then
+  echo "NAVER API HUB News secrets must be prepared as a complete set of two files." >&2
+  exit 1
+fi
+
+if [ "$naver_news_secret_count" -eq 2 ]; then
+  for secret_name in $naver_news_secret_names; do
+    secret_path="$PROJECT_ROOT/secrets/$secret_name"
+    if [ ! -s "$secret_path" ]; then
+      echo "Missing or empty secret file: $secret_path" >&2
+      exit 1
+    fi
+    chown "$APP_UID:$APP_GID" "$secret_path"
+    chmod 0400 "$secret_path"
+  done
+fi
+
 echo "Cresta secret ownership and permissions are ready for UID/GID 10001:10001."

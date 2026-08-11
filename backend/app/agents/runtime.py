@@ -58,7 +58,7 @@ SERVER_INPUT_DAG_VERSIONS = frozenset({"agent-dag-v5", DAG_VERSION})
 ASSESSMENT_SCHEMA_VERSION = "agent-assessment-v2"
 CORE_SCHEMA_VERSION = "agent-core-v2"
 SCORE_POLICY_VERSION = "score-policy-v1"
-EVIDENCE_POLICY_VERSION = "official-primary-v2"
+EVIDENCE_POLICY_VERSION = "official-primary-secondary-v3"
 ROUTE_ROLES = (
     "TECHNICAL_SCOUT",
     "NEWS_DISCLOSURE_SCOUT",
@@ -945,6 +945,11 @@ def create_diagnostic_run(
         raise AgentRuntimeError("AGENT_DART_NOT_CONFIGURED", 409)
     if settings.krx_enabled and settings.krx_configuration_status() != "CONFIGURED":
         raise AgentRuntimeError("AGENT_KRX_NOT_CONFIGURED", 409)
+    if (
+        settings.naver_news_enabled
+        and settings.naver_news_configuration_status() != "CONFIGURED"
+    ):
+        raise AgentRuntimeError("AGENT_NAVER_NEWS_NOT_CONFIGURED", 409)
     snapshot = _snapshot(db, market, symbol)
     position = db.scalar(
         select(Position)
@@ -1053,6 +1058,7 @@ def create_diagnostic_run(
             "version": EVIDENCE_POLICY_VERSION,
             "dart_status": settings.dart_configuration_status(),
             "krx_status": settings.krx_configuration_status(),
+            "naver_news_status": settings.naver_news_configuration_status(),
         },
         "route_versions": route_versions,
     }

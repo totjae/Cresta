@@ -337,7 +337,13 @@ app/llm/*                     Provider/Gateway 호출 계층
 - `MAO-142`: Adapter는 KOSPI와 KOSDAQ 응답에서 6자리 `ISU_CD`가 run 종목코드와 정확히 일치하는 한 행만 채택한다. `BAS_DD`, 시장, 종목명, OHLC, 등락률, 거래량·거래대금·시가총액만 `KRX_DAILY_MARKET/PRIMARY` EvidenceItem으로 저장하며 원문 응답과 인증키는 저장하지 않는다.
 - `MAO-143`: KRX 일별 응답은 거래일·시장 endpoint별로 프로세스 메모리에 캐시하여 같은 날짜 전체 종목 응답을 run마다 재호출하지 않는다. 정상 빈 날짜는 이전 날짜 조회로 진행하고, 7일 안에 종목을 찾지 못하면 `KRX_QUERY_COMPLETE_NO_MATCH`로 구분한다.
 - `MAO-144`: HTTP·timeout·인증·quota·형식 오류는 안정적인 `KRX_*` 오류로 INTEL stage를 fail-closed 처리한다. 정상 빈 결과와 장애를 서로 바꾸지 않으며, 채택 데이터의 기준일이 7일을 초과하면 bundle의 허용 evidence에 포함하지 않는다.
-- `MAO-145`: INTEL은 활성화된 OpenDART와 KRX Adapter를 모두 실행하고 source별 결과·policy version·evidence ID를 기록한다. EvidenceBundle은 검증된 DART·KRX ID만 Scout allowlist에 포함하되 계약된 뉴스 coverage가 없으므로 계속 `PARTIAL`이다. Provider citation은 별도 `UNRATED` 후보로 유지한다.
+- `MAO-145`: INTEL은 활성화된 OpenDART·KRX·NAVER News Adapter를 모두 실행하고 source별 결과·policy version·evidence ID를 기록한다. EvidenceBundle은 각 Adapter의 검증을 통과한 ID만 Scout allowlist에 포함한다. Provider citation은 별도 `UNRATED` 후보로 유지한다.
+- `MAO-146`: 선택형 NAVER API HUB News Adapter는 공식 `https://naverapihub.apigw.ntruss.com/search/v1/news`만 호출하고 `sort=date`, 최대 20건, 1회 요청으로 제한한다. 구형 NAVER Developers endpoint와 Provider 내장 검색은 이 Adapter의 대체 경로가 아니다.
+- `MAO-147`: 검색어는 같은 INTEL 실행에서 공식 DART 또는 KRX가 확인한 회사명을 우선하고 없으면 정확한 6자리 종목코드를 사용한다. 제목·요약에서 정규화된 검색 identity가 확인되지 않는 결과는 종목 근거로 채택하지 않는다.
+- `MAO-148`: 응답의 `pubDate`를 RFC 2822로 검증하고 기본 72시간 이내 결과만 허용 evidence ID에 포함한다. 더 오래된 결과는 `stale_evidence_ids`로 분리하며 미래 시각, 비공개·비HTTPS URL, 잘못된 응답 형식은 채택하지 않는다.
+- `MAO-149`: 채택 뉴스는 원문 우선 공개 HTTPS URL, 정제된 제목, 게시시각, 원문 host와 match identity만 `NEWS/SECONDARY` EvidenceItem으로 저장한다. 검색 요약·기사 본문·Provider 원문 응답·인증정보는 저장하거나 Core에 전달하지 않는다.
+- `MAO-150`: NAVER News 정상 빈 결과, 모두 비연관 결과와 stale-only 결과는 구분된 reason code로 완료한다. 인증·권한·quota·HTTP·timeout·형식 오류는 안정적인 `NAVER_NEWS_*` 오류로 INTEL을 fail-closed 처리하고 빈 성공으로 바꾸지 않는다. 검색 identity·credential fingerprint별 단기 cache로 호출량을 제한한다.
+- `MAO-151`: EvidenceBundle은 활성화된 OpenDART·KRX·NAVER News 조회가 모두 오류 없이 완료되고 최신 KRX 종목 증거가 있을 때만 `VERIFIED`가 될 수 있다. DART 또는 뉴스의 정상 빈 결과는 source coverage 완료로 인정하되 긍정 신호로 해석하지 않는다. 비활성·미완료·오류 source가 있거나 최신 KRX 증거가 없으면 `PARTIAL`로 축소한다.
 
 ### Agent Runtime v4 SHADOW 의미 계약
 

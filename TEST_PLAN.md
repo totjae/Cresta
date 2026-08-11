@@ -526,6 +526,14 @@ Evidence: MockTransport 고유번호 해석·pagination·필터·빈 결과·Pro
 - `T-KRX-004`: 검증한 행을 `KRX_DAILY_MARKET/PRIMARY`로 DART와 함께 불변 bundle에 포함하되 계약 뉴스 coverage 전까지 Bundle `PARTIAL`과 주문 0건을 유지한다.
 - `T-BOOT-004`: 선택 secret 유무에 따라 boot reconcile이 DART·KRX overlay를 정확히 포함하고 재부팅 뒤 설정 상태와 Agent 수집을 복원한다.
 
+# NAVER API HUB SECONDARY 뉴스 증거 시험 (2026-08-11)
+
+- `T-NEWS-001`: 공식 Hub endpoint와 Client ID·Secret file만 허용하고 인증 header·요약·원문 응답을 영속화하지 않는다.
+- `T-NEWS-002`: 공식 회사명 우선 검색, 종목 identity 일치, HTTPS URL 정규화와 중복 제거를 거친 결과만 `NEWS/SECONDARY`로 채택한다.
+- `T-NEWS-003`: 72시간 이내 evidence와 stale ID를 분리하고 빈 결과·비연관 결과·stale-only 결과를 안정적인 reason code로 구분한다.
+- `T-NEWS-004`: 인증·권한·quota·HTTP·timeout·형식 오류는 `NAVER_NEWS_*`로 fail-closed 처리하며 단기 cache가 반복 호출을 줄인다.
+- `T-NEWS-005`: DART·KRX·NAVER News 복합 Bundle에서도 Provider citation은 `UNRATED`, Core·Scout 허용 근거는 bundle ID 부분집합, 주문은 0건으로 유지한다.
+
 # 구조화 LLM 응답 이력 시험 (2026-08-11)
 
 - `T-LLM-OUTPUT-001`: 성공 output과 server contract 실패 output을 validation 전에 canonical JSON·hash·capture 시각으로 저장한다.

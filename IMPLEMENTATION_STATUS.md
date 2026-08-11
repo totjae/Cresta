@@ -91,8 +91,8 @@
 - 키움 모의투자 계정·API 사용신청·고정 출구 IP와 REST 인증·시세·10자리 계좌 일치는 실제 서버 확인 완료
 - NXT/SOR 실거래 검증 환경
 - 외부 LLM Provider SHADOW 호출은 활성화됐지만 모델·Gateway별 실제 응답 편차를 계속 검증해야 한다.
-- OpenDART 실제 키·고정 출구 IP 호출과 삼성전자 최근 3일 공시 6건 수집을 Ubuntu 서버에서 확인했다. KRX 전 거래일 공식 일별매매 Adapter는 구현했지만 KRX 인증키·서비스 승인과 실제 서버 호출은 아직 미검증이며 계약 뉴스 source는 미선정이다.
-- DART·KRX secret을 감지하는 선택 overlay 부팅 조정은 구현했지만 실제 Ubuntu 재부팅 자동복구 인수시험은 미검증이다.
+- OpenDART 실제 키·고정 출구 IP 호출과 삼성전자 최근 3일 공시 6건 수집을 Ubuntu 서버에서 확인했다. KRX 전 거래일 공식 일별매매 Adapter와 NAVER API HUB News Adapter는 구현했지만 KRX·NAVER 실제 자격증명 및 서버 호출은 아직 미검증이다.
+- DART·KRX secret과 NAVER credential 쌍을 감지하는 선택 overlay 부팅 조정은 구현했지만 신규 source overlay를 포함한 실제 Ubuntu 재부팅 자동복구 인수시험은 미검증이다.
 
 ## 6. 다음 구현 작업
 
@@ -149,7 +149,7 @@
 
 범위:
 
-- OpenDART 외에 뉴스와 시장·업종의 공식 또는 계약된 source Adapter 선정
+- OpenDART·KRX·NAVER API HUB source Adapter의 실제 운영 자격증명 검증과 시장·업종 coverage 확장
 - Provider citation은 계속 `UNRATED`로 보존하고 독립 검증을 통과한 항목만 EvidenceBundle에 편입
 - 출처별 freshness, 중복 제거, 장애와 quota 정책 확정
 
@@ -158,7 +158,7 @@
 - 공식 KRX OPEN API의 KOSPI·KOSDAQ 일별매매정보를 최근 전 거래일 증거로 수집하는 선택 Adapter를 구현했다.
 - 정확한 종목코드 매칭, 7일 freshness 상한, 일자·시장 cache, 정상 무자료와 장애 분리, DART와의 복합 EvidenceBundle 편입 경계를 적용했다.
 - DART·KRX secret 존재 여부에 따라 선택 overlay를 포함하는 boot reconcile 스크립트와 systemd unit을 구현했다.
-- 계약 뉴스 source 선정, KRX 실제 키 호출, DART·KRX 재부팅 인수시험은 남아 있다.
+- NAVER API HUB News Adapter와 선택 overlay를 구현했다. KRX·NAVER 실제 키 호출 및 DART·KRX·NAVER 재부팅 인수시험은 남아 있다.
 
 완료 gate:
 
@@ -284,3 +284,10 @@
 - KRX 행은 `KRX_DAILY_MARKET/PRIMARY`로 저장하며 인증키·원문 응답은 보존하지 않는다. 일자·시장·credential fingerprint별 메모리 cache로 key당 일 10,000회 한도를 보호한다.
 - 정상 무자료와 HTTP·timeout·형식 장애를 구분하고, 활성 secret이 잘못되면 run admission을 409로 차단한다. DART와 KRX 증거는 같은 불변 Bundle에 들어가지만 계약 뉴스 coverage 전까지 `PARTIAL`, 주문 0건을 유지한다.
 - DART·KRX secret 존재 여부로 선택 overlay를 조합하는 `boot-reconcile.sh`와 systemd unit을 추가했다. Ruff와 backend 전체 회귀시험을 통과했으며 KRX 실제 키 호출과 Ubuntu 재부팅 인수시험은 남아 있다.
+
+## 2026-08-11 NAVER API HUB SECONDARY 뉴스 증거 Adapter
+
+- 현행 NAVER API HUB News Search 공식 endpoint를 사용하는 선택형 Adapter를 `INTEL_COLLECTOR`에 추가했다. 같은 실행에서 DART·KRX가 확인한 회사명을 우선 검색하며 정확한 종목 연관성, 공개 HTTPS URL과 72시간 freshness를 통과한 결과만 채택한다.
+- 기사 본문과 검색 요약은 저장하지 않고 정제된 제목·원문 URL·게시시각·host·검색 identity만 `NEWS/SECONDARY` EvidenceItem으로 저장한다. 인증·권한·quota·timeout·HTTP·응답 형식 오류는 `NAVER_NEWS_*` 코드로 fail-closed 처리한다.
+- 두 credential 파일이 모두 있을 때만 `compose.naver-news.yaml`을 적용하도록 secret 준비와 boot reconcile을 확장했다. DART·KRX·NAVER 조회 완료와 최신 KRX 증거를 Bundle `VERIFIED`의 최소 coverage로 고정했으며, 정상 빈 뉴스는 coverage 완료일 뿐 긍정 신호가 아니다.
+- 로컬 Adapter·통합·설정·배포 회귀시험은 통과했다. NAVER 실제 credential 호출과 Ubuntu 재부팅 자동복구 인수시험은 남아 있다.

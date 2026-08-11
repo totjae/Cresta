@@ -55,6 +55,9 @@ def test_boot_unit_uses_optional_source_overlay_reconciler() -> None:
     assert "-f deploy/compose.dart.yaml" in script
     assert "[ -s secrets/krx_api_key ]" in script
     assert "-f deploy/compose.krx.yaml" in script
+    assert "naver_api_hub_client_id" in script
+    assert "naver_api_hub_client_secret" in script
+    assert "-f deploy/compose.naver-news.yaml" in script
     assert "config --quiet" in script
     assert "up -d --wait --wait-timeout 180" in script
     assert "Restart=on-failure" in unit

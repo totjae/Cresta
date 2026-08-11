@@ -116,3 +116,28 @@ def test_non_official_krx_endpoint_is_rejected() -> None:
     settings = Settings(krx_base_url="https://example.com")
     with pytest.raises(RuntimeError, match="official KRX"):
         settings.validate_safety()
+
+
+def test_naver_news_configuration_requires_complete_secret_pair(tmp_path: Path) -> None:
+    client_id = tmp_path / "naver_client_id"
+    client_secret = tmp_path / "naver_client_secret"
+    client_id.write_text("client-id-123456", encoding="utf-8")
+    client_secret.write_text("client-secret-123456", encoding="utf-8")
+    configured = Settings(
+        naver_news_enabled=True,
+        naver_news_client_id_file=str(client_id),
+        naver_news_client_secret_file=str(client_secret),
+    )
+    assert configured.naver_news_configuration_status() == "CONFIGURED"
+    assert configured.load_naver_news_credentials() == (
+        "client-id-123456",
+        "client-secret-123456",
+    )
+    client_secret.write_text("bad secret with spaces", encoding="utf-8")
+    assert configured.naver_news_configuration_status() == "INVALID"
+
+
+def test_non_official_naver_news_endpoint_is_rejected() -> None:
+    settings = Settings(naver_news_base_url="https://example.com")
+    with pytest.raises(RuntimeError, match="official NAVER API HUB"):
+        settings.validate_safety()
