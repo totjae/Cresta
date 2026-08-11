@@ -485,6 +485,8 @@ function VenueSelectionPanel({
       <div className="venue-history">{items.slice(0, 10).map((item) => <article className="venue-result" key={item.selection_id}>
         <div className="venue-result-head"><div><strong>{item.symbol}</strong><span>{item.side} {item.quantity.toLocaleString("ko-KR")}주 · {item.session}</span></div><span className={`order-status ${item.selected_venue === "WAIT" ? "risk" : "complete"}`}>{item.selected_venue}</span></div>
         <dl className="venue-summary">
+          <div><dt>거래일</dt><dd>{item.trading_day_status} · {item.calendar_reason}</dd></div>
+          <div><dt>캘린더</dt><dd>{item.calendar_policy_version}</dd></div>
           <div><dt>NXT 적격성</dt><dd>{item.nxt_eligibility_status}</dd></div>
           <div><dt>실행 경계</dt><dd>{item.execution_stage} · 주문 없음</dd></div>
           {(["KRX", "NXT"] as const).map((market) => {

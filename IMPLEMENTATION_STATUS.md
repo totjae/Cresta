@@ -1,5 +1,11 @@
 # Cresta 구현 상태
 
+### 2026-08-12 KRX·NXT 공통 거래일 캘린더
+
+- 기존 평일 판정에 대한민국 공휴일·대체공휴일, 근로자의 날과 KRX 연말 휴장을 추가한 `krx-calendar-v1`을 구현했다. 캘린더 판정 실패는 `UNKNOWN/CALENDAR_UNAVAILABLE`로 닫히며 장중 시각이라도 venue 선택은 `WAIT`다.
+- 거래시장 SHADOW 평가에는 거래일 상태·사유·캘린더 정책 버전을 canonical input hash와 불변 DB 이력에 포함하고 API·Console에 같은 값을 표시한다. venue 정책은 `venue-selection-v2`로 올렸으며 주문 생성 금지 경계는 유지한다.
+- migration `20260812_0030` 왕복, Backend 전체 시험·Ruff, Frontend TypeScript·12개 component 시험·production build가 로컬에서 통과했다. 임시 휴장·개장시간 변경을 위한 공식 일정 동기화와 운영 override는 후속 범위다.
+
 ### 2026-08-12 거래시장 SHADOW 평가 Console
 
 - 감시 종목 화면에 등록 종목·방향·수량·주문 유형·긴급도를 입력하는 SHADOW 진단과 최근 평가 이력을 추가했다.

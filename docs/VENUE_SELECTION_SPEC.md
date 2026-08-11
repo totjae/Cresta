@@ -45,6 +45,8 @@ KRX 상장 종목을 사용자가 KRX 또는 NXT에 고정 배정하지 않고, 
 | VEN-009 | 실제 주문 연결 단계에서는 Guard가 송신 직전 동일 정책으로 재평가한다. snapshot 또는 세션이 바뀌면 이전 선택을 재사용하지 않는다. |
 | VEN-010 | KRX OPEN API는 venue 선택의 필수 입력이 아니다. 거래시점 시장 데이터는 키움 KRX/NXT stream을 사용하고 KRX OPEN API는 선택형 전일 검증·백필 source로만 유지한다. |
 | VEN-011 | NXT 종목 적격성은 `VERIFIED`, `INELIGIBLE`, `UNKNOWN`으로 구분한다. 정상화된 NXT quote 수신은 `VERIFIED/QUOTE_OBSERVED` 근거가 되며 별도 venue 상태 원장에 보존한다. snapshot·원장 부재를 미지원으로 단정하지 않는다. `UNKNOWN`은 NXT 단독 세션에서 `WAIT/NXT_ELIGIBILITY_UNVERIFIED`로 종료한다. |
+| VEN-012 | KRX와 NXT의 장중 세션을 계산하기 전에 공통 국내주식 거래일 캘린더를 적용한다. 토요일·일요일, 대한민국 공휴일과 대체공휴일, 근로자의 날, KRX 연말 휴장일은 시간대와 관계없이 `CLOSED/WAIT`다. |
+| VEN-013 | 거래일 판정은 정책 버전, `OPEN/CLOSED/UNKNOWN` 상태와 `WEEKDAY/WEEKEND/PUBLIC_HOLIDAY/LABOR_DAY/YEAR_END_CLOSURE/CALENDAR_UNAVAILABLE` 근거를 평가 입력 hash·DB·API에 함께 기록한다. 캘린더 라이브러리 오류나 판정 불능은 거래일로 추정하지 않고 `CALENDAR_UNAVAILABLE/WAIT`로 종료한다. |
 
 ## 5. API 계약
 
@@ -54,6 +56,8 @@ KRX 상장 종목을 사용자가 KRX 또는 NXT에 고정 배정하지 않고, 
 
 응답은 `selection_id`, `session`, `selected_venue`, `state`, `reason_codes`, 양 시장 quote 진단, `execution_stage=SHADOW`, `order_creation_allowed=false`를 반환한다.
 
+응답은 추가로 `calendar_policy_version`, `trading_day_status`, `calendar_reason`을 반환한다. 이는 화면 표시와 감사용이며 클라이언트가 세션을 다시 계산하지 않는다.
+
 ## 6. 검증 조건
 
 - 08:00·08:49:59에는 NXT, 08:50에는 opening auction, 09:00에는 KRX, 09:00:30에는 dual, 15:20에는 closing auction, 15:40에는 NXT after, 20:00에는 closed로 분류한다.
@@ -61,11 +65,12 @@ KRX 상장 종목을 사용자가 KRX 또는 NXT에 고정 배정하지 않고, 
 - 일반 주문은 가격, 긴급 주문은 잔량을 우선한다.
 - MOCK에서는 NXT/SOR 추천이 주문으로 전환되지 않는다.
 - 동일 입력 snapshot과 평가시각의 canonical hash가 재현 가능하다.
+- 평일·주말뿐 아니라 공휴일·근로자의 날·연말 휴장일에도 시간대와 무관하게 `CLOSED/WAIT`가 재현된다.
 
 ## 7. 후속 단계
 
 - 권위 있는 키움 NXT 전체 적격 목록 동기화와 명시적 `INELIGIBLE` 판정. NXT 실시간 호가 stream과 관측 기반 `VERIFIED`는 우선 구현한다.
-- KRX 공식 휴장일 calendar를 서버 입력으로 고정하고 현재 평일 기반 임시 분류를 대체
+- KRX 임시 휴장·개장시간 변경 공지를 반영하는 운영 override와 공식 일정 자동 동기화
 - 실거래 키움 SOR 주문 코드·체결시장 매핑 인수시험
 - Web UI에 양 시장 비교와 선택 근거 표시
 - Guard 송신 직전 재선택 및 기존 미체결 주문의 venue 전환 정책

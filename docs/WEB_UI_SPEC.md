@@ -389,6 +389,7 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 | UI-144 | 평가 결과는 `KRX/NXT/SOR/WAIT`, 세션, NXT 적격 상태, 양 시장의 매수·매도 1호가와 유효성, reason code, 평가 시각을 표시한다. 값이 없으면 `-` 또는 `시세 없음`으로 표시하고 KRX와 NXT를 합산하지 않는다. |
 | UI-145 | 평가 영역에는 `SHADOW · 주문 없음`과 `order_creation_allowed=false`를 고정 표시한다. 진단 실행은 Approval·OrderIntent·TradingOrder 생성이나 자동 주문을 의미하는 버튼·문구를 사용하지 않는다. |
 | UI-146 | 화면 진입 시 최근 평가 이력을 조회하고 신규 진단 성공 후 목록을 다시 조회한다. 401은 세션 종료로 처리하고, 최신 snapshot·적격 상태 부족 등 서버 거부는 기존 결과를 지우지 않은 채 안전한 오류 문구로 표시한다. |
+| UI-147 | 평가 카드에는 서버가 판정한 거래일 `OPEN/CLOSED`, 캘린더 근거와 정책 버전을 표시한다. 브라우저 시간이나 로컬 공휴일 정보로 서버 판정을 덮어쓰지 않는다. |
 
 ### 6.4 에이전트·LLM Provider 관리 화면 계약
 

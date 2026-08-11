@@ -9,9 +9,10 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
+from app.market_calendar import TradingDayDecision, evaluate_krx_trading_day
 from app.models import MarketSnapshot, User, VenueSelectionEvaluation
 
-VENUE_SELECTION_POLICY_VERSION = "venue-selection-v1"
+VENUE_SELECTION_POLICY_VERSION = "venue-selection-v2"
 KST = ZoneInfo("Asia/Seoul")
 
 
@@ -31,6 +32,9 @@ class VenueQuote:
 @dataclass(frozen=True)
 class VenueSelectionResult:
     session: str
+    trading_day_status: str
+    calendar_reason: str
+    calendar_policy_version: str
     selected_venue: str
     state: str
     reason_codes: tuple[str, ...]
@@ -42,10 +46,16 @@ def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def classify_session(now: datetime) -> str:
-    if now.astimezone(KST).weekday() >= 5:
+def _trading_day(now: datetime) -> TradingDayDecision:
+    return evaluate_krx_trading_day(now.astimezone(KST).date())
+
+
+def classify_session(now: datetime, trading_day: TradingDayDecision | None = None) -> str:
+    local_now = now.astimezone(KST)
+    decision = trading_day or _trading_day(now)
+    if decision.status != "OPEN":
         return "CLOSED"
-    current = now.astimezone(KST).time().replace(tzinfo=None)
+    current = local_now.time().replace(tzinfo=None)
     if time(8, 0) <= current < time(8, 50):
         return "NXT_PRE"
     if time(8, 50) <= current < time(9, 0):
@@ -149,8 +159,10 @@ def select_venue(
     nxt_quote: VenueQuote | None,
     now: datetime,
     max_age_seconds: int,
+    trading_day: TradingDayDecision | None = None,
 ) -> VenueSelectionResult:
-    session = classify_session(now)
+    day = trading_day or _trading_day(now)
+    session = classify_session(now, day)
     krx_valid = _quote_valid(
         krx_quote, side=side, now=now, max_age_seconds=max_age_seconds
     )
@@ -159,101 +171,61 @@ def select_venue(
         nxt_quote, side=side, now=now, max_age_seconds=max_age_seconds
     )
 
-    if session == "CLOSED":
-        return VenueSelectionResult(session, "WAIT", "WAIT", ("SESSION_CLOSED",), krx_valid, nxt_valid)
-    if session in {"KRX_OPENING_AUCTION", "KRX_CLOSING_AUCTION"}:
-        return VenueSelectionResult(
-            session, "WAIT", "WAIT", ("AUCTION_TRADING_DISABLED",), krx_valid, nxt_valid
-        )
-    if session == "NXT_AFTER_AUCTION":
-        return VenueSelectionResult(
-            session, "WAIT", "WAIT", ("NXT_AFTER_AUCTION_DISABLED",), krx_valid, nxt_valid
-        )
-    if session in {"NXT_PRE", "NXT_AFTER"}:
-        if nxt_eligibility_status == "UNKNOWN":
-            return VenueSelectionResult(
-                session,
-                "WAIT",
-                "WAIT",
-                ("NXT_ELIGIBILITY_UNVERIFIED",),
-                krx_valid,
-                nxt_valid,
-            )
-        if not nxt_eligible:
-            return VenueSelectionResult(
-                session,
-                "WAIT",
-                "WAIT",
-                ("NXT_SYMBOL_INELIGIBLE",),
-                krx_valid,
-                nxt_valid,
-            )
-        if not nxt_valid:
-            return VenueSelectionResult(
-                session,
-                "WAIT",
-                "WAIT",
-                ("NO_FRESH_EXECUTABLE_NXT_QUOTE",),
-                krx_valid,
-                nxt_valid,
-            )
-        reasons = ["NXT_ONLY_SESSION"]
-        if environment == "MOCK":
-            reasons.append("MOCK_NXT_EXECUTION_UNAVAILABLE")
-        return VenueSelectionResult(session, "NXT", "SELECTED", tuple(reasons), krx_valid, nxt_valid)
-    if session == "KRX_ONLY":
-        if not krx_valid:
-            return VenueSelectionResult(
-                session,
-                "WAIT",
-                "WAIT",
-                ("NO_FRESH_EXECUTABLE_KRX_QUOTE",),
-                krx_valid,
-                nxt_valid,
-            )
-        return VenueSelectionResult(
-            session, "KRX", "SELECTED", ("KRX_ONLY_SESSION",), krx_valid, nxt_valid
-        )
-
-    if krx_valid and nxt_valid:
-        if sor_supported and environment == "REAL":
-            return VenueSelectionResult(
-                session,
-                "SOR",
-                "SELECTED",
-                ("BROKER_SOR_AVAILABLE",),
-                krx_valid,
-                nxt_valid,
-            )
-        assert krx_quote is not None and nxt_quote is not None
-        selected, reason = _choose_dual(krx_quote, nxt_quote, side=side, urgency=urgency)
-        return VenueSelectionResult(
-            session, selected, "SELECTED", (reason,), krx_valid, nxt_valid
-        )
-    if krx_valid:
+    def result(
+        selected_venue: str,
+        state: str,
+        reason_codes: tuple[str, ...],
+    ) -> VenueSelectionResult:
         return VenueSelectionResult(
             session,
-            "KRX",
-            "SELECTED",
-            ("SINGLE_FRESH_VENUE", "ONLY_KRX_QUOTE_VALID"),
+            day.status,
+            day.reason,
+            day.policy_version,
+            selected_venue,
+            state,
+            reason_codes,
             krx_valid,
             nxt_valid,
         )
+
+    if day.status == "UNKNOWN":
+        return result("WAIT", "WAIT", ("CALENDAR_UNAVAILABLE",))
+    if session == "CLOSED":
+        return result("WAIT", "WAIT", ("SESSION_CLOSED",))
+    if session in {"KRX_OPENING_AUCTION", "KRX_CLOSING_AUCTION"}:
+        return result("WAIT", "WAIT", ("AUCTION_TRADING_DISABLED",))
+    if session == "NXT_AFTER_AUCTION":
+        return result("WAIT", "WAIT", ("NXT_AFTER_AUCTION_DISABLED",))
+    if session in {"NXT_PRE", "NXT_AFTER"}:
+        if nxt_eligibility_status == "UNKNOWN":
+            return result("WAIT", "WAIT", ("NXT_ELIGIBILITY_UNVERIFIED",))
+        if not nxt_eligible:
+            return result("WAIT", "WAIT", ("NXT_SYMBOL_INELIGIBLE",))
+        if not nxt_valid:
+            return result("WAIT", "WAIT", ("NO_FRESH_EXECUTABLE_NXT_QUOTE",))
+        reasons = ["NXT_ONLY_SESSION"]
+        if environment == "MOCK":
+            reasons.append("MOCK_NXT_EXECUTION_UNAVAILABLE")
+        return result("NXT", "SELECTED", tuple(reasons))
+    if session == "KRX_ONLY":
+        if not krx_valid:
+            return result("WAIT", "WAIT", ("NO_FRESH_EXECUTABLE_KRX_QUOTE",))
+        return result("KRX", "SELECTED", ("KRX_ONLY_SESSION",))
+
+    if krx_valid and nxt_valid:
+        if sor_supported and environment == "REAL":
+            return result("SOR", "SELECTED", ("BROKER_SOR_AVAILABLE",))
+        assert krx_quote is not None and nxt_quote is not None
+        selected, reason = _choose_dual(krx_quote, nxt_quote, side=side, urgency=urgency)
+        return result(selected, "SELECTED", (reason,))
+    if krx_valid:
+        return result("KRX", "SELECTED", ("SINGLE_FRESH_VENUE", "ONLY_KRX_QUOTE_VALID"))
     if nxt_valid:
         reasons = ["SINGLE_FRESH_VENUE", "ONLY_NXT_QUOTE_VALID"]
         if environment == "MOCK":
             reasons.append("MOCK_NXT_EXECUTION_UNAVAILABLE")
-        return VenueSelectionResult(
-            session, "NXT", "SELECTED", tuple(reasons), krx_valid, nxt_valid
-        )
-    return VenueSelectionResult(
-        session,
-        "WAIT",
-        "WAIT",
-        ("NO_FRESH_EXECUTABLE_QUOTE",),
-        krx_valid,
-        nxt_valid,
-    )
+        return result("NXT", "SELECTED", tuple(reasons))
+    return result("WAIT", "WAIT", ("NO_FRESH_EXECUTABLE_QUOTE",))
 
 
 def _quote_record(quote: VenueQuote | None, valid: bool) -> dict[str, object] | None:
@@ -313,6 +285,9 @@ def evaluate_and_store_venue_selection(
         "execution_stage": "SHADOW",
         "evaluated_at": _utc(now).isoformat(),
         "session": result.session,
+        "trading_day_status": result.trading_day_status,
+        "calendar_reason": result.calendar_reason,
+        "calendar_policy_version": result.calendar_policy_version,
         "nxt_eligible": nxt_eligibility_status == "VERIFIED",
         "nxt_eligibility_status": nxt_eligibility_status,
         "sor_supported": sor_supported,
@@ -334,6 +309,9 @@ def evaluate_and_store_venue_selection(
         environment=environment,
         execution_stage="SHADOW",
         session=result.session,
+        trading_day_status=result.trading_day_status,
+        calendar_reason=result.calendar_reason,
+        calendar_policy_version=result.calendar_policy_version,
         nxt_eligible=nxt_eligibility_status == "VERIFIED",
         nxt_eligibility_status=nxt_eligibility_status,
         sor_supported=sor_supported,

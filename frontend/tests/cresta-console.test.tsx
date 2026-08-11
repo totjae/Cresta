@@ -129,6 +129,7 @@ describe("CrestaConsole authentication", () => {
       policy_version: "venue-selection-v1", execution_stage: "SHADOW",
       order_creation_allowed: false, environment: "MOCK", symbol: "005930", side: "BUY",
       quantity: 1, order_type: "LIMIT", urgency: "NORMAL", session: "DUAL_CONTINUOUS",
+      trading_day_status: "OPEN", calendar_reason: "WEEKDAY", calendar_policy_version: "krx-calendar-v1",
       nxt_eligible: true, nxt_eligibility_status: "VERIFIED", sor_supported: false,
       selected_venue: "NXT", state: "SELECTED", reason_codes: ["BETTER_EXECUTABLE_PRICE_NXT"],
       quotes: {
@@ -162,6 +163,8 @@ describe("CrestaConsole authentication", () => {
     expect(await screen.findByText("거래시장 SHADOW 평가")).toBeInTheDocument();
     expect(screen.getAllByText("SHADOW · 주문 없음").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("BETTER_EXECUTABLE_PRICE_NXT")).toBeInTheDocument();
+    expect(screen.getByText("OPEN · WEEKDAY")).toBeInTheDocument();
+    expect(screen.getByText("krx-calendar-v1")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "SHADOW 평가" }));
     const createCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/watchlist" && init?.method === "POST");
     expect(createCall?.[1]).toEqual(expect.objectContaining({

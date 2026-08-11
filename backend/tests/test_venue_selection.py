@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.market_calendar import TradingDayDecision
 from app.models import (
     Approval,
     InstrumentVenueState,
@@ -62,6 +63,27 @@ def test_session_boundaries_follow_nxt_and_krx_windows() -> None:
     assert classify_session(_at(15, 40)) == "NXT_AFTER"
     assert classify_session(_at(20, 0)) == "CLOSED"
     assert classify_session(datetime(2026, 8, 15, 10, 0, tzinfo=KST)) == "CLOSED"
+
+
+def test_holiday_and_unavailable_calendar_fail_closed() -> None:
+    holiday = _at(10, 0).replace(month=8, day=17)
+    assert classify_session(holiday) == "CLOSED"
+
+    unavailable = select_venue(
+        side="BUY",
+        urgency="NORMAL",
+        environment="MOCK",
+        nxt_eligibility_status="VERIFIED",
+        sor_supported=False,
+        krx_quote=_quote("KRX", now=_at(10, 0)),
+        nxt_quote=_quote("NXT", now=_at(10, 0)),
+        now=_at(10, 0),
+        max_age_seconds=2,
+        trading_day=TradingDayDecision("UNKNOWN", "CALENDAR_UNAVAILABLE"),
+    )
+    assert unavailable.session == "CLOSED"
+    assert unavailable.selected_venue == "WAIT"
+    assert unavailable.reason_codes == ("CALENDAR_UNAVAILABLE",)
 
 
 def test_nxt_only_session_requires_eligibility_and_fresh_quote() -> None:
@@ -267,6 +289,9 @@ def test_diagnostic_api_persists_shadow_evaluation_without_orders(
     body = response.json()
     assert body["execution_stage"] == "SHADOW"
     assert body["order_creation_allowed"] is False
+    assert body["trading_day_status"] in {"OPEN", "CLOSED"}
+    assert body["calendar_policy_version"] == "krx-calendar-v1"
+    assert body["calendar_reason"] != "CALENDAR_UNAVAILABLE"
     assert body["nxt_eligibility_status"] == "VERIFIED"
     assert body["selected_venue"] in {"KRX", "NXT", "WAIT"}
     assert len(body["input_hash"]) == 64
@@ -274,6 +299,11 @@ def test_diagnostic_api_persists_shadow_evaluation_without_orders(
     listing = client.get("/api/v1/venue-selections?symbol=005930")
     assert listing.status_code == 200
     assert listing.json()["items"][0]["selection_id"] == body["selection_id"]
+    stored = db.scalar(select(VenueSelectionEvaluation))
+    assert stored is not None
+    assert stored.trading_day_status == body["trading_day_status"]
+    assert stored.calendar_reason == body["calendar_reason"]
+    assert '"calendar_policy_version":"krx-calendar-v1"' in stored.input_json
     assert db.scalar(select(func.count()).select_from(VenueSelectionEvaluation)) == 1
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(OrderIntent)) == 0

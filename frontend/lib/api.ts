@@ -246,6 +246,9 @@ export type VenueSelectionData = {
   order_type: "LIMIT" | "MARKET";
   urgency: "NORMAL" | "EMERGENCY";
   session: string;
+  trading_day_status: "OPEN" | "CLOSED" | "UNKNOWN";
+  calendar_reason: "WEEKDAY" | "WEEKEND" | "PUBLIC_HOLIDAY" | "LABOR_DAY" | "YEAR_END_CLOSURE" | "CALENDAR_UNAVAILABLE";
+  calendar_policy_version: string;
   nxt_eligible: boolean;
   nxt_eligibility_status: "VERIFIED" | "INELIGIBLE" | "UNKNOWN";
   sor_supported: boolean;

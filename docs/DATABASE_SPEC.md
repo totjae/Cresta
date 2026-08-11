@@ -332,10 +332,11 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-151 | migration `20260811_0027_server_owned_agent_inputs`는 기존 run을 재작성하지 않고 신규 table·nullable column·index와 제약만 추가한다. downgrade는 신규 참조 column을 제거한 뒤 context table을 삭제한다. |
 ## 거래시장 선택 평가
 
-`venue_selection_evaluations`는 [거래시장 자동 선택 명세](VENUE_SELECTION_SPEC.md)의 SHADOW 평가를 보존한다. 사용자·종목·방향·수량·주문유형·긴급도·세션·NXT 적격성·SOR 지원 여부·양 시장 snapshot 참조·선택 결과·reason code·canonical input hash를 저장한다. 이 테이블은 주문 권한을 가지지 않으며 `order_creation_allowed=false`로 고정한다.
+`venue_selection_evaluations`는 [거래시장 자동 선택 명세](VENUE_SELECTION_SPEC.md)의 SHADOW 평가를 보존한다. 사용자·종목·방향·수량·주문유형·긴급도·세션·거래일 상태·캘린더 정책과 판정 근거·NXT 적격성·SOR 지원 여부·양 시장 snapshot 참조·선택 결과·reason code·canonical input hash를 저장한다. 이 테이블은 주문 권한을 가지지 않으며 `order_creation_allowed=false`로 고정한다.
 
 `instrument_venue_states`는 종목·venue별 현재 적격 상태와 근거를 보존한다. 첫 구현은 정상 NXT quote 관측으로 `VERIFIED/QUOTE_OBSERVED`만 기록하며, quote 부재를 `INELIGIBLE`로 기록하지 않는다. 평가 시각의 적격 상태는 `venue_selection_evaluations`에도 복제해 과거 판단을 재현한다.
 
 - Migration `20260812_0028`은 SHADOW 거래시장 선택 평가 원장을 추가한다.
 - Migration `20260812_0029`는 `instrument_venue_states`를 추가한다. downgrade는 상태 원장만 제거하며 기존 market snapshot과 SHADOW 평가를 보존한다.
-- 현재 schema head는 `20260812_0029`다.
+- Migration `20260812_0030`은 거래시장 평가에 거래일 상태·캘린더 근거·정책 버전을 추가한다.
+- 현재 schema head는 `20260812_0030`이다.

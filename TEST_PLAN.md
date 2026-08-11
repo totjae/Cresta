@@ -381,7 +381,7 @@ Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript
 | T-AI-009 | AI-070~074, API-099~101, DB-092~093 | 동일 snapshot 진단·지연 시세·실행 권한 3개 모드 | 결정론적 출력, 중복 억제, 주문 0건, 안전 분기 기록 | 통과 (2026-08-04, 자동) |
 | T-UI-013 | UI-039, UI-044~045 | Mock 진단 요청과 판단 목록 표시 | 모델·snapshot·행동·실행 차단 결과를 오인 없이 표시 | 통과 (2026-08-04, component) |
 | T-WATCH-009 | MKT-080~081, API-102~104, DB-094~096 | 감시 종목 등록·중복·3개 제한·해제 | 사용자별 유일성·최대 3개·CSRF를 지키고 기존 snapshot은 보존 | 통과 (2026-08-04, 자동) |
-| T-WATCH-010 | MKT-082~090, KIW-138~143 | 시작·목록 변경 구독과 공식 `0B`·`0D` fixture | 그룹 분리, KRX·NXT item 전체 동기화, suffix 정규화, 시장별 cache·snapshot 격리 | 통과 (2026-08-12, 자동 fixture); 실제 장중 `_NX` payload 대기 |
+| T-WATCH-010 | MKT-082~089·112, KIW-138~143 | 시작·목록 변경 구독과 공식 `0B`·`0D` fixture | 그룹 분리, KRX·NXT item 전체 동기화, suffix 정규화, 시장별 cache·snapshot 격리 | 통과 (2026-08-12, 자동 fixture); 실제 장중 `_NX` payload 대기 |
 | T-UI-014 | UI-046~048 | 빈 목록·등록·시세 대기·최신 snapshot·삭제 | 슬롯과 데이터 상태를 오인 없이 표시하고 mutation은 CSRF 사용 | component 등록 통과; 삭제 수동 대기 |
 | T-WATCH-011 | MKT-090~095, DB-097~098 | 같은 분·다음 분 체결, 호가만 변경, 거래일 변경, gap·late 입력 | 결정론적 OHLCV·turnover와 VWAP·SMA5·drawdown·spread, 비정상 입력 제외 | 통과 (2026-08-04, 자동 fixture) |
 | T-UI-015 | MKT-096, API-105, UI-049 | 지표 없음과 최신 지표가 있는 감시 카드 조회 | 계산 전 null과 지표 값을 구분해 표시 | 통과 (2026-08-04, API·component) |
@@ -596,5 +596,8 @@ Local evidence: 서버 입력·Market Context 집중시험, backend 전체 회�
 | T-VENUE-010 | migration `20260812_0029`의 upgrade→downgrade→upgrade가 통과하며 market snapshot과 기존 0028 평가 원장은 보존된다. |
 | T-VENUE-011 | Console 감시 화면은 등록 종목으로 SHADOW 진단을 실행하고 선택 venue·세션·NXT 적격성·양 시장 호가·reason code를 표시하며 주문 생성 컨트롤을 제공하지 않는다. |
 | T-VENUE-012 | 진단 실패와 401에서 기존 평가 이력을 보존하고 각각 안전한 오류·세션 만료로 처리한다. |
+| T-VENUE-013 | 평일·주말·대한민국 공휴일과 대체공휴일·근로자의 날·연말 휴장일을 공통 캘린더가 판정하며 휴장일 장중 시각도 `CLOSED/WAIT`다. |
+| T-VENUE-014 | 거래일 상태·캘린더 근거·정책 버전이 DB·canonical input hash·API·Console에 일치하게 보존되고 판정 실패는 `CALENDAR_UNAVAILABLE/WAIT`다. |
+| T-VENUE-015 | migration `20260812_0030`의 upgrade→downgrade→upgrade가 통과하며 기존 평가 행은 보수적인 `UNKNOWN/CALENDAR_UNAVAILABLE` 근거로 조회된다. |
 
-Local evidence (2026-08-12): Frontend TypeScript, 12개 component 시험과 Next.js production build가 통과했다. Ubuntu 배포 후 NXT 장중 snapshot을 사용한 실제 카드 표시는 대기 중이다.
+Local evidence (2026-08-12): 평일·주말·공휴일·근로자의 날·연말 휴장과 캘린더 장애 fail-closed 집중 시험, Backend 전체 시험·Ruff, migration `20260812_0030` upgrade→downgrade→upgrade, Frontend TypeScript·12개 component 시험·Next.js production build가 통과했다. Ubuntu PostgreSQL 적용과 실제 카드의 캘린더 근거 표시는 대기 중이다.

@@ -973,6 +973,16 @@ class VenueSelectionResponse(StrictModel):
     order_type: Literal["LIMIT", "MARKET"]
     urgency: Literal["NORMAL", "EMERGENCY"]
     session: str
+    trading_day_status: Literal["OPEN", "CLOSED", "UNKNOWN"]
+    calendar_reason: Literal[
+        "WEEKDAY",
+        "WEEKEND",
+        "PUBLIC_HOLIDAY",
+        "LABOR_DAY",
+        "YEAR_END_CLOSURE",
+        "CALENDAR_UNAVAILABLE",
+    ]
+    calendar_policy_version: str
     nxt_eligible: bool
     nxt_eligibility_status: Literal["VERIFIED", "INELIGIBLE", "UNKNOWN"]
     sor_supported: bool

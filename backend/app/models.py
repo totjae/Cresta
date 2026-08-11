@@ -847,6 +847,16 @@ class VenueSelectionEvaluation(Base):
             "nxt_eligibility_status IN ('VERIFIED','INELIGIBLE','UNKNOWN')",
             name="ck_venue_selection_nxt_eligibility",
         ),
+        CheckConstraint(
+            "trading_day_status IN ('OPEN','CLOSED','UNKNOWN')",
+            name="ck_venue_selection_trading_day_status",
+        ),
+        CheckConstraint(
+            "calendar_reason IN "
+            "('WEEKDAY','WEEKEND','PUBLIC_HOLIDAY','LABOR_DAY',"
+            "'YEAR_END_CLOSURE','CALENDAR_UNAVAILABLE')",
+            name="ck_venue_selection_calendar_reason",
+        ),
         Index("ix_venue_selection_symbol_created", "symbol", "created_at"),
         Index("ix_venue_selection_input_hash", "input_hash"),
     )
@@ -863,6 +873,9 @@ class VenueSelectionEvaluation(Base):
     environment: Mapped[str] = mapped_column(String(16), nullable=False)
     execution_stage: Mapped[str] = mapped_column(String(16), nullable=False, default="SHADOW")
     session: Mapped[str] = mapped_column(String(32), nullable=False)
+    trading_day_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    calendar_reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    calendar_policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
     nxt_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
     nxt_eligibility_status: Mapped[str] = mapped_column(String(16), nullable=False)
     sor_supported: Mapped[bool] = mapped_column(Boolean, nullable=False)
