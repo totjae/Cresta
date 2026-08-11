@@ -23,7 +23,6 @@ class AnthropicMessagesAdapter(ExternalHttpAdapter):
             "model": safe_model_id(model_id),
             "max_tokens": request.max_output_tokens,
             "messages": messages,
-            "temperature": min(request.temperature, 1),
             "output_config": {
                 "format": {
                     "type": "json_schema",
@@ -31,12 +30,14 @@ class AnthropicMessagesAdapter(ExternalHttpAdapter):
                 }
             },
         }
+        if request.temperature is not None:
+            if request.temperature > 1:
+                raise ValueError("anthropic temperature must be <= 1")
+            body["temperature"] = request.temperature
         if system_parts:
             body["system"] = "\n\n".join(str(item) for item in system_parts)
         if request.top_p is not None:
             body["top_p"] = request.top_p
-        if request.service_tier != "DEFAULT":
-            body["service_tier"] = request.service_tier.lower()
         if request.tool_policy == "ALLOWLIST" and "WEB_SEARCH" in request.allowed_tools:
             body["tools"] = [
                 {

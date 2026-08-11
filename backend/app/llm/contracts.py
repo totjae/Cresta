@@ -39,7 +39,7 @@ class LlmRequest(ContractModel):
     timeout_ms: int = Field(ge=1000, le=600000)
     service_tier: Literal["DEFAULT", "PRIORITY", "FLEX"] = "DEFAULT"
     max_output_tokens: int = Field(gt=0, le=32768)
-    temperature: float = Field(ge=0, le=2)
+    temperature: float | None = Field(default=None, ge=0, le=2)
     top_p: float | None = Field(default=None, ge=0, le=1)
     reasoning_effort: Literal["LOW", "MEDIUM", "HIGH"] | None = None
     seed: int | None = None

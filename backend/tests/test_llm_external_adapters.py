@@ -426,7 +426,7 @@ def test_compatible_non_reasoning_model_keeps_sampling_and_strict_schema() -> No
         chat_path="/chat/completions",
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
-    adapter.generate_structured(_request(), "google-vertex/gemini-3.1-flash-lite")
+    adapter.generate_structured(_request(), "anthropic/claude-sonnet-4")
     body = captured["body"]
     assert isinstance(body, dict)
     assert body["max_tokens"] == 256
@@ -435,6 +435,28 @@ def test_compatible_non_reasoning_model_keeps_sampling_and_strict_schema() -> No
     assert "max_completion_tokens" not in body
     assert body["response_format"]["type"] == "json_schema"
     assert "Return exactly one JSON object" in body["messages"][0]["content"]
+
+
+def test_compatible_gemini_3_omits_sampling_parameters() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(503, json={"error": "fixture"})
+
+    adapter = OpenAICompatibleAdapter(
+        endpoint="https://api.llmgateway.example/v1",
+        api_key="secret",
+        chat_path="/chat/completions",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    adapter.generate_structured(
+        _request(reasoning_effort="LOW"), "google-vertex/gemini-3.1-flash-lite"
+    )
+    body = captured["body"]
+    assert "temperature" not in body
+    assert "top_p" not in body
+    assert body["reasoning_effort"] == "low"
 
 
 @pytest.mark.parametrize(
@@ -446,6 +468,23 @@ def test_compatible_non_reasoning_model_keeps_sampling_and_strict_schema() -> No
             ),
             "gpt-test",
         ),
+    ],
+)
+def test_native_adapters_forward_explicit_service_tier(adapter_factory, model_id: str) -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(503, json={"error": "fixture"})
+
+    adapter = adapter_factory(httpx.Client(transport=httpx.MockTransport(handler)))
+    adapter.generate_structured(_request("PRIORITY"), model_id)
+    assert captured["body"]["service_tier"] == "priority"
+
+
+@pytest.mark.parametrize(
+    ("adapter_factory", "model_id"),
+    [
         (
             lambda client: AnthropicMessagesAdapter(
                 endpoint="https://api.anthropic.com/v1", api_key="secret", client=client
@@ -462,7 +501,9 @@ def test_compatible_non_reasoning_model_keeps_sampling_and_strict_schema() -> No
         ),
     ],
 )
-def test_native_adapters_forward_explicit_service_tier(adapter_factory, model_id: str) -> None:
+def test_native_adapters_do_not_forward_unsupported_service_tier(
+    adapter_factory, model_id: str
+) -> None:
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -471,7 +512,28 @@ def test_native_adapters_forward_explicit_service_tier(adapter_factory, model_id
 
     adapter = adapter_factory(httpx.Client(transport=httpx.MockTransport(handler)))
     adapter.generate_structured(_request("PRIORITY"), model_id)
-    assert captured["body"]["service_tier"] == "priority"
+    assert "service_tier" not in captured["body"]
+
+
+def test_gemini_3_uses_model_sampling_defaults_and_maps_thinking_level() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(503, json={"error": "fixture"})
+
+    adapter = GeminiGenerateContentAdapter(
+        endpoint="https://generativelanguage.googleapis.com/v1beta",
+        api_key="secret",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    adapter.generate_structured(
+        _request(reasoning_effort="MEDIUM"), "gemini-3.6-flash"
+    )
+    generation = captured["body"]["generationConfig"]
+    assert "temperature" not in generation
+    assert "topP" not in generation
+    assert generation["thinkingConfig"] == {"thinkingLevel": "medium"}
 
 
 @pytest.mark.parametrize(

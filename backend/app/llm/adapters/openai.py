@@ -37,7 +37,7 @@ class OpenAIResponsesAdapter(ExternalHttpAdapter):
             },
             "store": False,
         }
-        if not reasoning_model:
+        if not reasoning_model and request.temperature is not None:
             body["temperature"] = request.temperature
         if request.top_p is not None and not reasoning_model:
             body["top_p"] = request.top_p

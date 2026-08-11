@@ -191,13 +191,13 @@ def test_mock_provider_model_and_shadow_route_lifecycle(client: TestClient, db: 
                 "local_execution": True,
             },
             "max_context_tokens": 4096,
-            "max_output_tokens": 1024,
             "temperature": "0",
         },
     )
     assert model_response.status_code == 201, model_response.text
     model = model_response.json()
     assert model["state"] == "DRAFT"
+    assert model["max_output_tokens"] == 8192
     validated_model = client.post(f"/api/v1/ai/models/{model['id']}/validate", headers=headers)
     assert validated_model.status_code == 200, validated_model.text
     assert validated_model.json()["state"] == "VALIDATED"
@@ -492,7 +492,7 @@ def test_provider_registration_discovers_models_before_persisting(
     monkeypatch.setattr(
         "app.llm.profiles.discover_models",
         lambda adapter_type, credential: [
-            DiscoveredModel("gpt-discovered", "GPT Discovered", 8192, 2048)
+            DiscoveredModel("gpt-discovered", "GPT Discovered", 8192, None)
         ],
     )
     challenge = client.post(
@@ -539,6 +539,7 @@ def test_provider_registration_discovers_models_before_persisting(
     assert payload["provider"]["state"] == "VALIDATED"
     assert payload["provider"]["health_status"] == "READY"
     assert payload["models"][0]["provider_model_id"] == "gpt-discovered"
+    assert payload["models"][0]["max_output_tokens"] == 8192
     assert payload["models"][0]["state"] == "DRAFT"
     assert raw_secret not in registered.text
     assert db.scalar(select(func.count()).select_from(LlmProviderProfile)) == 1

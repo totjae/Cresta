@@ -371,7 +371,7 @@ export type LlmModelProfile = {
   capabilities: LlmCapabilities;
   max_context_tokens: number | null;
   max_output_tokens: number;
-  temperature: string;
+  temperature: string | null;
   top_p: string | null;
   reasoning_effort: "LOW" | "MEDIUM" | "HIGH" | null;
   seed: number | null;
@@ -406,7 +406,7 @@ export type LlmRoleRoute = {
   reasoning_effort_override: "LOW" | "MEDIUM" | "HIGH" | null;
   seed_override: number | null;
   effective_parameters: {
-    temperature: string;
+    temperature: string | null;
     temperature_source: string;
     top_p: string | null;
     top_p_source: string;
@@ -713,12 +713,12 @@ export const llmApi = {
         alias,
         provider_model_id: providerModelId,
         capabilities,
-        max_context_tokens: 4096,
-        max_output_tokens: defaults.maxOutputTokens ?? 1024,
-        temperature: defaults.temperature ?? "0",
+        max_context_tokens: null,
+        max_output_tokens: defaults.maxOutputTokens ?? 8192,
+        temperature: defaults.temperature ?? null,
         top_p: defaults.topP ?? null,
         reasoning_effort: null,
-        seed: defaults.seed === undefined ? 0 : defaults.seed,
+        seed: defaults.seed ?? null,
       }),
     });
   },
@@ -792,7 +792,7 @@ export const llmApi = {
         primary_model_profile_id: modelProfileId,
         failure_policy: failurePolicy,
         fallback_model_profile_id: fallbackModelProfileId,
-        timeout_ms: parameters.timeoutMs ?? 30000,
+        timeout_ms: parameters.timeoutMs ?? 120000,
         service_tier: parameters.serviceTier ?? "DEFAULT",
         web_search_enabled: parameters.webSearchEnabled ?? false,
         daily_call_limit: 100,

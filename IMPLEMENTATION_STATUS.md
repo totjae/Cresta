@@ -4,6 +4,20 @@
 
 명세된 요구사항의 계획, 구현, 검증 상태를 구분해 관리한다. `명세 완료`는 코드 구현이나 시험 완료를 의미하지 않는다.
 
+### 2026-08-11 LLM 구조화 출력 기본 여유 상향
+
+- 신규 Model Profile의 API·ORM·DB server default와 Provider 미명시 fallback을 `8192`로 상향했다.
+- Console의 신규 역할 변경 후보는 `max output=8192`를 명시적 override 기본값으로 사용한다.
+- 기존 Model Profile, 활성 Route 및 Invocation 이력은 자동 변경하지 않는다.
+- Backend 전체 시험·Ruff, Frontend component 시험·TypeScript 검사와 `20260811_0024` upgrade/downgrade/upgrade가 통과해 `구현·로컬 검증 완료` 상태다. Ubuntu PostgreSQL 배포 검증은 남아 있다.
+
+### 2026-08-11 LLM 생성 파라미터 안전화
+
+- 신규 sampling·seed 기본값을 Adapter 상속으로 변경하고 Gemini 3.x sampling 생략·thinkingLevel 변환, routed OpenAI reasoning 판정을 구현했다.
+- 신규 Route 기본 120초, Flex 권장 300초, 연결 제한 10초와 Provider별 service tier 검증을 반영했다.
+- 일일 호출 횟수를 실제 Invocation 경계에서 집행하며 비용 제한은 가격 산정 미구현 상태에서 양수 설정을 거부한다.
+- 기존 활성 Route와 Model Profile 값은 자동 변경하지 않는다. Backend 전체 회귀·Ruff, Frontend component·TypeScript, SQLite migration 왕복 검증이 통과했으며 Ubuntu PostgreSQL 배포 검증은 남아 있다.
+
 ## 2. 상태 정의
 
 - `미명세`: 요구사항이 아직 문서화되지 않음

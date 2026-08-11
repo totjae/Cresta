@@ -6,6 +6,7 @@ from typing import Any
 from app.llm.adapters.http_base import ExternalHttpAdapter, parse_json_text, safe_model_id
 from app.llm.contracts import LlmRequest, ModelCapabilities
 from app.llm.parameter_policy import (
+    is_gemini_3_model,
     is_openai_reasoning_model,
     uses_completion_token_parameter,
 )
@@ -51,7 +52,13 @@ class OpenAICompatibleAdapter(ExternalHttpAdapter):
             body["max_completion_tokens"] = request.max_output_tokens
         else:
             body["max_tokens"] = request.max_output_tokens
-        if not is_openai_reasoning_model(normalized_model_id):
+        reasoning_or_gemini_3 = is_openai_reasoning_model(
+            normalized_model_id
+        ) or is_gemini_3_model(normalized_model_id)
+        if (
+            not reasoning_or_gemini_3
+            and request.temperature is not None
+        ):
             body["temperature"] = request.temperature
             if request.top_p is not None:
                 body["top_p"] = request.top_p

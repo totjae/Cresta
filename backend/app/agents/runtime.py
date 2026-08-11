@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,7 @@ from app.agents.reason_codes import (
 from app.config import get_settings
 from app.llm.contracts import LlmRequest
 from app.llm.discovery import get_template
+from app.llm.parameter_policy import supports_service_tier
 from app.llm.registry import AdapterNotImplementedError, provider_registry
 from app.llm.secrets import LlmSecretError, LlmSecretStore
 from app.models import (
@@ -363,6 +364,13 @@ def _invoke_once(
     db.flush()
     if stage.invocation_id is None:
         stage.invocation_id = invocation.id
+    if binding.route.service_tier != "DEFAULT" and not supports_service_tier(
+        provider.provider_template_id
+    ):
+        invocation.state = "PROVIDER_ERROR"
+        invocation.error_code = "AGENT_SERVICE_TIER_UNSUPPORTED"
+        invocation.completed_at = now
+        return None
     prompt = (
         db.get(LlmPromptProfile, binding.route.prompt_profile_id)
         if binding.route.prompt_profile_id
@@ -426,7 +434,9 @@ def _invoke_once(
             binding.route.temperature_override
             if binding.route.temperature_override is not None
             else model.temperature
-        ),
+        )
+        if (binding.route.temperature_override is not None or model.temperature is not None)
+        else None,
         top_p=float(
             binding.route.top_p_override
             if binding.route.top_p_override is not None
@@ -565,6 +575,41 @@ def _invoke_model(
     role_input: dict[str, object],
     now: datetime,
 ) -> InvocationOutcome:
+    day_start_kst = now.astimezone(ZoneInfo("Asia/Seoul")).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    day_start_utc = day_start_kst.astimezone(UTC)
+    daily_calls = db.scalar(
+        select(func.count(LlmInvocation.id))
+        .join(AgentStageRun, AgentStageRun.id == LlmInvocation.stage_run_id)
+        .where(
+            AgentStageRun.route_id == binding.route.id,
+            LlmInvocation.created_at >= day_start_utc,
+            or_(
+                LlmInvocation.error_code.is_(None),
+                LlmInvocation.error_code != "LOCAL_DAILY_CALL_LIMIT",
+            ),
+        )
+    ) or 0
+    if daily_calls >= binding.route.daily_call_limit:
+        stage.state = "RUNNING"
+        stage.started_at = now
+        invocation = LlmInvocation(
+            stage_run_id=stage.id,
+            requested_provider_profile_id=binding.provider.id,
+            requested_model_profile_id=binding.model.id,
+            state="RATE_LIMITED",
+            input_hash=stage.input_hash,
+            runtime_context_at=now,
+            web_search_enabled=binding.route.web_search_enabled,
+            error_code="LOCAL_DAILY_CALL_LIMIT",
+            completed_at=now,
+        )
+        db.add(invocation)
+        db.flush()
+        if stage.invocation_id is None:
+            stage.invocation_id = invocation.id
+        raise AgentRuntimeError("AGENT_DAILY_CALL_LIMIT")
     outcome = _invoke_once(
         db,
         stage=stage,
@@ -724,7 +769,12 @@ def create_diagnostic_run(
                     binding.route.temperature_override
                     if binding.route.temperature_override is not None
                     else binding.model.temperature
-                ),
+                )
+                if (
+                    binding.route.temperature_override is not None
+                    or binding.model.temperature is not None
+                )
+                else None,
                 "top_p": str(
                     binding.route.top_p_override
                     if binding.route.top_p_override is not None

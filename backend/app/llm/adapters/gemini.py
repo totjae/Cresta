@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 from app.llm.adapters.http_base import ExternalHttpAdapter, parse_json_text, safe_model_id
 from app.llm.contracts import LlmRequest, ModelCapabilities
+from app.llm.parameter_policy import is_gemini_3_model
 from app.llm.source_candidates import candidates_from_values
 
 
@@ -34,17 +35,21 @@ class GeminiGenerateContentAdapter(ExternalHttpAdapter):
                 contents.append({"role": role, "parts": [{"text": str(content)}]})
         generation: dict[str, Any] = {
             "maxOutputTokens": request.max_output_tokens,
-            "temperature": request.temperature,
             "responseMimeType": "application/json",
             "responseJsonSchema": request.output_json_schema,
         }
-        if request.top_p is not None:
+        gemini_3_model = is_gemini_3_model(model)
+        if request.temperature is not None and not gemini_3_model:
+            generation["temperature"] = request.temperature
+        if request.top_p is not None and not gemini_3_model:
             generation["topP"] = request.top_p
         if request.seed is not None:
             generation["seed"] = request.seed
         body: dict[str, Any] = {"contents": contents, "generationConfig": generation}
-        if request.service_tier != "DEFAULT":
-            body["service_tier"] = request.service_tier.lower()
+        if request.reasoning_effort is not None:
+            generation["thinkingConfig"] = {
+                "thinkingLevel": request.reasoning_effort.lower()
+            }
         if system_parts:
             body["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
         if request.tool_policy == "ALLOWLIST" and "WEB_SEARCH" in request.allowed_tools:

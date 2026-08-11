@@ -21,7 +21,11 @@ from app.llm.discovery import (
     get_template,
     resolve_endpoint,
 )
-from app.llm.parameter_policy import is_openai_reasoning_model
+from app.llm.parameter_policy import (
+    is_gemini_3_model,
+    is_openai_reasoning_model,
+    supports_service_tier,
+)
 from app.llm.prompts import LlmPromptError, get_prompt
 from app.llm.registry import AdapterNotImplementedError, provider_registry
 from app.llm.router import RouteBoundaryError, validate_foundation_route
@@ -220,7 +224,10 @@ def _discovered_capabilities(
             adapter_type in {"OPENAI_RESPONSES", "GEMINI_GENERATE_CONTENT"}
             or (
                 adapter_type == "OPENAI_COMPATIBLE"
-                and is_openai_reasoning_model(model_id)
+                and (
+                    is_openai_reasoning_model(model_id)
+                    or is_gemini_3_model(model_id)
+                )
             )
         ),
         seed=adapter_type == "GEMINI_GENERATE_CONTENT",
@@ -270,8 +277,8 @@ def _add_discovered_models(
             provider_model_id=item.provider_model_id,
             capabilities_json=capabilities.model_dump_json(),
             max_context_tokens=item.max_context_tokens,
-            max_output_tokens=min(item.max_output_tokens or 1024, 32768),
-            temperature=Decimal(0),
+            max_output_tokens=min(item.max_output_tokens or 8192, 32768),
+            temperature=None,
             top_p=None,
             reasoning_effort=None,
             seed=None,
@@ -677,7 +684,7 @@ def create_model(
     capabilities: ModelCapabilities,
     max_context_tokens: int | None,
     max_output_tokens: int,
-    temperature: Decimal,
+    temperature: Decimal | None,
     top_p: Decimal | None,
     reasoning_effort: str | None,
     seed: int | None,
@@ -1008,23 +1015,16 @@ def validate_route(
             raise LlmProfileError("ADAPTER_NOT_IMPLEMENTED") from exc
     if provider.adapter_type != "MOCK" and not provider.credential_secret_ref:
         raise LlmProfileError("PROVIDER_CREDENTIAL_REQUIRED")
-    tier_adapters = [provider.adapter_type, *(
-        get_provider(db, user.id, item.provider_profile_id).adapter_type
-        for item in fallback_models
-    )]
-    if route.service_tier == "PRIORITY" and any(
-        adapter_type == "MOCK" for adapter_type in tier_adapters
+    tier_providers = [
+        provider,
+        *(get_provider(db, user.id, item.provider_profile_id) for item in fallback_models),
+    ]
+    if route.service_tier != "DEFAULT" and any(
+        not supports_service_tier(item.provider_template_id) for item in tier_providers
     ):
         raise LlmProfileError("SERVICE_TIER_UNSUPPORTED")
-    if route.service_tier == "FLEX" and any(
-        adapter_type not in {
-            "OPENAI_RESPONSES",
-            "GEMINI_GENERATE_CONTENT",
-            "OPENAI_COMPATIBLE",
-        }
-        for adapter_type in tier_adapters
-    ):
-        raise LlmProfileError("SERVICE_TIER_UNSUPPORTED")
+    if route.daily_cost_limit_krw > 0:
+        raise LlmProfileError("DAILY_COST_LIMIT_UNAVAILABLE")
     try:
         provider_registry.resolve(
             provider.adapter_type,
@@ -1038,6 +1038,29 @@ def validate_route(
         capabilities,
         *(ModelCapabilities.model_validate_json(item.capabilities_json) for item in fallback_models),
     ]
+    effective_temperatures = [
+        route.temperature_override
+        if route.temperature_override is not None
+        else item.temperature
+        for item in [model, *fallback_models]
+    ]
+    provider_model_pairs = list(zip(tier_providers, [model, *fallback_models], strict=True))
+    if any(
+        item is not None and item > 1
+        for item, (item_provider, _) in zip(
+            effective_temperatures, provider_model_pairs, strict=True
+        )
+        if item_provider.adapter_type == "ANTHROPIC_MESSAGES"
+    ):
+        raise LlmProfileError("MODEL_PARAMETER_UNSUPPORTED_TEMPERATURE")
+    if (
+        route.temperature_override is not None or route.top_p_override is not None
+    ) and any(
+            item_provider.adapter_type == "GEMINI_GENERATE_CONTENT"
+            and is_gemini_3_model(item_model.provider_model_id)
+            for item_provider, item_model in provider_model_pairs
+    ):
+        raise LlmProfileError("MODEL_PARAMETER_USE_ADAPTER_DEFAULT")
     if route.reasoning_effort_override is not None and any(
         not item.reasoning for item in model_capabilities
     ):
@@ -1078,7 +1101,7 @@ def effective_generation_parameters(
         else model.temperature,
         "temperature_source": "ROLE_OVERRIDE"
         if route.temperature_override is not None
-        else "MODEL_DEFAULT",
+        else ("MODEL_DEFAULT" if model.temperature is not None else "ADAPTER_DEFAULT"),
         "top_p": route.top_p_override if route.top_p_override is not None else model.top_p,
         "top_p_source": "ROLE_OVERRIDE"
         if route.top_p_override is not None

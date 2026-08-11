@@ -17,6 +17,8 @@ from app.models import (
     EvidenceBundle,
     IndicatorSnapshot,
     LlmInvocation,
+    LlmModelProfile,
+    LlmRoleRoute,
     MarketSnapshot,
     MarketStreamState,
     TradingOrder,
@@ -291,3 +293,66 @@ def test_agent_runtime_rejects_incomplete_route_set_without_creating_run(
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "AGENT_ROUTE_SET_INCOMPLETE"
     assert db.scalar(select(func.count()).select_from(AgentRun)) == 0
+
+
+def test_agent_runtime_enforces_route_daily_call_limit_before_provider_call(
+    client: TestClient, db: Session
+) -> None:
+    _market_fixture(db)
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    route_ids = _routes(client, headers)
+    technical_route = db.get(LlmRoleRoute, route_ids["TECHNICAL_SCOUT"])
+    assert technical_route is not None
+    technical_route.daily_call_limit = 1
+    db.commit()
+
+    response = client.post(
+        "/api/v1/ai/agent-runs/diagnostic",
+        headers=headers,
+        json={
+            "schema_version": "1.0",
+            "market": "KRX",
+            "symbol": "005930",
+            "route_ids": route_ids,
+        },
+    )
+    assert response.status_code == 201
+    run_id = response.json()["run_id"]
+    technical_stage = db.scalar(
+        select(AgentStageRun).where(
+            AgentStageRun.run_id == run_id,
+            AgentStageRun.role == "TECHNICAL_SCOUT",
+        )
+    )
+    assert technical_stage is not None
+    model = db.get(LlmModelProfile, technical_route.primary_model_profile_id)
+    assert model is not None
+    db.add(
+        LlmInvocation(
+            stage_run_id=technical_stage.id,
+            requested_provider_profile_id=model.provider_profile_id,
+            requested_model_profile_id=model.id,
+            state="SUCCEEDED",
+            input_hash=technical_stage.input_hash,
+            validation_status="PASSED",
+            completed_at=datetime.now(UTC),
+        )
+    )
+    db.commit()
+
+    for _ in range(3):
+        assert process_agent_work_once(db, worker_id="daily-limit-worker", lease_seconds=30)
+
+    db.refresh(technical_stage)
+    assert technical_stage.state == "FAILED"
+    assert technical_stage.error_code == "AGENT_DAILY_CALL_LIMIT"
+    limited = db.scalar(
+        select(LlmInvocation).where(
+            LlmInvocation.stage_run_id == technical_stage.id,
+            LlmInvocation.error_code == "LOCAL_DAILY_CALL_LIMIT",
+        )
+    )
+    assert limited is not None
+    assert limited.state == "RATE_LIMITED"
+    assert limited.actual_provider is None

@@ -638,8 +638,8 @@ class LlmModelCreateRequest(StrictModel):
     provider_model_id: str = Field(min_length=1, max_length=128)
     capabilities: LlmCapabilitiesPayload
     max_context_tokens: int | None = Field(default=None, ge=1, le=2_000_000)
-    max_output_tokens: int = Field(default=1024, ge=1, le=32768)
-    temperature: Decimal = Field(default=Decimal(0), ge=0, le=2)
+    max_output_tokens: int = Field(default=8192, ge=1, le=32768)
+    temperature: Decimal | None = Field(default=None, ge=0, le=2)
     top_p: Decimal | None = Field(default=None, ge=0, le=1)
     reasoning_effort: Literal["LOW", "MEDIUM", "HIGH"] | None = None
     seed: int | None = Field(default=None, ge=-2147483648, le=2147483647)
@@ -653,7 +653,7 @@ class LlmModelResponse(StrictModel):
     capabilities: LlmCapabilitiesPayload
     max_context_tokens: int | None
     max_output_tokens: int
-    temperature: Decimal
+    temperature: Decimal | None
     top_p: Decimal | None
     reasoning_effort: Literal["LOW", "MEDIUM", "HIGH"] | None
     seed: int | None
@@ -709,7 +709,7 @@ class LlmRouteCreateRequest(StrictModel):
     primary_model_profile_id: str = Field(min_length=36, max_length=36)
     failure_policy: Literal["FAIL_STOP", "FAILOVER"] = "FAIL_STOP"
     fallback_model_profile_id: str | None = Field(default=None, min_length=36, max_length=36)
-    timeout_ms: int = Field(default=30000, ge=1000, le=600000)
+    timeout_ms: int = Field(default=120000, ge=1000, le=600000)
     service_tier: Literal["DEFAULT", "PRIORITY", "FLEX"] = "DEFAULT"
     web_search_enabled: bool = False
     daily_call_limit: int = Field(default=100, ge=1, le=100000)
@@ -726,7 +726,7 @@ class LlmRouteCreateRequest(StrictModel):
 
 
 class LlmEffectiveGenerationParameters(StrictModel):
-    temperature: Decimal
+    temperature: Decimal | None
     temperature_source: str
     top_p: Decimal | None
     top_p_source: str

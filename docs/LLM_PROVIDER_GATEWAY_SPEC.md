@@ -4,6 +4,21 @@
 
 OpenAI, Anthropic, Google Gemini의 공식 API와 Vercel AI Gateway, OpenAI 호환 Gateway, Ollama를 Cresta의 동일한 구조화 판단 계약으로 호출하기 위한 Adapter, 모델 기능, 라우팅, 실패 처리, 비밀 관리와 운영 기준을 정의한다.
 
+### 구조화 출력 토큰 기본값 (2026-08-11)
+
+- `LLM-PROVIDER-142`: Provider 모델 조회 결과에 출력 한도가 명시되지 않은 신규 Model Profile은 `max_output_tokens=8192`를 기본값으로 사용한다. Provider가 값을 명시하면 해당 Model Profile 기본값으로 사용하되 canonical 상한 `32768`을 적용한다.
+- `LLM-PROVIDER-143`: Console의 신규 역할 변경 후보는 구조화된 Scout·Core JSON이 완성될 여유를 확보하도록 역할 override `8192`를 기본 입력한다. 사용자는 `1..32768` 범위에서 명시적으로 변경할 수 있다.
+- `LLM-PROVIDER-144`: 기본값 상향은 기존 Model Profile, `VALIDATED/ACTIVE` Route 및 과거 Invocation을 수정하지 않는다. 기존 배정은 사용자가 새 Route를 생성·활성화하기 전까지 동일한 값으로 재현되어야 한다.
+
+### 생성 파라미터 및 제한 기본값 (2026-08-11)
+
+- `LLM-PROVIDER-145`: 신규 Model Profile의 `temperature`, `top_p`, `reasoning_effort`, `seed` 기본값은 `null`이며 `null`은 Provider/Adapter 기본값 사용을 뜻한다.
+- `LLM-PROVIDER-146`: Gemini 3.x에는 `temperature`와 `top_p`를 전송하지 않는다. 명시 reasoning은 Gemini `thinkingConfig.thinkingLevel`로 변환하며 지원하지 않는 역할 override는 Route 검증에서 거부한다.
+- `LLM-PROVIDER-147`: 신규 Route 기본 전체 응답 제한은 120초이고 Flex 선택 시 Console 권장값은 300초다. 600초는 사용자가 명시한 진단용 상한이며 TCP/TLS 연결 제한은 10초다.
+- `LLM-PROVIDER-148`: 비기본 service tier는 검증된 OpenAI, LLM Gateway, Vercel AI Gateway 연결에서만 허용한다. 그 밖의 Provider에는 전송하지 않고 Route 검증을 실패시킨다.
+- `LLM-PROVIDER-149`: `daily_call_limit`는 Asia/Seoul 날짜 기준 실제 Provider 호출 전에 집행한다. 제한 도달은 외부 호출 없이 `LOCAL_DAILY_CALL_LIMIT` Invocation 이력을 남기고 fail-stop한다. 비용 산정표가 없는 동안 `daily_cost_limit_krw`의 양수 설정은 검증하지 않는다.
+- `LLM-PROVIDER-150`: 수동 모델 등록 시 알 수 없는 context 한도를 임의로 `4096`으로 만들지 않으며 seed를 `0`으로 강제하지 않는다.
+
 ## 2. 적용 범위
 
 - Provider·Gateway·Model profile과 역할별 route
@@ -436,7 +451,7 @@ Provider·Model·Route Foundation의 누적형 화면은 역할 배정 관리 �
 
 ### 역할별 응답 제한시간과 서비스 티어 (2026-08-10)
 
-- `LLM-PROVIDER-121`: `timeout_ms`는 연결 성공 시각이나 첫 토큰 시각이 아니라 최종 구조화 JSON 응답을 모두 수신할 때까지의 역할별 전체 응답 제한시간이다. 범위는 1–600초이고 신규 후보 기본값은 30초다. TCP/TLS 연결 단계는 이 값과 별도로 최대 3초로 제한한다.
+- `LLM-PROVIDER-121`: `timeout_ms`는 연결 성공 시각이나 첫 토큰 시각이 아니라 최종 구조화 JSON 응답을 모두 수신할 때까지의 역할별 전체 응답 제한시간이다. 범위는 1–600초이고 신규 후보 기본값은 120초다. TCP/TLS 연결 단계는 이 값과 별도로 최대 10초로 제한한다.
 - `LLM-PROVIDER-122`: 현재 Adapter는 non-streaming 응답을 사용한다. 향후 streaming transport를 추가하더라도 Agent 판단은 완성된 JSON의 서버 schema 검증이 끝난 뒤에만 확정한다.
 - `LLM-PROVIDER-123`: 역할 route는 `DEFAULT`, `PRIORITY`, `FLEX` 서비스 티어를 저장한다. `DEFAULT`는 요청 필드를 생략하여 Provider의 Standard/Auto 정책을 따르고, 나머지는 Adapter가 소문자 provider 필드로 전달한다.
 - `LLM-PROVIDER-124`: 서비스 티어와 timeout은 역할 배정 version의 일부다. 후보 검증과 원자 활성화를 거쳐야 변경되며 기존 run과 route 이력은 당시 값을 보존한다.

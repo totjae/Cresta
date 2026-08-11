@@ -4,6 +4,12 @@
 
 Cresta의 거래·리스크·감시 정책을 Web UI에서 안전하게 설정하고, 범위·우선순위·버전·적용 시점과 충돌 검증을 일관되게 관리한다.
 
+### LLM 출력 토큰 기본값 (2026-08-11)
+
+- `CFG-101`: Provider가 별도 값을 제공하지 않은 신규 Model Profile과 신규 역할 배정 초안의 `max_output_tokens` 기본값은 `8192`이다. 역할의 명시적 override가 Model Profile 기본값보다 우선하며 기존 활성·버전 Route는 기본값 변경으로 자동 수정하지 않는다.
+- `CFG-102`: 신규 역할 배정의 응답 제한은 120초, Flex 권장값은 300초이며 sampling·reasoning·seed는 모델 기본값을 우선한다. 사용자가 지원하지 않는 값을 명시하면 후보 검증은 fail-closed한다.
+- `CFG-103`: service tier 선택지는 현재 모델 Provider가 OpenAI, LLM Gateway 또는 Vercel AI Gateway일 때만 표시한다.
+
 ## 2. 적용 범위
 
 - 사용자 기본 설정과 종목별 재정의

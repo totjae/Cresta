@@ -386,8 +386,11 @@ describe("execution policy settings", () => {
     expect(screen.getByText("0/5 ACTIVE")).toBeInTheDocument();
     expect(screen.getAllByText(/timeout 10s/)).toHaveLength(5);
     const timeoutInputs = screen.getAllByLabelText(/^전체 응답 제한\(초\)/);
+    const maxOutputInputs = screen.getAllByLabelText("max output");
     expect(screen.getAllByLabelText("서비스 티어")[0]).toHaveValue("DEFAULT");
-    expect(timeoutInputs[0]).toHaveValue(30);
+    expect(timeoutInputs[0]).toHaveValue(120);
+    expect(maxOutputInputs).toHaveLength(5);
+    expect(maxOutputInputs.every((input) => (input as HTMLInputElement).value === "8192")).toBe(true);
     await user.click(screen.getByRole("button", { name: "현재 배정 적용" }));
     expect(await screen.findByRole("dialog", { name: "역할별 모델 배정 적용" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "5개 역할 적용" }));

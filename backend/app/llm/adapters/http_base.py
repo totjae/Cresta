@@ -63,7 +63,7 @@ class ExternalHttpAdapter(ABC):
         response_timeout_seconds = request.timeout_ms / 1000
         http_timeout = httpx.Timeout(
             response_timeout_seconds,
-            connect=min(3.0, response_timeout_seconds),
+            connect=min(10.0, response_timeout_seconds),
         )
         try:
             if self._client is None:

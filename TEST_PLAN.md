@@ -4,6 +4,27 @@
 
 제품·운영·주문 명세의 요구사항을 검증 가능한 시험으로 연결한다. 구현 전에는 계획 상태로 유지하고, 실제 실행 후 결과와 근거를 추가한다.
 
+### LLM 출력 토큰 기본값 시험 (2026-08-11)
+
+- `T-LLM-TOKEN-001`: `max_output_tokens`를 생략한 신규 Model Profile API 요청이 `8192`를 저장·반환하는지 확인한다.
+- `T-LLM-TOKEN-002`: Provider 조회 결과가 출력 한도를 제공하지 않으면 `8192`, 제공하면 해당 값(최대 `32768`)을 사용하는지 확인한다.
+- `T-LLM-TOKEN-003`: Console의 신규 역할 후보 5개가 `max output=8192`로 시작하고 사용자가 명시적으로 변경할 수 있는지 확인한다.
+- `T-LLM-TOKEN-004`: migration이 DB server default를 `8192`로 변경하되 기존 Profile·Route 값을 수정하지 않는지 upgrade/downgrade로 확인한다.
+
+Local evidence: Backend 전체 시험과 Ruff, Frontend 12개 component 시험과 TypeScript 검사가 통과했다. SQLite migration 왕복에서 head default `8192`, downgrade default `1024`, 재-upgrade `8192`를 확인했다. Ubuntu PostgreSQL migration과 신규 역할 후보 화면은 배포 후 확인한다.
+
+### LLM 파라미터 안전 기본값 시험 (2026-08-11)
+
+- `T-LLM-PARAM-001`: 신규 Model Profile의 sampling·seed 기본값이 null이고 수동 등록의 context 한도가 임의 생성되지 않는지 확인한다.
+- `T-LLM-PARAM-002`: Gemini 3.x가 temperature/top_p를 생략하고 reasoning을 thinkingLevel로 변환하는지 확인한다.
+- `T-LLM-PARAM-003`: `openai/gpt-5-*` routed ID도 reasoning 모델로 판정해 sampling 파라미터를 전송하지 않는지 확인한다.
+- `T-LLM-PARAM-004`: 신규 Route 120초, Flex UI 300초, 연결 제한 10초를 확인한다.
+- `T-LLM-PARAM-005`: 지원 Provider에만 service tier를 허용하고 양수 비용 제한은 미지원으로 거부하는지 확인한다.
+- `T-LLM-PARAM-006`: 일일 호출 한도 도달 시 외부 호출 없이 RATE_LIMITED Invocation을 기록하는지 확인한다.
+- `T-LLM-PARAM-007`: migration `20260811_0025`가 기존 값은 보존하면서 temperature nullable과 Route timeout server default를 변경하는지 왕복 확인한다.
+
+Local evidence: Backend 전체 시험과 Ruff, Frontend 12개 component 시험과 TypeScript 검사가 통과했다. SQLite `20260811_0025` 왕복에서 head는 temperature nullable·timeout `120000`·max output `8192`, downgrade는 temperature non-null default `0`·timeout `30000`, 재-upgrade는 head 값을 확인했다. Ubuntu PostgreSQL과 실제 Provider 요청은 배포 후 확인한다.
+
 ## 2. 적용 범위
 
 - 설정 검증
