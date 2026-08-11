@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import AuthContext, get_auth_context, require_csrf
 from app.config import Settings, get_settings
 from app.db import get_db
-from app.models import MarketSnapshot, MarketStreamState, VenueSelectionEvaluation
+from app.models import (
+    InstrumentVenueState,
+    MarketSnapshot,
+    MarketStreamState,
+    VenueSelectionEvaluation,
+)
 from app.schemas import (
     VenueSelectionDiagnosticRequest,
     VenueSelectionListResponse,
@@ -99,6 +104,7 @@ def post_venue_selection_diagnostic(
 ) -> VenueSelectionResponse:
     krx_snapshot = _snapshot(db, "KRX", payload.symbol)
     nxt_snapshot = _snapshot(db, "NXT", payload.symbol)
+    nxt_state = db.get(InstrumentVenueState, (payload.symbol, "NXT"))
     now = datetime.now(UTC)
     environment = settings.environment.upper()
     evaluation = evaluate_and_store_venue_selection(
@@ -110,7 +116,13 @@ def post_venue_selection_diagnostic(
         order_type=payload.order_type,
         urgency=payload.urgency,
         environment=environment,
-        nxt_eligibility_status="VERIFIED" if nxt_snapshot is not None else "UNKNOWN",
+        nxt_eligibility_status=(
+            nxt_state.eligibility_status
+            if nxt_state is not None
+            else "VERIFIED"
+            if nxt_snapshot is not None
+            else "UNKNOWN"
+        ),
         sor_supported=settings.kiwoom_sor_enabled and environment == "REAL",
         krx_snapshot=krx_snapshot,
         nxt_snapshot=nxt_snapshot,

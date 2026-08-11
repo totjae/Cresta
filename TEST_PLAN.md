@@ -381,7 +381,7 @@ Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript
 | T-AI-009 | AI-070~074, API-099~101, DB-092~093 | 동일 snapshot 진단·지연 시세·실행 권한 3개 모드 | 결정론적 출력, 중복 억제, 주문 0건, 안전 분기 기록 | 통과 (2026-08-04, 자동) |
 | T-UI-013 | UI-039, UI-044~045 | Mock 진단 요청과 판단 목록 표시 | 모델·snapshot·행동·실행 차단 결과를 오인 없이 표시 | 통과 (2026-08-04, component) |
 | T-WATCH-009 | MKT-080~081, API-102~104, DB-094~096 | 감시 종목 등록·중복·3개 제한·해제 | 사용자별 유일성·최대 3개·CSRF를 지키고 기존 snapshot은 보존 | 통과 (2026-08-04, 자동) |
-| T-WATCH-010 | MKT-082~086, KIW-138~141 | 시작·목록 변경 구독과 공식 `0B`·`0D` fixture | 그룹 분리, KRX 종목 전체 동기화, 체결·호가 정규화와 snapshot 영속 | 통과 (2026-08-04, 자동 fixture); 실제 장중·재연결 대기 |
+| T-WATCH-010 | MKT-082~090, KIW-138~143 | 시작·목록 변경 구독과 공식 `0B`·`0D` fixture | 그룹 분리, KRX·NXT item 전체 동기화, suffix 정규화, 시장별 cache·snapshot 격리 | 통과 (2026-08-12, 자동 fixture); 실제 장중 `_NX` payload 대기 |
 | T-UI-014 | UI-046~048 | 빈 목록·등록·시세 대기·최신 snapshot·삭제 | 슬롯과 데이터 상태를 오인 없이 표시하고 mutation은 CSRF 사용 | component 등록 통과; 삭제 수동 대기 |
 | T-WATCH-011 | MKT-090~095, DB-097~098 | 같은 분·다음 분 체결, 호가만 변경, 거래일 변경, gap·late 입력 | 결정론적 OHLCV·turnover와 VWAP·SMA5·drawdown·spread, 비정상 입력 제외 | 통과 (2026-08-04, 자동 fixture) |
 | T-UI-015 | MKT-096, API-105, UI-049 | 지표 없음과 최신 지표가 있는 감시 카드 조회 | 계산 전 null과 지표 값을 구분해 표시 | 통과 (2026-08-04, API·component) |
@@ -592,3 +592,5 @@ Local evidence: 서버 입력·Market Context 집중시험, backend 전체 회�
 | T-VENUE-006 | 진단 API는 서버 snapshot만 사용해 평가를 영속화하고 Approval·OrderIntent·TradingOrder를 생성하지 않는다. |
 | T-VENUE-007 | migration `20260812_0028`의 upgrade→downgrade→upgrade가 통과한다. |
 | T-VENUE-008 | NXT snapshot이 없는 상태를 미지원으로 단정하지 않고 `UNKNOWN`으로 기록하며, NXT 단독 세션에서는 `WAIT/NXT_ELIGIBILITY_UNVERIFIED`로 종료한다. |
+| T-VENUE-009 | 정상 NXT quote는 `instrument_venue_states`에 `VERIFIED/QUOTE_OBSERVED`로 저장되고 이후 SHADOW 평가가 해당 상태를 사용한다. |
+| T-VENUE-010 | migration `20260812_0029`의 upgrade→downgrade→upgrade가 통과하며 market snapshot과 기존 0028 평가 원장은 보존된다. |

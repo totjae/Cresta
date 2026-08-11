@@ -22,6 +22,7 @@ TRADE_EVENT_TYPE = "0B"
 ORDERBOOK_EVENT_TYPE = "0D"
 WATCH_EVENT_TYPES = {TRADE_EVENT_TYPE, ORDERBOOK_EVENT_TYPE}
 KST = ZoneInfo("Asia/Seoul")
+NXT_SUFFIX = "_NX"
 
 
 class WebSocketLike(Protocol):
@@ -64,6 +65,7 @@ class KiwoomAccountWebSocket:
         self.clock = clock or (lambda: datetime.now(UTC))
         self.socket: WebSocketLike | None = None
         self.quote_symbols: tuple[str, ...] = ()
+        self.quote_items: tuple[str, ...] = ()
         self.pending_events: deque[str | QuoteEvent] = deque()
         self.trade_cache: dict[str, dict[str, Any]] = {}
         self.orderbook_cache: dict[str, dict[str, Any]] = {}
@@ -74,6 +76,7 @@ class KiwoomAccountWebSocket:
 
     async def open(self, access_token: str) -> None:
         self.quote_symbols = ()
+        self.quote_items = ()
         self.pending_events.clear()
         self.trade_cache.clear()
         self.orderbook_cache.clear()
@@ -94,7 +97,8 @@ class KiwoomAccountWebSocket:
         normalized = tuple(sorted(set(symbols)))
         if any(len(symbol) != 6 or not symbol.isdigit() for symbol in normalized):
             raise KiwoomWebSocketError("KIWOOM_WS_INVALID_WATCHLIST")
-        if normalized == self.quote_symbols:
+        items = tuple(item for symbol in normalized for item in (symbol, f"{symbol}{NXT_SUFFIX}"))
+        if normalized == self.quote_symbols and items == self.quote_items:
             return
         if not normalized:
             if self.quote_symbols:
@@ -108,18 +112,19 @@ class KiwoomAccountWebSocket:
                     "refresh": "0",
                     "data": [
                         {
-                            "item": list(normalized),
+                            "item": list(items),
                             "type": [TRADE_EVENT_TYPE, ORDERBOOK_EVENT_TYPE],
                         }
                     ],
                 }
             )
             await self._wait_for_ack("REG", "KIWOOM_WS_QUOTE_SUBSCRIBE_FAILED")
-        removed = set(self.quote_symbols) - set(normalized)
-        for symbol in removed:
-            self.trade_cache.pop(symbol, None)
-            self.orderbook_cache.pop(symbol, None)
+        removed = set(self.quote_items) - set(items)
+        for item in removed:
+            self.trade_cache.pop(item, None)
+            self.orderbook_cache.pop(item, None)
         self.quote_symbols = normalized
+        self.quote_items = items
 
     async def receive(self) -> str | QuoteEvent:
         if self.pending_events:
@@ -149,20 +154,25 @@ class KiwoomAccountWebSocket:
     async def close(self) -> None:
         socket, self.socket = self.socket, None
         self.quote_symbols = ()
+        self.quote_items = ()
         if socket is not None:
             await socket.close()
 
     def _parse_quote_item(self, item: dict[str, Any]) -> QuoteEvent | None:
         event_type = item.get("type")
-        symbol = item.get("item")
+        wire_item = item.get("item")
         values = item.get("values")
         if (
             event_type not in WATCH_EVENT_TYPES
-            or not isinstance(symbol, str)
-            or symbol not in self.quote_symbols
+            or not isinstance(wire_item, str)
+            or wire_item not in self.quote_items
             or not isinstance(values, dict)
         ):
             return None
+        normalized = _normalize_quote_item(wire_item)
+        if normalized is None:
+            return None
+        symbol, market = normalized
         received_at = self.clock().astimezone(UTC)
         try:
             if event_type == TRADE_EVENT_TYPE:
@@ -174,7 +184,7 @@ class KiwoomAccountWebSocket:
                     "cumulative_volume": _nonnegative_int(values["13"]),
                     "event_at": _event_time(values["20"], received_at),
                 }
-                self.trade_cache[symbol] = trade
+                self.trade_cache[wire_item] = trade
             else:
                 book = {
                     "best_ask_price": _absolute_decimal(values["41"]),
@@ -183,17 +193,17 @@ class KiwoomAccountWebSocket:
                     "best_bid_quantity": _nonnegative_int(values["71"]),
                     "event_at": _event_time(values["21"], received_at),
                 }
-                self.orderbook_cache[symbol] = book
-            trade = self.trade_cache.get(symbol)
+                self.orderbook_cache[wire_item] = book
+            trade = self.trade_cache.get(wire_item)
             if trade is None:
                 return None
-            book = self.orderbook_cache.get(symbol)
+            book = self.orderbook_cache.get(wire_item)
             # A merged quote follows the trade clock so an independently newer
             # orderbook timestamp cannot make the next trade look late.
             event_at = trade["event_at"]
             identity = hashlib.sha256(
                 json.dumps(
-                    {"type": event_type, "item": symbol, "values": values},
+                    {"type": event_type, "item": wire_item, "values": values},
                     sort_keys=True,
                     separators=(",", ":"),
                     ensure_ascii=False,
@@ -201,7 +211,7 @@ class KiwoomAccountWebSocket:
             ).hexdigest()
             return QuoteEvent(
                 symbol=symbol,
-                market="KRX",
+                market=market,
                 source="KIWOOM_WS",
                 sequence_or_hash=identity,
                 event_at=event_at,
@@ -263,6 +273,14 @@ def _absolute_decimal(value: object) -> Decimal:
     if result <= 0:
         raise ValueError("price must be positive")
     return result
+
+
+def _normalize_quote_item(item: str) -> tuple[str, str] | None:
+    market = "NXT" if item.endswith(NXT_SUFFIX) else "KRX"
+    symbol = item[: -len(NXT_SUFFIX)] if market == "NXT" else item
+    if len(symbol) != 6 or not symbol.isdigit():
+        return None
+    return symbol, market
 
 
 def _nonnegative_int(value: object) -> int:

@@ -143,6 +143,72 @@ def test_quote_subscription_trade_orderbook_and_remove_contract(settings: Settin
     asyncio.run(scenario())
     assert socket.sent[2] == {
         "trnm": "REG", "grp_no": "2", "refresh": "0",
-        "data": [{"item": ["005930"], "type": ["0B", "0D"]}],
+        "data": [{"item": ["005930", "005930_NX"], "type": ["0B", "0D"]}],
     }
     assert socket.sent[3] == {"trnm": "REMOVE", "grp_no": "2"}
+
+
+def test_nxt_wire_item_is_normalized_and_cache_is_market_isolated(
+    settings: Settings,
+) -> None:
+    socket = FakeSocket(
+        [
+            {"trnm": "LOGIN", "return_code": 0},
+            {"trnm": "REG", "return_code": 0},
+            {"trnm": "REG", "return_code": 0},
+            {
+                "trnm": "REAL",
+                "data": [
+                    {
+                        "type": "0B",
+                        "item": "005930",
+                        "values": {
+                            "20": "101530", "10": "70000", "13": "100",
+                            "16": "69000", "17": "70500", "18": "68800",
+                        },
+                    },
+                    {
+                        "type": "0B",
+                        "item": "005930_NX",
+                        "values": {
+                            "20": "101531", "10": "70100", "13": "200",
+                            "16": "69100", "17": "70600", "18": "68900",
+                        },
+                    },
+                    {
+                        "type": "0D",
+                        "item": "005930_NX",
+                        "values": {
+                            "21": "101532", "41": "70200", "61": "30",
+                            "51": "70100", "71": "40",
+                        },
+                    },
+                ],
+            },
+        ]
+    )
+
+    async def connector(_: str) -> FakeSocket:
+        return socket
+
+    async def scenario() -> None:
+        session = KiwoomAccountWebSocket(
+            settings,
+            connector,
+            clock=lambda: datetime(2026, 8, 4, 1, 15, 33, tzinfo=UTC),
+        )
+        await session.open("token")
+        await session.sync_quotes(("005930",))
+        krx = await session.receive()
+        nxt_trade = await session.receive()
+        nxt_book = await session.receive()
+        assert isinstance(krx, QuoteEvent) and krx.market == "KRX"
+        assert krx.symbol == "005930" and krx.last_price == Decimal(70000)
+        assert isinstance(nxt_trade, QuoteEvent) and nxt_trade.market == "NXT"
+        assert nxt_trade.symbol == "005930" and nxt_trade.last_price == Decimal(70100)
+        assert isinstance(nxt_book, QuoteEvent) and nxt_book.market == "NXT"
+        assert nxt_book.best_ask_price == Decimal(70200)
+        assert nxt_book.best_bid_quantity == 40
+        assert krx.best_ask_price is None
+
+    asyncio.run(scenario())

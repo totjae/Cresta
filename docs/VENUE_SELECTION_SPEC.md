@@ -44,7 +44,7 @@ KRX 상장 종목을 사용자가 KRX 또는 NXT에 고정 배정하지 않고, 
 | VEN-008 | 진단 endpoint는 `SHADOW` 고정이며 Decision·Approval·OrderIntent·TradingOrder를 생성하지 않는다. |
 | VEN-009 | 실제 주문 연결 단계에서는 Guard가 송신 직전 동일 정책으로 재평가한다. snapshot 또는 세션이 바뀌면 이전 선택을 재사용하지 않는다. |
 | VEN-010 | KRX OPEN API는 venue 선택의 필수 입력이 아니다. 거래시점 시장 데이터는 키움 KRX/NXT stream을 사용하고 KRX OPEN API는 선택형 전일 검증·백필 source로만 유지한다. |
-| VEN-011 | NXT 종목 적격성은 `VERIFIED`, `INELIGIBLE`, `UNKNOWN`으로 구분한다. NXT snapshot 존재는 `VERIFIED` 근거가 될 수 있지만 snapshot 부재를 미지원으로 단정하지 않는다. `UNKNOWN`은 NXT 단독 세션에서 `WAIT/NXT_ELIGIBILITY_UNVERIFIED`로 종료한다. |
+| VEN-011 | NXT 종목 적격성은 `VERIFIED`, `INELIGIBLE`, `UNKNOWN`으로 구분한다. 정상화된 NXT quote 수신은 `VERIFIED/QUOTE_OBSERVED` 근거가 되며 별도 venue 상태 원장에 보존한다. snapshot·원장 부재를 미지원으로 단정하지 않는다. `UNKNOWN`은 NXT 단독 세션에서 `WAIT/NXT_ELIGIBILITY_UNVERIFIED`로 종료한다. |
 
 ## 5. API 계약
 
@@ -64,7 +64,7 @@ KRX 상장 종목을 사용자가 KRX 또는 NXT에 고정 배정하지 않고, 
 
 ## 7. 후속 단계
 
-- 키움 NXT 종목 적격 목록과 NXT 실시간 호가 stream 자동 수집
+- 권위 있는 키움 NXT 전체 적격 목록 동기화와 명시적 `INELIGIBLE` 판정. NXT 실시간 호가 stream과 관측 기반 `VERIFIED`는 우선 구현한다.
 - KRX 공식 휴장일 calendar를 서버 입력으로 고정하고 현재 평일 기반 임시 분류를 대체
 - 실거래 키움 SOR 주문 코드·체결시장 매핑 인수시험
 - Web UI에 양 시장 비교와 선택 근거 표시

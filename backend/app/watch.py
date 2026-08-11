@@ -9,7 +9,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import MarketSnapshot, MarketStreamState
+from app.models import InstrumentVenueState, MarketSnapshot, MarketStreamState
 
 PRICE_QUANTUM = Decimal("0.0001")
 SUPPORTED_MARKETS = {"KRX", "NXT"}
@@ -263,6 +263,25 @@ def ingest_quote(db: Session, event: QuoteEvent) -> IngestResult:
         state.cumulative_volume = event.cumulative_volume
         state.quality = "NORMAL"
         state.version += 1
+        if event.market == "NXT":
+            venue_state = db.get(InstrumentVenueState, (event.symbol, "NXT"))
+            if venue_state is None:
+                venue_state = InstrumentVenueState(
+                    symbol=event.symbol,
+                    venue="NXT",
+                    eligibility_status="VERIFIED",
+                    evidence_source="QUOTE_OBSERVED",
+                    evidence_ref=event.sequence_or_hash,
+                    observed_at=event_at,
+                    last_quote_at=event_at,
+                )
+                db.add(venue_state)
+            else:
+                venue_state.eligibility_status = "VERIFIED"
+                venue_state.evidence_source = "QUOTE_OBSERVED"
+                venue_state.evidence_ref = event.sequence_or_hash
+                venue_state.observed_at = event_at
+                venue_state.last_quote_at = event_at
     db.commit()
     db.refresh(snapshot)
     db.refresh(state)

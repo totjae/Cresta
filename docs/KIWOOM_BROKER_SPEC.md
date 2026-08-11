@@ -149,9 +149,11 @@ broker:
 
 ### 3.8 KRX·NXT·SOR 처리
 
-키움 공식 안내에 따르면 모의투자 주문·계좌조회는 KRX만 지원하지만 NXT 시세는 제공될 수 있다. 공식 자료 확인 기준일은 2026-07-31이다.
+키움 공식 안내에 따르면 모의투자 주문·계좌조회는 KRX만 지원하지만 NXT 시세는 제공된다. 거래소별 종목코드는 KRX 원본 6자리, NXT `_NX`, SOR `_AL` suffix를 사용한다. 공식 자료 확인 기준일은 2026-08-12이다.
 
 참고 자료: <https://openapi.kiwoom.com/intro/mockInvestInfo?dummyVal=0>
+
+거래소별 종목코드: <https://openapi.kiwoom.com/m/guide/apiguide?jobTpCode=02>
 
 MVP 정책:
 
@@ -418,9 +420,11 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 | ID | 요구사항 |
 | --- | --- |
 | KIW-138 | 계좌 이벤트는 그룹 `1`, Watch 시세는 그룹 `2`를 사용해 등록 변경이 서로의 구독을 해제하지 않게 한다. |
-| KIW-139 | Watch 목록 전체 동기화는 그룹 `2`에 `refresh=0`, 활성 KRX 종목과 `type=["0B","0D"]`를 전송하며 응답 `return_code=0`을 확인한 뒤 구독 준비로 간주한다. |
-| KIW-140 | 빈 Watch 목록도 그룹 `2`의 기존 등록을 명시적으로 제거한다. 재연결 후 DB 활성 목록을 다시 읽어 등록하며 NXT suffix는 MOCK worker에서 생성하지 않는다. |
+| KIW-139 | Watch 목록 전체 동기화는 그룹 `2`에 `refresh=0`, 활성 종목별 KRX item과 NXT `_NX` item 및 `type=["0B","0D"]`를 전송하며 응답 `return_code=0`을 확인한 뒤 구독 준비로 간주한다. 공식 거래소별 코드 규칙은 KRX `005930`, NXT `005930_NX`, SOR `005930_AL`이다. |
+| KIW-140 | 빈 Watch 목록도 그룹 `2`의 기존 등록을 명시적으로 제거한다. 재연결 후 DB 활성 목록을 다시 읽어 KRX·NXT 시세 item을 재등록한다. 이는 MOCK NXT 주문을 활성화하지 않는다. |
 | KIW-141 | REAL payload의 타입·종목·values 구조가 잘못되거나 필수 FID가 누락되면 해당 이벤트만 폐기하고 안전한 오류 코드로 기록한다. token·계좌·원본 payload는 로그에 기록하지 않는다. |
+| KIW-142 | 실시간 item은 suffix를 제거한 6자리 종목과 `KRX/NXT` 시장으로 정규화하며 체결·호가 cache는 wire item별로 격리한다. 한 시장 이벤트가 다른 시장 snapshot을 덮어쓰면 안 된다. |
+| KIW-143 | MOCK의 NXT quote 구독과 저장은 분석용으로 허용하지만 주문 Adapter의 `KRX only` 검사는 유지한다. NXT quote 존재나 구독 성공은 NXT 주문 권한을 뜻하지 않는다. |
 
 ## 4. 오류·예외 또는 경계 조건
 

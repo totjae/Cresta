@@ -9,7 +9,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Approval, OrderIntent, TradingOrder, VenueSelectionEvaluation
+from app.models import (
+    Approval,
+    InstrumentVenueState,
+    OrderIntent,
+    TradingOrder,
+    VenueSelectionEvaluation,
+)
 from app.venue_selection import VenueQuote, classify_session, select_venue
 from app.watch import QuoteEvent, ingest_quote
 from tests.conftest import TEST_PASSWORD, TEST_TOTP_SECRET
@@ -238,6 +244,10 @@ def test_diagnostic_api_persists_shadow_evaluation_without_orders(
     ingest_quote(db, _event("KRX", now))
     ingest_quote(db, _event("NXT", now))
     db.commit()
+    venue_state = db.get(InstrumentVenueState, ("005930", "NXT"))
+    assert venue_state is not None
+    assert venue_state.eligibility_status == "VERIFIED"
+    assert venue_state.evidence_source == "QUOTE_OBSERVED"
     csrf = _login(client)
     headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
 

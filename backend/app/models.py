@@ -796,6 +796,30 @@ class MarketStreamState(Base):
     }
 
 
+class InstrumentVenueState(Base):
+    __tablename__ = "instrument_venue_states"
+    __table_args__ = (
+        CheckConstraint("venue IN ('KRX','NXT','SOR')", name="ck_instrument_venue_state_venue"),
+        CheckConstraint(
+            "eligibility_status IN ('VERIFIED','INELIGIBLE','UNKNOWN')",
+            name="ck_instrument_venue_state_eligibility",
+        ),
+        Index("ix_instrument_venue_state_status", "venue", "eligibility_status"),
+    )
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    venue: Mapped[str] = mapped_column(String(8), primary_key=True)
+    eligibility_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    evidence_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    evidence_ref: Mapped[str] = mapped_column(String(128), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_quote_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
 class VenueSelectionEvaluation(Base):
     __tablename__ = "venue_selection_evaluations"
     __table_args__ = (

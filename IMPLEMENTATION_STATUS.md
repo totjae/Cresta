@@ -1,10 +1,17 @@
 # Cresta 구현 상태
 
+### 2026-08-12 키움 KRX·NXT 시세 stream과 관측 기반 적격 상태
+
+- 활성 감시 종목마다 키움 실시간 KRX item과 NXT `_NX` item을 함께 구독하고 wire item을 6자리 종목과 `KRX/NXT` 시장으로 정규화한다. 체결·호가 cache와 PostgreSQL stream은 시장별로 격리한다.
+- 정상 NXT quote 수신을 `instrument_venue_states`에 `VERIFIED/QUOTE_OBSERVED`로 저장하고 Venue Selection 진단이 이를 우선 사용한다. quote 부재는 계속 `UNKNOWN`이며 권위 있는 목록 없이 `INELIGIBLE`로 판정하지 않는다.
+- MOCK의 NXT 시세는 분석·SHADOW 선택에만 사용하며 키움 주문 Adapter의 KRX-only 경계는 변경하지 않았다.
+- backend 전체 회귀, Ruff lint와 SQLite migration `20260812_0029` upgrade/downgrade/upgrade가 통과했다. Ubuntu PostgreSQL 적용과 실제 장중 `_NX` payload 검증은 대기 중이다.
+
 ### 2026-08-12 KRX·NXT 자동 거래시장 선택 SHADOW 기반
 
 - 사용자가 거래시장을 고정하지 않고 KST 세션, NXT 적격성, KRX·NXT 최신 호가와 표시 수량, 주문 긴급도 및 Broker SOR 지원 여부로 `KRX/NXT/SOR/WAIT`를 결정하는 `venue-selection-v1` 엔진을 구현했다.
 - 진단 API와 `venue_selection_evaluations` 감사 원장을 추가했다. 입력 호가와 평가 시각은 서버 상태에서만 가져오며 `execution_stage=SHADOW`, `order_creation_allowed=false`를 DB 제약과 응답 계약으로 고정해 Decision·Approval·OrderIntent·TradingOrder를 만들지 않는다.
-- NXT snapshot 부재를 미지원으로 오판하지 않도록 적격성을 `VERIFIED/INELIGIBLE/UNKNOWN`으로 구분한다. 실제 NXT 종목 적격 목록 수집, 키움 NXT stream 및 SOR 주문 매핑, Guard 직전 재선택은 후속 단계다.
+- NXT snapshot 부재를 미지원으로 오판하지 않도록 적격성을 `VERIFIED/INELIGIBLE/UNKNOWN`으로 구분한다. 권위 있는 NXT 종목 전체 적격 목록 수집, SOR 주문 매핑, Guard 직전 재선택은 후속 단계다.
 - 집중 테스트·Ruff와 SQLite migration `20260812_0028` upgrade/downgrade/upgrade가 통과했다. Ubuntu PostgreSQL 적용과 실제 NXT 데이터 검증은 미완료다.
 
 ## 1. 목적
