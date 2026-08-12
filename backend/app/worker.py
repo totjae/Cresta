@@ -25,11 +25,13 @@ from app.config import Settings, get_settings
 from app.db import SessionLocal
 from app.ids import uuid7
 from app.reconciliation import ReconciliationResult, run_kiwoom_reconciliation
+from app.stop_trigger import recover_exit_pending, run_fixed_stop_triggers
 from app.watch import QuoteEvent, WatchError, ingest_quote
 from app.watchlist import active_kiwoom_symbols
 
 logger = logging.getLogger("cresta.kiwoom_worker")
 RECONNECT_BACKOFF = (1, 2, 5, 10, 30)
+STOP_TRIGGER_INTERVAL_SECONDS = 10
 
 
 class WorkerReconciliationError(RuntimeError):
@@ -187,11 +189,17 @@ class KiwoomBrokerWorker:
         now = datetime.now(UTC)
         next_periodic = now + timedelta(seconds=self.settings.kiwoom_reconcile_interval_seconds)
         next_token_check = now + timedelta(seconds=self.settings.kiwoom_worker_heartbeat_seconds)
+        next_stop_trigger = now + timedelta(seconds=STOP_TRIGGER_INTERVAL_SECONDS)
         event_due: datetime | None = None
         next_watchlist_sync = now + timedelta(seconds=self.settings.kiwoom_watchlist_sync_seconds)
         order_dispatch_enabled = True
         while not self.stop_event.is_set() and not self.lease_lost.is_set():
             observed_at = datetime.now(UTC)
+            if observed_at >= next_stop_trigger:
+                await self._run_stop_triggers(observed_at)
+                next_stop_trigger = datetime.now(UTC) + timedelta(
+                    seconds=STOP_TRIGGER_INTERVAL_SECONDS
+                )
             if observed_at >= next_watchlist_sync:
                 await self._sync_watchlist()
                 next_watchlist_sync = observed_at + timedelta(
@@ -265,6 +273,34 @@ class KiwoomBrokerWorker:
                 return send_next_created_order(db, self.client, self.identity)
 
         return await asyncio.to_thread(execute)
+
+    async def _run_stop_triggers(self, now: datetime) -> None:
+        """Evaluate fixed stop triggers and recover EXIT_PENDING rows.
+
+        Runs only while this worker holds the lease. Failures are isolated so a
+        trigger evaluation error never crashes the broker worker (EXE-055).
+        """
+        if self.identity is None:
+            return
+        correlation_id = f"stop-{now.isoformat()}"
+
+        def execute() -> None:
+            with SessionLocal() as db:
+                run_fixed_stop_triggers(
+                    db,
+                    settings=self.settings,
+                    now=now,
+                    correlation_id=correlation_id,
+                )
+                recover_exit_pending(db, settings=self.settings, now=now)
+
+        try:
+            await asyncio.to_thread(execute)
+        except Exception as exc:  # noqa: BLE001 - isolate trigger failures from worker
+            code = _safe_error_code(exc)
+            logger.warning(
+                "Kiwoom worker stop trigger evaluation failed code=%s", code
+            )
 
     async def _sync_watchlist(self) -> None:
         with SessionLocal() as db:

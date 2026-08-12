@@ -1,5 +1,21 @@
 # Cresta 테스트 계획
 
+### T-STOP-001 — 고정 손절 trigger SHADOW (2026-08-12)
+
+- `T-STOP-001`: `compute_stop_price`가 평균단가와 `fixed_stop_loss_pct`로 손절가를 계산하고 허용 범위(0.1%~20%) 경계를 통과하는지 확인한다.
+- `T-STOP-002`: `should_trigger`가 매수호가 ≤ 손절가(경계 포함)일 때만 발화하고 None/0/양수 미달은 미발화인지 확인한다.
+- `T-STOP-003`: gate READY·정상 시세·TRADING 세션에서 trigger가 `SHADOW_RECORDED`로 발화하고 `OrderIntent`·`TradingOrder`·`Decision`·`Approval`이 0건인지 확인한다.
+- `T-STOP-004`: 게이트 미준비·재동기화·활성/UNKNOWN 주문·stale 시세·비거래 세션은 `EXIT_PENDING` + `risk_events` ACTIVE로 영속되는지 확인한다.
+- `T-STOP-005`: `EXIT_PENDING` trigger가 gate READY 후 재평가에서 `SHADOW_RECORDED`로, risk_event가 `RESOLVED/BROKER_RECOVERED`로 전환되는지 확인한다.
+- `T-STOP-006`: 같은 (position, version, policy) 두 번 평가해 `StopTrigger` 1개, 중복 생성 없이 재평가하는지 확인한다.
+- `T-STOP-007`: position version 변경(체결) 시 기존 활성 trigger `SUPERSEDED`, 새 version으로 신규 trigger 생성을 확인한다.
+- `T-STOP-008`: `PAUSE_ENTRY` 활성 상태에서도 FIXED_STOP trigger가 차단되지 않고(신규매수 전용) 통과하는지 확인한다.
+- `T-STOP-009`: 활성 RISK_POLICY가 없을 때 `SAFE_DEFAULT`(-2.0%)를 사용하고 `risk_policy_version_id=null`을 기록하는지 확인한다.
+- `T-STOP-010`: 매도가능수량 부족·포지션 종료 시 `SELL_QUANTITY_EXCEEDED`/`POSITION_CLOSED`로 처리되는지 확인한다.
+- `T-RISKEVENT-001`: `risk_events`가 scope별로 독립 동작하고 생성·`RESOLVED` 전이·비밀값 미포함을 확인한다.
+
+Evidence: 집중시험 16개, backend 전체 회귀 289개 통과, Ruff lint 통과, SQLite migration `20260812_0033` upgrade→downgrade→upgrade 왕복 통과. Ubuntu PostgreSQL 적용·실제 장중 발화·EXIT_PENDING 회복·FIXED_STOP 주문 연결은 대기 중이다.
+
 ### T-GUARD-PAUSE-ENTRY-001 — 영속 신규매수 중지
 
 - 로그인 세션·CSRF·고유 `Idempotency-Key`로 `PAUSE_ENTRY`를 활성화하고 동일 키 재시도가 같은 상태를 반환하는지 확인한다.

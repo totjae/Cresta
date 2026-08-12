@@ -758,6 +758,105 @@ class PositionEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class RiskEvent(Base):
+    """Generic immutable ledger row for Guard/rule risk signals.
+
+    Scope distinguishes risk families (FIXED_STOP today; DAILY_LOSS, SPREAD,
+    CONNECTION and position mismatch later). Resolution tracks lifecycle while
+    the detailed state machine for stop triggers lives in ``stop_triggers``.
+    """
+
+    __tablename__ = "risk_events"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('ACTIVE','RESOLVED')", name="ck_risk_events_state"
+        ),
+        CheckConstraint(
+            "severity IN ('INFO','WARNING','HIGH','CRITICAL')",
+            name="ck_risk_events_severity",
+        ),
+        Index("ix_risk_events_scope_state", "scope", "state"),
+        Index("ix_risk_events_account_created", "account_alias", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    rule_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="ACTIVE")
+    account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(16))
+    input_snapshot_id: Mapped[str | None] = mapped_column(
+        ForeignKey("market_snapshots.id")
+    )
+    input_json: Mapped[str] = mapped_column(Text, nullable=False)
+    resolution: Mapped[str | None] = mapped_column(String(64))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class StopTrigger(Base):
+    """Fixed stop-loss trigger state machine.
+
+    Fires deterministically from the broker worker (no AI/Core decision). The
+    trigger binds to the position version and active risk policy version at
+    evaluation time and persists ``EXIT_PENDING`` across restarts so a data gap
+    does not erase a stop signal (GRD-085, EXE-053, ORD-023).
+    """
+
+    __tablename__ = "stop_triggers"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('PENDING','SHADOW_RECORDED','EXIT_PENDING','SUPERSEDED','FULFILLED')",
+            name="ck_stop_triggers_state",
+        ),
+        UniqueConstraint(
+            "position_id",
+            "position_version",
+            "risk_policy_version_id",
+            name="uq_stop_triggers_position_version_policy",
+        ),
+        Index("ix_stop_triggers_account_state", "account_alias", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
+    position_id: Mapped[str] = mapped_column(
+        ForeignKey("positions.id"), nullable=False
+    )
+    position_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    market: Mapped[str] = mapped_column(String(16), nullable=False)
+    risk_policy_version_id: Mapped[str | None] = mapped_column(String(36))
+    stop_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    trigger_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    snapshot_id: Mapped[str | None] = mapped_column(
+        ForeignKey("market_snapshots.id")
+    )
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="PENDING")
+    result_code: Mapped[str | None] = mapped_column(String(64))
+    guard_evaluation_id: Mapped[str | None] = mapped_column(String(36))
+    risk_event_id: Mapped[str | None] = mapped_column(
+        ForeignKey("risk_events.id"), index=True
+    )
+    halt_scope: Mapped[str | None] = mapped_column(String(24))
+    correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    __mapper_args__: ClassVar[dict[str, object]] = {
+        "version_id_col": version,
+        "version_id_generator": False,
+    }
+
+
 class MarketSnapshot(Base):
     __tablename__ = "market_snapshots"
     __table_args__ = (

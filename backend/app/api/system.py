@@ -13,12 +13,23 @@ from app.broker.worker_state import get_broker_status
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.emergency_stop import active_pause_entry
-from app.models import MarketStreamState, Position, TradingGate, TradingOrder
+from app.models import (
+    MarketStreamState,
+    Position,
+    RiskEvent,
+    StopTrigger,
+    TradingGate,
+    TradingOrder,
+)
 from app.schemas import (
     AnalysisSchedulerStatusResponse,
     BrokerStatusResponse,
     MockOrderTestRequest,
     MockOrderTestResponse,
+    RiskEventListResponse,
+    RiskEventResponse,
+    StopTriggerListResponse,
+    StopTriggerResponse,
     SystemCountResponse,
     SystemHealthResponse,
     TradingGateResponse,
@@ -184,4 +195,81 @@ def mock_order_test(
         order_id=order.id,
         status=order.status,
         symbol=order.symbol,
+    )
+
+
+@router.get("/stop-triggers", response_model=StopTriggerListResponse)
+def list_stop_triggers(
+    request: Request,
+    _: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+) -> StopTriggerListResponse:
+    triggers = list(
+        db.scalars(
+            select(StopTrigger)
+            .order_by(StopTrigger.created_at.desc())
+            .limit(100)
+        )
+    )
+    items = [
+        StopTriggerResponse(
+            trigger_id=trigger.id,
+            account_alias=trigger.account_alias,
+            symbol=trigger.symbol,
+            market=trigger.market,
+            position_id=trigger.position_id,
+            position_version=trigger.position_version,
+            risk_policy_version_id=trigger.risk_policy_version_id,
+            stop_price=trigger.stop_price,
+            trigger_price=trigger.trigger_price,
+            snapshot_id=trigger.snapshot_id,
+            state=trigger.state,
+            result_code=trigger.result_code,
+            guard_evaluation_id=trigger.guard_evaluation_id,
+            risk_event_id=trigger.risk_event_id,
+            halt_scope=trigger.halt_scope,
+            version=trigger.version,
+            created_at=trigger.created_at,
+            updated_at=trigger.updated_at,
+        )
+        for trigger in triggers
+    ]
+    return StopTriggerListResponse(
+        request_id=request.state.request_id,
+        items=items,
+    )
+
+
+@router.get("/risk-events", response_model=RiskEventListResponse)
+def list_risk_events(
+    request: Request,
+    _: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+) -> RiskEventListResponse:
+    events = list(
+        db.scalars(
+            select(RiskEvent).order_by(RiskEvent.created_at.desc()).limit(100)
+        )
+    )
+    items = [
+        RiskEventResponse(
+            event_id=event.id,
+            scope=event.scope,
+            rule_code=event.rule_code,
+            severity=event.severity,
+            state=event.state,
+            account_alias=event.account_alias,
+            symbol=event.symbol,
+            input_snapshot_id=event.input_snapshot_id,
+            resolution=event.resolution,
+            resolved_at=event.resolved_at,
+            correlation_id=event.correlation_id,
+            created_at=event.created_at,
+            updated_at=event.updated_at,
+        )
+        for event in events
+    ]
+    return RiskEventListResponse(
+        request_id=request.state.request_id,
+        items=items,
     )

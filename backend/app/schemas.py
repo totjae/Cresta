@@ -1047,3 +1047,52 @@ class CalendarOverrideListResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str
     items: list[CalendarOverrideResponse]
+
+
+class StopTriggerResponse(StrictModel):
+    trigger_id: str
+    account_alias: str
+    symbol: str
+    market: str
+    position_id: str
+    position_version: int
+    risk_policy_version_id: str | None
+    stop_price: Decimal
+    trigger_price: Decimal | None
+    snapshot_id: str | None
+    state: str
+    result_code: str | None
+    guard_evaluation_id: str | None
+    risk_event_id: str | None
+    halt_scope: str | None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class StopTriggerListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[StopTriggerResponse]
+
+
+class RiskEventResponse(StrictModel):
+    event_id: str
+    scope: str
+    rule_code: str
+    severity: str
+    state: str
+    account_alias: str
+    symbol: str | None
+    input_snapshot_id: str | None
+    resolution: str | None
+    resolved_at: datetime | None
+    correlation_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class RiskEventListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[RiskEventResponse]

@@ -73,6 +73,8 @@
 | GET | `/system/health` | 데이터·브로커·큐·DB 상태 |
 | GET | `/system/broker` | 키움 환경, 연결, 토큰 만료 예정, Active worker와 호출 제한 상태 |
 | POST | `/system/broker/mock-order-test` | MOCK·KRX 매수 1주 연결 시험 주문 대기열 생성; 현재는 세션·CSRF·확인문구를 요구하고 TOTP 재인증은 API-DEV 정책에 따라 보류 |
+| GET | `/system/stop-triggers` | 고정 손절 trigger 최근 이력(상태·손절가·trigger가·차단 reason). 읽기 전용, 인증 세션 필요, mutation 없음 |
+| GET | `/system/risk-events` | 범용 위험 이벤트 원장 최근 이력(scope·rule_code·severity·state·resolution). 읽기 전용, 인증 세션 필요, mutation 없음 |
 
 인증 API는 계정 존재·비밀번호 오류·TOTP 오류를 구분하지 않는 공통 오류를 반환한다. TOTP challenge와 재인증 증명은 1회용이며 URL이나 WebSocket query string으로 전달하지 않는다. 비밀번호·TOTP·복구 코드는 응답, 감사 이벤트와 애플리케이션 로그에 포함하지 않는다.
 

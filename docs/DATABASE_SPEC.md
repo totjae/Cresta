@@ -51,9 +51,10 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | `orders` | id, intent_id, parent_order_id, client_order_id, idempotency_key, broker_order_id, status, quantities | client/idempotency unique |
 | `order_events` | id, order_id, event_type, source, source_key, payload_hash, occurred_at | source 중복 방지 |
 | `fills` | id, order_id, broker_fill_key, quantity, price, fee, tax, filled_at | broker fill 중복 방지 |
-| `positions` | id, account_alias, symbol, quantity, average_price, stop_price, state, version | 활성 account+symbol unique |
+| `positions` | id, account_alias, symbol, quantity, average_price, state, version | 활성 account+symbol unique. 발화 시점 stop_price는 `stop_triggers`에 고정하므로 Position 컬럼은 두지 않음 |
 | `position_events` | id, position_id, cause_type, cause_id, before, after | 불변 원장 |
-| `risk_events` | id, scope, rule_code, severity, state, input_snapshot, resolution | 원인·해제 추적 |
+| `risk_events` | id, scope, rule_code, severity, state, account_alias, symbol, input_snapshot_id, input_json, resolution, resolved_at, correlation_id | 범용 위험 원장. scope로 FIXED_STOP/DAILY_LOSS/SPREAD/CONNECTION 구분, ACTIVE→RESOLVED |
+| `stop_triggers` | id, account_alias, position_id, position_version, symbol, market, risk_policy_version_id, stop_price, trigger_price, snapshot_id, state, result_code, guard_evaluation_id, risk_event_id, halt_scope, version | 고정 손절 trigger 상태머신. (position_id, position_version, risk_policy_version_id) unique로 idempotency, EXIT_PENDING 영속 |
 | `emergency_stops` | id, account_alias, level, state, reason, activation/release idempotency key, activated_by, released_by, version, timestamps | 계좌당 현재 상태 1개; 변경 이력은 감사 로그에 보존 |
 | `reconciliation_runs` | id, scope, trigger, state, started_at, completed_at | 단계·checkpoint 포함 |
 | `reconciliation_mismatches` | id, run_id, code, symbol, severity, state, broker_value, internal_value | 해결 이력 |

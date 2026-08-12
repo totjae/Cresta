@@ -159,7 +159,7 @@ SPREAD_TOO_WIDE | PRICE_DEVIATION_EXCEEDED | DATABASE_UNAVAILABLE
 | EXE-053 | 고정손절 trigger는 최신 정상 시세에서 한 번 발생하면 데이터 단절로 지우지 않고 `EXIT_PENDING` 위험 이벤트를 유지한다. 주문 실행 불가 사유를 경보하고 Broker 복구 후 최신 상태를 재검사한다. |
 | EXE-054 | Guard 기준가격·수량·노출 계산은 Decimal/정수 연산을 사용하고 수수료·세금 포함 정책과 이미 예약된 미체결 금액·수량을 반영한다. |
 | EXE-055 | `BROKER_SEND` 단계는 worker의 현재 lease·fencing, gate, 주문 상태·계좌·수량 불변조건을 다시 검사한다. 실패하면 송신하지 않고 주문을 안전 상태 또는 재동기화로 전환한다. |
-| EXE-056 | Guard 차단은 decision 실행 결과, `risk_events`와 감사 로그에 reason code·scope·입력 version을 남기며 비밀값과 전체 계좌번호를 저장하지 않는다. |
+| EXE-056 | Guard 차단은 decision 실행 결과, `risk_events`와 감사 로그에 reason code·scope·입력 version을 남기며 비밀값과 전체 계좌번호를 저장하지 않는다. 고정 손절 trigger의 차단 기록은 `stop_triggers` 상태(`EXIT_PENDING`)와 `risk_events`(scope=`FIXED_STOP`)에 함께 기록하며, 일일손실·spread·연결위험은 후속에서 같은 `risk_events` 원장을 재사용한다. |
 
 ### 3.7 주문 생성 경계
 

@@ -1,5 +1,13 @@
 # Cresta 구현 상태
 
+### 2026-08-12 고정 손절 trigger SHADOW 구현
+
+- 평균 매입가와 활성 `RISK_POLICY`의 `fixed_stop_loss_pct`로 손절가를 계산하고 최신 정상 KRX 매수호가가 도달하면 발화하는 고정 손절 trigger를 구현했다. Core 판단이 아닌 결정론적 규칙 trigger로 `Decision`을 만들지 않고 `StopTrigger` 독립 상태머신으로 관리한다.
+- trigger는 position version·risk policy version에 결합해 idempotency unique 제약으로 중복 생성을 막고, position version 변경 시 기존 활성 trigger를 `SUPERSEDED`로 전환한다. 가용성 차단(BROKER/재동기화/활성주문/stale 시세/세션)은 `EXIT_PENDING` + `risk_events` ACTIVE row로 영속해 데이터 단절과 재시작 후에도 신호를 지운다.
+- `risk_events`는 범용 위험 원장(`scope`로 손절·일일손실·spread·연결위험 구분)으로 도입했고, 고정손절 차단 기록을 먼저 채운다. `recover_exit_pending`이 gate READY 후 매 tick 재평가해 통과 시 `SHADOW_RECORDED`로, risk_event를 `RESOLVED`로 전환한다.
+- 현재 `SHADOW` 단계이므로 trigger는 평가·기록만 하고 `OrderIntent`·`TradingOrder`·`Decision`·`Approval` 0건을 유지한다. 매도 Guard는 `PAUSE_ENTRY`로 차단하지 않으며(신규매수 전용), `ENVIRONMENT_NOT_MOCK`을 검사한다. Broker worker 루프가 10초 간격으로 trigger runner를 try/except 격리해 호출한다.
+- backend 전체 회귀 289개 통과, Ruff lint 통과, SQLite migration `20260812_0033` upgrade→downgrade→upgrade 왕복 통과. Ubuntu PostgreSQL 적용, 실제 장중 발화·EXIT_PENDING 회복·FIXED_STOP 주문 생성(다음 단계)은 대기 중이다.
+
 ### 2026-08-12 핵심 모의투자 우선순위 전환
 
 - 휴장일·운영 자동화 확장은 보류하고 `AI 판단 → Guard → 승인/자동 권한 → 키움 모의주문 → 체결/포지션` 경로를 우선한다.
@@ -102,7 +110,7 @@
 | HTTP/WebSocket API | `docs/API_SPEC.md` | 구현 중 | 인증·상태·주문/체결·포지션·quote 조회 구현; Guard·승인·실행 단계 REST/event 계약 완료, 거래 명령·stream 미구현 |
 | UI 콘셉트 참고자료 | `stitch_cresta_ai_intraday_trading_system/` | 참고자료 | 실제 Console 구현물이 아님 |
 | 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | 인증·snapshot·worker는 실서버 통과; 주문 Adapter·FIFO polling·UNKNOWN 대조·계좌 event gate·Web MOCK 1주 진단 API 자동시험 통과, 실제 모의주문 미검증 |
-| Guard 리스크·비상정지 | `docs/GUARD_RISK_SPEC.md` | 구현 중 | BUY SHADOW 1차 평가와 `USER_DEFAULT / RISK_POLICY` 안전 기본값·검증·활성화 구현; 전체 노출·예수금·일일진입·spread 평가, 손절 trigger·비상정지는 미구현 |
+| Guard 리스크·비상정지 | `docs/GUARD_RISK_SPEC.md` | 구현 중 | BUY SHADOW 1차 평가와 `USER_DEFAULT / RISK_POLICY` 안전 기본값·검증·활성화, 고정 손절 trigger SHADOW(`StopTrigger`+`risk_events`+매도 Guard) 구현; 전체 노출·예수금·일일진입·spread 평가, 비상정지는 미구현 |
 | 사용자 설정·적용 | `docs/CONFIGURATION_SPEC.md` | 구현 중 | 실행 권한, Guard 사용자 기본 위험 설정, fail-closed 운영 휴장과 Provider/Model/역할별 배정 UI/API 구현; 종목별 위험 override·영향 미리보기·예약 적용 미구현 |
 | Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, 감시 종목·KRX/NXT SHADOW venue 평가·운영 휴장·Paper 조회·Broker 진단·실행 권한·Guard 위험 설정, Provider 모델·역할·프롬프트·FAILOVER 배정, stage 결과·구조화 응답 조회 구현; 승인 카드·Guard 평가 상세 결과 미구현 |
 | 인증·세션·TOTP | `docs/SECURITY_SPEC.md` | 구현 중 | 로그인 TOTP·세션·CSRF·실패제한 구현; 현재 개발 단계의 로그인 이후 설정·Provider·역할 배정·MOCK 시험 재인증은 제거하고 향후 위험 분석 시 선택적 재도입 예정, 복구·운영 검증 미완료 |
@@ -226,6 +234,8 @@
 범위:
 
 - Guard 전체 노출·예수금·일일진입·spread와 손절 trigger 완성
+  - 고정 손절 trigger SHADOW 구현 완료(`StopTrigger` + `risk_events` + 매도 Guard, 주문 0건). FIXED_STOP 주문 생성은 다음 단계에서 연결
+  - 일일손실·spread·연결위험 평가는 `risk_events` 원장을 재사용해 직후 진행
 - 기능별 `AUTOMATIC/MANUAL_APPROVAL/DISABLED` 실행 권한 적용
 - 승인 카드, 만료·거절, 재평가와 원자 OrderIntent·TradingOrder 생성
 - 외부 AI 결과가 실패·불완전·만료일 때 신규매수 fail-closed

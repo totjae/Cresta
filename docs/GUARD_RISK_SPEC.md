@@ -235,7 +235,7 @@ PARTIAL_SELL | FULL_SELL | FIXED_STOP
 | GRD-082 | 신규매수 검사는 현재 포지션과 미체결 매수의 예약금액, 외부 포지션, 예수금, 당일 신규진입 횟수를 같은 기준시각으로 합산한다. |
 | GRD-083 | 매도·손절에는 신규매수 한도 초과를 차단 사유로 사용하지 않지만 실제 수량, 활성·불명 주문과 Broker 송신 가능성은 검사한다. |
 | GRD-084 | 승인 생성 시 Guard 통과는 주문 권한이 아니며 승인 처리와 자동 주문 생성 직전에 최신 상태로 다시 평가한다. |
-| GRD-085 | 고정손절 trigger는 평균단가, 활성 stop 설정 버전, 최신 정상 시세와 position version에 결합해 중복 생성하지 않는다. trigger 후 주문 불가 상태에서도 `EXIT_PENDING` 위험을 유지한다. |
+| GRD-085 | 고정손절 trigger는 평균단가, 활성 stop 설정 버전, 최신 정상 시세와 position version에 결합해 중복 생성하지 않는다. trigger 후 주문 불가 상태에서도 `EXIT_PENDING` 위험을 유지한다. 구현: `stop_triggers` 테이블이 (position_id, position_version, risk_policy_version_id) unique 제약으로 idempotency를 보장하고, position version 변경 시 기존 활성 trigger를 `SUPERSEDED`로 전환하며, 가용성 차단은 `EXIT_PENDING` + `risk_events`(scope=`FIXED_STOP`) ACTIVE row로 영속해 재시작·데이터 단절 후에도 신호를 지우지 않는다. 발화 시점 손절가는 `stop_triggers.stop_price`에 고정한다. |
 | GRD-086 | Guard 결과에는 안정된 reason code, severity, halt scope, 사용한 snapshot·position·실행권한·위험설정 version과 유효시간을 기록한다. |
 | GRD-087 | 첫 구현 미지원 trigger와 행동은 `ACTION_NOT_IMPLEMENTED`로 차단하며 다른 청산·보유 행동으로 자동 변환하지 않는다. |
 | GRD-088 | 자동 또는 승인형 `BUY` 기능 gate는 신규진입 Guard, 고정손절 trigger, `PAUSE_ENTRY` 비상정지와 관련 장애시험이 모두 준비되기 전 열지 않는다. |
