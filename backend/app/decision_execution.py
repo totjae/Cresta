@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.approvals import create_approval
 from app.config import Settings
 from app.emergency_stop import active_pause_entry
 from app.execution_policy import active_policy, policy_payload
@@ -21,6 +23,16 @@ from app.models import (
     User,
     WatchlistItem,
 )
+from app.risk_calc import (
+    broker_connection_ok,
+    consecutive_loss_count,
+    daily_entry_count,
+    daily_loss_pct,
+    open_position_count,
+    open_position_exposure,
+    spread_pct,
+)
+from app.risk_events import RISK_EVENT_SCOPE_DAILY_LOSS, active_risk_events
 from app.risk_policy import active_risk_policy, risk_policy_payload
 from app.schemas import RiskPolicyPayload
 
@@ -89,6 +101,22 @@ def _buy_guard_rules(
         and (now - _utc(snapshot.received_at)).total_seconds()
         <= risk_policy.quote_stale_seconds
     )
+    entry_amount = Decimal(risk_policy.entry_order_amount) if risk_policy.entry_order_amount else Decimal(0)
+    per_symbol, total_exposure = open_position_exposure(db, ACCOUNT_ALIAS, now=now)
+    symbol_exposure = per_symbol.get(decision.symbol, Decimal(0))
+    open_positions = open_position_count(db, ACCOUNT_ALIAS)
+    entries_today = daily_entry_count(db, ACCOUNT_ALIAS, now=now)
+    loss_pct = daily_loss_pct(
+        db,
+        ACCOUNT_ALIAS,
+        basis=risk_policy.daily_loss_basis,
+        now=now,
+        denominator=Decimal(risk_policy.max_total_position_amount),
+    )
+    consecutive_losses = consecutive_loss_count(db, ACCOUNT_ALIAS)
+    snapshot_spread = spread_pct(snapshot)
+    connection_ok, _ = broker_connection_ok(db, ACCOUNT_ALIAS, now=now)
+    active_daily_loss_events = active_risk_events(db, scope=RISK_EVENT_SCOPE_DAILY_LOSS, account_alias=ACCOUNT_ALIAS)
     return [
         _rule("ENVIRONMENT_NOT_MOCK", settings.environment.upper() == "MOCK"),
         _rule("DECISION_EXPIRED", now <= _utc(decision.valid_until)),
@@ -101,6 +129,28 @@ def _buy_guard_rules(
             "ORDER_SIZE_NOT_CONFIGURED",
             risk_policy.entry_order_amount is not None,
         ),
+        # Full Risk Guard (#2): exposure, entries, daily loss, spread, connection.
+        _rule(
+            "TOTAL_EXPOSURE_LIMIT",
+            total_exposure + entry_amount <= Decimal(risk_policy.max_total_position_amount),
+        ),
+        _rule(
+            "SYMBOL_EXPOSURE_LIMIT",
+            symbol_exposure + entry_amount <= Decimal(risk_policy.max_position_amount_per_symbol),
+        ),
+        _rule("OPEN_POSITIONS_LIMIT", open_positions < risk_policy.max_open_positions),
+        _rule("DAILY_ENTRIES_LIMIT", entries_today < risk_policy.max_daily_entries),
+        _rule("DAILY_LOSS_LIMIT", loss_pct < risk_policy.daily_loss_limit_pct),
+        _rule(
+            "CONSECUTIVE_LOSS_LIMIT",
+            consecutive_losses < risk_policy.max_consecutive_losses,
+        ),
+        _rule(
+            "SPREAD_LIMIT",
+            snapshot_spread is not None and snapshot_spread <= risk_policy.max_spread_pct,
+        ),
+        _rule("BROKER_CONNECTION_OK", connection_ok),
+        _rule("NO_ACTIVE_DAILY_LOSS_EVENT", not active_daily_loss_events),
     ]
 
 
@@ -113,7 +163,17 @@ def route_trading_decision(
     settings: Settings,
     now: datetime | None = None,
 ) -> DecisionExecution | None:
-    """Persist one idempotent SHADOW execution; never create approval or order rows."""
+    """Route one idempotent TRADING decision through Guard to its terminal state.
+
+    In the ``SHADOW`` stage no approval or order is ever created — the execution
+    ends in ``SHADOW_RECORDED`` (or ``GUARD_BLOCKED``). In the ``APPROVAL_ONLY``
+    stage a BUY decision whose hard Guard passes either creates a ``PENDING``
+    approval (``MANUAL_APPROVAL`` mode) or, for ``AUTOMATIC`` mode, creates the
+    CREATED order directly via the shared order creation service. Sell actions
+    remain rule-triggered (FIXED_STOP) rather than decision-driven; non-BUY
+    supported actions stay ``ACTION_NOT_IMPLEMENTED`` until the take-profit
+    milestone wires them through the same service.
+    """
     if decision.purpose != "TRADING":
         return None
 
@@ -190,6 +250,35 @@ def route_trading_decision(
         if blocked:
             execution.state = "GUARD_BLOCKED"
             execution.result_code = str(blocked[0]["code"])
+        elif action == "BUY" and settings.execution_stage == "APPROVAL_ONLY":
+            if mode == "MANUAL_APPROVAL":
+                # Defer order creation to user approval; the approval service
+                # re-runs the Guard and price-deviation check before creating
+                # the CREATED order on approval.
+                approval = create_approval(
+                    db,
+                    execution=execution,
+                    decision=decision,
+                    user=user,
+                    settings=settings,
+                    now=current,
+                )
+                execution.approval_id = approval.id
+                # create_approval commits and sets execution.state APPROVAL_PENDING.
+            elif mode == "AUTOMATIC":
+                execution = _create_buy_order(
+                    db,
+                    execution=execution,
+                    decision=decision,
+                    user=user,
+                    risk_policy=risk_policy,
+                    settings=settings,
+                    correlation_id=correlation_id,
+                    current=current,
+                )
+            else:
+                execution.state = "SHADOW_RECORDED"
+                execution.result_code = "SHADOW_ONLY"
         else:
             execution.state = "SHADOW_RECORDED"
             execution.result_code = "SHADOW_ONLY"
@@ -217,4 +306,76 @@ def route_trading_decision(
     )
     db.commit()
     db.refresh(execution)
+    return execution
+
+
+def _buy_quantity(entry_order_amount, price) -> int:
+    """Whole-share quantity for an automatic BUY (mirrors approvals service)."""
+    from decimal import ROUND_DOWN, Decimal
+
+    if entry_order_amount is None or price is None or price <= 0:
+        return 0
+    return int((entry_order_amount / price).quantize(Decimal(1), rounding=ROUND_DOWN))
+
+
+def _create_buy_order(
+    db: Session,
+    *,
+    execution: DecisionExecution,
+    decision: Decision,
+    user: User,
+    risk_policy: RiskPolicyPayload,
+    settings: Settings,
+    correlation_id: str,
+    current: datetime,
+) -> DecisionExecution:
+    """Create the CREATED BUY order directly (AUTOMATIC mode, APPROVAL_ONLY stage)."""
+    from app.approvals import _marketable_buy_price  # reuse the same pricing helper
+    from app.order_creation import OrderCreationError, OrderRequest, create_order
+
+    snapshot = db.get(MarketSnapshot, decision.input_snapshot_id)
+    price = _marketable_buy_price(snapshot)
+    quantity = _buy_quantity(risk_policy.entry_order_amount, price)
+    if quantity <= 0 or price is None:
+        execution.state = "GUARD_BLOCKED"
+        execution.result_code = "ORDER_SIZE_NOT_CONFIGURED"
+        return execution
+    request = OrderRequest(
+        symbol=decision.symbol,
+        market=decision.market,
+        side="BUY",
+        action="BUY",
+        order_type="LIMIT",
+        limit_price=price,
+        quantity=quantity,
+        idempotency_key=f"auto-buy:{decision.id}",
+        request_payload={
+            "environment": "MOCK",
+            "symbol": decision.symbol,
+            "market": decision.market,
+            "side": "BUY",
+            "action": "BUY",
+            "order_type": "LIMIT",
+            "limit_price": str(price),
+            "quantity": quantity,
+            "decision_id": decision.id,
+            "idempotency_key": f"auto-buy:{decision.id}",
+        },
+        correlation_id=correlation_id,
+    )
+    try:
+        order = create_order(
+            db,
+            user=user,
+            request=request,
+            audit_action="AUTOMATIC_BUY_ORDER_CREATED",
+            now=current,
+        )
+    except OrderCreationError as exc:
+        execution.state = "FAILED_SAFE"
+        execution.result_code = exc.code
+        return execution
+    execution.state = "ORDER_CREATED"
+    execution.result_code = "ORDER_CREATED"
+    execution.order_intent_id = order.intent_id
     return execution

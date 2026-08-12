@@ -9,6 +9,10 @@ from sqlalchemy.orm import Session
 from app.models import RiskEvent
 
 RISK_EVENT_SCOPE_FIXED_STOP = "FIXED_STOP"
+RISK_EVENT_SCOPE_DAILY_LOSS = "DAILY_LOSS"
+RISK_EVENT_SCOPE_EXPOSURE = "EXPOSURE"
+RISK_EVENT_SCOPE_SPREAD = "SPREAD"
+RISK_EVENT_SCOPE_CONNECTION = "CONNECTION"
 
 
 def _canonical(input_record: dict[str, object]) -> str:

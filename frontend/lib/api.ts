@@ -42,6 +42,9 @@ export type RiskPolicy = {
   quote_stale_seconds: number;
   max_spread_pct: string;
   max_price_deviation_pct: string;
+  daily_loss_limit_pct: string;
+  daily_loss_basis: "REALIZED_ONLY" | "REALIZED_PLUS_UNREALIZED";
+  max_consecutive_losses: number;
 };
 export type RiskPolicyCurrent = {
   active_version_id: string | null;
@@ -400,6 +403,41 @@ export type MockOrderTestResult = {
   requested_quantity: 1;
 };
 
+export type ApprovalData = {
+  schema_version: "1.0";
+  request_id: string;
+  approval_id: string;
+  execution_id: string;
+  decision_id: string;
+  user_id: string;
+  state: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "INVALIDATED";
+  symbol: string;
+  market: string;
+  action: string;
+  reference_price: string | null;
+  quantity: number;
+  order_id: string | null;
+  result_code: string | null;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ApprovalListData = {
+  schema_version: "1.0";
+  request_id: string;
+  items: ApprovalData[];
+};
+
+export type ApprovalActionResult = {
+  schema_version: "1.0";
+  request_id: string;
+  approval_id: string;
+  state: string;
+  order_id: string | null;
+  result_code: string | null;
+};
+
 export type LlmCapabilities = {
   structured_output: boolean;
   tool_calling: boolean;
@@ -632,6 +670,32 @@ export const riskApi = {
       method: "POST",
       headers: { "X-CSRF-Token": csrfToken, "Idempotency-Key": `pause-entry-release-${crypto.randomUUID()}` },
       body: JSON.stringify({ schema_version: "1.0", level: "PAUSE_ENTRY", reason }),
+    });
+  },
+};
+
+export const approvalApi = {
+  list(signal?: AbortSignal) {
+    return request<ApprovalListData>("/api/v1/approvals", { signal });
+  },
+  pending(signal?: AbortSignal) {
+    return request<ApprovalListData>("/api/v1/approvals/pending", { signal });
+  },
+  detail(approvalId: string, signal?: AbortSignal) {
+    return request<ApprovalData>(`/api/v1/approvals/${encodeURIComponent(approvalId)}`, { signal });
+  },
+  approve(csrfToken: string, approvalId: string, idempotencyKey: string) {
+    return request<ApprovalActionResult>(`/api/v1/approvals/${encodeURIComponent(approvalId)}/approve`, {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken, "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ schema_version: "1.0", idempotency_key: idempotencyKey }),
+    });
+  },
+  reject(csrfToken: string, approvalId: string, idempotencyKey: string) {
+    return request<ApprovalActionResult>(`/api/v1/approvals/${encodeURIComponent(approvalId)}/reject`, {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken, "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ schema_version: "1.0", idempotency_key: idempotencyKey }),
     });
   },
 };

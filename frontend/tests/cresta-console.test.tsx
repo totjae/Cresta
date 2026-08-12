@@ -320,6 +320,7 @@ describe("execution policy settings", () => {
       max_position_amount_per_symbol: 1000000, max_total_position_amount: 3000000,
       max_open_positions: 3, max_daily_entries: 5, fixed_stop_loss_pct: "-2.0",
       quote_stale_seconds: 2, max_spread_pct: "0.30", max_price_deviation_pct: "0.50",
+      daily_loss_limit_pct: "5.0", daily_loss_basis: "REALIZED_PLUS_UNREALIZED", max_consecutive_losses: 3,
     };
     let active = false;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -361,6 +362,7 @@ describe("execution policy settings", () => {
       max_position_amount_per_symbol: 1000000, max_total_position_amount: 3000000,
       max_open_positions: 3, max_daily_entries: 5, fixed_stop_loss_pct: "-2.0",
       quote_stale_seconds: 2, max_spread_pct: "0.30", max_price_deviation_pct: "0.50",
+      daily_loss_limit_pct: "5.0", daily_loss_basis: "REALIZED_PLUS_UNREALIZED", max_consecutive_losses: 3,
     };
     let item: Record<string, unknown> | null = null;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {

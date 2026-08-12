@@ -429,3 +429,62 @@ def _assert_no_orders_not_injected(db: Session) -> None:
     assert db.scalar(select(func.count()).select_from(Decision)) == 0
     assert db.scalar(select(func.count()).select_from(DecisionExecution)) == 0
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
+
+
+def test_approval_only_auto_sell_creates_fulfilled_trigger_and_order(
+    db: Session, settings: Settings
+) -> None:
+    """In APPROVAL_ONLY, a firing trigger with a fresh KRX bid creates a SELL order."""
+    settings.execution_stage = "APPROVAL_ONLY"
+    _set_gate(db, "READY")
+    position = _position(db, average_price=Decimal(50000), quantity=10)
+    # Bid at 49000 <= stop price 49000 -> trigger fires.
+    _snapshot(db, bid_price=Decimal(49000))
+    count = run_fixed_stop_triggers(db, settings=settings, now=NOW)
+    assert count == 1
+    trigger = db.scalar(select(StopTrigger).where(StopTrigger.position_id == position.id))
+    assert trigger is not None
+    assert trigger.state == "FULFILLED"
+    assert trigger.result_code == "ORDER_CREATED"
+    order = db.scalar(select(TradingOrder).where(TradingOrder.side == "SELL"))
+    assert order is not None
+    assert order.status == "CREATED"
+    assert order.requested_quantity == 10
+    intent = db.get(OrderIntent, order.intent_id)
+    assert intent is not None and intent.action == "FIXED_STOP"
+    assert db.scalar(select(func.count()).select_from(Decision)) == 0
+    assert db.scalar(select(func.count()).select_from(Approval)) == 0
+
+
+def test_shadow_stage_still_creates_no_sell_order(
+    db: Session, settings: Settings
+) -> None:
+    """SHADOW stage keeps the trigger at SHADOW_RECORDED with zero orders."""
+    # Default settings.execution_stage is SHADOW.
+    _set_gate(db, "READY")
+    position = _position(db, average_price=Decimal(50000), quantity=10)
+    _snapshot(db, bid_price=Decimal(49000))
+    run_fixed_stop_triggers(db, settings=settings, now=NOW)
+    trigger = db.scalar(select(StopTrigger).where(StopTrigger.position_id == position.id))
+    assert trigger is not None
+    assert trigger.state == "SHADOW_RECORDED"
+    _assert_no_orders(db)
+    assert db.scalar(select(func.count()).select_from(StopTrigger)) == 1
+
+
+def test_external_position_not_auto_sold(
+    db: Session, settings: Settings
+) -> None:
+    """External positions are never auto-sold by the fixed-stop trigger."""
+    settings.execution_stage = "APPROVAL_ONLY"
+    _set_gate(db, "READY")
+    position = _position(db, average_price=Decimal(50000), quantity=10)
+    position.origin = "EXTERNAL"
+    db.flush()
+    _snapshot(db, bid_price=Decimal(49000))
+    run_fixed_stop_triggers(db, settings=settings, now=NOW)
+    trigger = db.scalar(select(StopTrigger).where(StopTrigger.position_id == position.id))
+    assert trigger is not None
+    assert trigger.state == "EXIT_PENDING"
+    assert trigger.result_code == "POSITION_ORIGIN_CRESTA_MANAGED"
+    _assert_no_orders(db)

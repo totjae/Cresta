@@ -24,6 +24,9 @@ SAFE_DEFAULT_POLICY = RiskPolicyPayload(
     quote_stale_seconds=2,
     max_spread_pct="0.30",
     max_price_deviation_pct="0.50",
+    daily_loss_limit_pct="5.0",
+    daily_loss_basis="REALIZED_PLUS_UNREALIZED",
+    max_consecutive_losses=3,
 )
 
 

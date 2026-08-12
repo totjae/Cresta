@@ -25,12 +25,12 @@
 - KST 평일 08:00~20:00에 감시 종목을 5분·10분 슬롯으로 평가하고 TRADING 판단을 SHADOW Guard에 인계하는 별도 AI scheduler
 - ACTIVE 역할 배정 snapshot으로 DIAGNOSTIC DAG를 등록하고 stage claim·lease·fencing·만료 복구를 수행하는 별도 Agent worker
 - Agent 호출별 Adapter 추출 구조화 JSON을 검증 전 단계에서 제한적으로 보관하고 Console에서 필요할 때만 조회하는 응답 이력
-- `USER_DEFAULT / RISK_POLICY`의 진입금액·투자한도·보유/진입 횟수·고정손절·시세·spread·가격편차를 버전으로 검증·활성화하는 Guard 위험 설정 UI/API
+- `USER_DEFAULT / RISK_POLICY`의 진입금액·투자한도·보유/진입 횟수·고정손절·시세·spread·가격편차·일일손실한도(REALIZED_PLUS_UNREALIZED/REALIZED_ONLY)·연속손실횟수를 버전으로 검증·활성화하는 Guard 위험 설정 UI/API
 - `scout-input-v1` canonical 입력·hash와 지표 provenance를 저장하고 이를 사용하는 `deterministic-mock-v2` Scout/Core
 - 인증된 `GET /api/v1/system/broker`와 `kiwoom-worker-status` 안전 상태 조회
 - N100·16GiB 서버용 Docker Compose 자원 제한 초안
 
-Console의 주문 생성·승인 화면, 주문가격 산정, 전체 Guard·외부 AI provider와 키움 실시간 체결의 주문 원장 반영은 아직 구현되지 않았습니다. Active worker의 영속 주문 polling과 중복 방지·`UNKNOWN` 즉시 재동기화는 구현됐지만 주문 생성·공개 승인 경로가 없어 정상 운영에서는 키움 주문이 생성되지 않습니다. 외부 주문·포지션도 자동 편입하거나 수정하지 않습니다.
+Console의 주문 생성·승인 화면, 주문가격 산정, 전체 Guard·외부 AI provider와 키움 실시간 체결의 주문 원장 반영은 아직 구현되지 않았습니다. 승인형 BUY 주문 생성과 FIXED_STOP 자동 매도 주문 연결은 `APPROVAL_ONLY` 단계에서 구현됐지만(기본값은 `SHADOW`로 주문 0건 유지), 호가단위 보정·미체결 재호가·PARTIAL_SELL/FULL_SELL/당일 고점 매도는 후속 milestone입니다. Active worker의 영속 주문 polling과 중복 방지·`UNKNOWN` 즉시 재동기화는 구현됐고, 공통 Order Creation Service가 만든 `CREATED` 주문을 키움으로 송신합니다. 외부 주문·포지션도 자동 편입하거나 수정하지 않습니다(외부 포지션은 `EXTERNAL` provenance로 태깅만).
 
 ## Backend 개발 실행
 
