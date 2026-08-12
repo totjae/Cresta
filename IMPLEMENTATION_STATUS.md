@@ -6,7 +6,7 @@
 - trigger는 position version·risk policy version에 결합해 idempotency unique 제약으로 중복 생성을 막고, position version 변경 시 기존 활성 trigger를 `SUPERSEDED`로 전환한다. 가용성 차단(BROKER/재동기화/활성주문/stale 시세/세션)은 `EXIT_PENDING` + `risk_events` ACTIVE row로 영속해 데이터 단절과 재시작 후에도 신호를 지운다.
 - `risk_events`는 범용 위험 원장(`scope`로 손절·일일손실·spread·연결위험 구분)으로 도입했고, 고정손절 차단 기록을 먼저 채운다. `recover_exit_pending`이 gate READY 후 매 tick 재평가해 통과 시 `SHADOW_RECORDED`로, risk_event를 `RESOLVED`로 전환한다.
 - 현재 `SHADOW` 단계이므로 trigger는 평가·기록만 하고 `OrderIntent`·`TradingOrder`·`Decision`·`Approval` 0건을 유지한다. 매도 Guard는 `PAUSE_ENTRY`로 차단하지 않으며(신규매수 전용), `ENVIRONMENT_NOT_MOCK`을 검사한다. Broker worker 루프가 10초 간격으로 trigger runner를 try/except 격리해 호출한다.
-- backend 전체 회귀 289개 통과, Ruff lint 통과, SQLite migration `20260812_0033` upgrade→downgrade→upgrade 왕복 통과. Ubuntu PostgreSQL 적용, 실제 장중 발화·EXIT_PENDING 회복·FIXED_STOP 주문 생성(다음 단계)은 대기 중이다.
+- backend 전체 회귀 289개 통과, Ruff lint 통과, SQLite migration `20260812_0033` upgrade→downgrade→upgrade 왕복 통과. Ubuntu PostgreSQL `20260812_0033` 적용 완료, 웹 Console·신규 API(`/system/stop-triggers`, `/system/risk-events`) 정상 응답 확인. 실제 장중 발화·EXIT_PENDING 회복·FIXED_STOP 주문 생성(다음 단계)은 대기 중이다.
 
 ### 2026-08-12 핵심 모의투자 우선순위 전환
 

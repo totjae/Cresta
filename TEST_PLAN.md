@@ -14,7 +14,7 @@
 - `T-STOP-010`: 매도가능수량 부족·포지션 종료 시 `SELL_QUANTITY_EXCEEDED`/`POSITION_CLOSED`로 처리되는지 확인한다.
 - `T-RISKEVENT-001`: `risk_events`가 scope별로 독립 동작하고 생성·`RESOLVED` 전이·비밀값 미포함을 확인한다.
 
-Evidence: 집중시험 16개, backend 전체 회귀 289개 통과, Ruff lint 통과, SQLite migration `20260812_0033` upgrade→downgrade→upgrade 왕복 통과. Ubuntu PostgreSQL 적용·실제 장중 발화·EXIT_PENDING 회복·FIXED_STOP 주문 연결은 대기 중이다.
+Evidence: 집중시험 16개, backend 전체 회귀 289개 통과, Ruff lint 통과, SQLite migration `20260812_0033` upgrade→downgrade→upgrade 왕복 통과. Ubuntu PostgreSQL `20260812_0033` 적용 완료, 웹 Console·신규 API(`/system/stop-triggers`, `/system/risk-events`) 정상 응답 확인. 실제 장중 발화·EXIT_PENDING 회복·FIXED_STOP 주문 연결은 대기 중이다.
 
 ### T-GUARD-PAUSE-ENTRY-001 — 영속 신규매수 중지
 
