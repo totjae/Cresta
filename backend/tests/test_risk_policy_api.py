@@ -42,6 +42,9 @@ def _policy(**overrides: object) -> dict[str, object]:
         "quote_stale_seconds": 2,
         "max_spread_pct": "0.30",
         "max_price_deviation_pct": "0.50",
+        "daily_loss_limit_pct": "5.0",
+        "daily_loss_basis": "REALIZED_PLUS_UNREALIZED",
+        "max_consecutive_losses": 3,
     } | overrides
 
 
@@ -132,3 +135,39 @@ def test_risk_policy_rejects_invalid_ranges_and_stale_activation(
     )
     assert conflict.status_code == 409
     assert conflict.json()["error"]["code"] == "CONFIGURATION_VERSION_CONFLICT"
+
+
+def test_risk_policy_daily_loss_fields_validated(client: TestClient, db: Session) -> None:
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    # daily_loss_limit_pct out of range (too high) -> rejected.
+    bad = client.post(
+        "/api/v1/settings/risk-policy/drafts",
+        headers=headers,
+        json={"schema_version": "1.0", "policy": _policy(daily_loss_limit_pct="25.0"), "reason": "bad daily loss"},
+    )
+    assert bad.status_code == 400
+    # max_consecutive_losses out of range -> rejected.
+    bad2 = client.post(
+        "/api/v1/settings/risk-policy/drafts",
+        headers=headers,
+        json={"schema_version": "1.0", "policy": _policy(max_consecutive_losses=20), "reason": "bad consec"},
+    )
+    assert bad2.status_code == 400
+    # invalid basis -> rejected.
+    bad3 = client.post(
+        "/api/v1/settings/risk-policy/drafts",
+        headers=headers,
+        json={"schema_version": "1.0", "policy": _policy(daily_loss_basis="BOGUS"), "reason": "bad basis"},
+    )
+    assert bad3.status_code == 400
+    # valid new fields accepted and persisted.
+    good = client.post(
+        "/api/v1/settings/risk-policy/drafts",
+        headers=headers,
+        json={"schema_version": "1.0", "policy": _policy(daily_loss_limit_pct="3.0", daily_loss_basis="REALIZED_ONLY", max_consecutive_losses=2), "reason": "valid loss config"},
+    )
+    assert good.status_code == 200
+    assert good.json()["policy"]["daily_loss_limit_pct"] == "3.0"
+    assert good.json()["policy"]["daily_loss_basis"] == "REALIZED_ONLY"
+    assert good.json()["policy"]["max_consecutive_losses"] == 2

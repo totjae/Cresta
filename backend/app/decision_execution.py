@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,6 +23,16 @@ from app.models import (
     User,
     WatchlistItem,
 )
+from app.risk_calc import (
+    broker_connection_ok,
+    consecutive_loss_count,
+    daily_entry_count,
+    daily_loss_pct,
+    open_position_count,
+    open_position_exposure,
+    spread_pct,
+)
+from app.risk_events import RISK_EVENT_SCOPE_DAILY_LOSS, active_risk_events
 from app.risk_policy import active_risk_policy, risk_policy_payload
 from app.schemas import RiskPolicyPayload
 
@@ -90,6 +101,22 @@ def _buy_guard_rules(
         and (now - _utc(snapshot.received_at)).total_seconds()
         <= risk_policy.quote_stale_seconds
     )
+    entry_amount = Decimal(risk_policy.entry_order_amount) if risk_policy.entry_order_amount else Decimal(0)
+    per_symbol, total_exposure = open_position_exposure(db, ACCOUNT_ALIAS, now=now)
+    symbol_exposure = per_symbol.get(decision.symbol, Decimal(0))
+    open_positions = open_position_count(db, ACCOUNT_ALIAS)
+    entries_today = daily_entry_count(db, ACCOUNT_ALIAS, now=now)
+    loss_pct = daily_loss_pct(
+        db,
+        ACCOUNT_ALIAS,
+        basis=risk_policy.daily_loss_basis,
+        now=now,
+        denominator=Decimal(risk_policy.max_total_position_amount),
+    )
+    consecutive_losses = consecutive_loss_count(db, ACCOUNT_ALIAS)
+    snapshot_spread = spread_pct(snapshot)
+    connection_ok, _ = broker_connection_ok(db, ACCOUNT_ALIAS, now=now)
+    active_daily_loss_events = active_risk_events(db, scope=RISK_EVENT_SCOPE_DAILY_LOSS, account_alias=ACCOUNT_ALIAS)
     return [
         _rule("ENVIRONMENT_NOT_MOCK", settings.environment.upper() == "MOCK"),
         _rule("DECISION_EXPIRED", now <= _utc(decision.valid_until)),
@@ -102,6 +129,28 @@ def _buy_guard_rules(
             "ORDER_SIZE_NOT_CONFIGURED",
             risk_policy.entry_order_amount is not None,
         ),
+        # Full Risk Guard (#2): exposure, entries, daily loss, spread, connection.
+        _rule(
+            "TOTAL_EXPOSURE_LIMIT",
+            total_exposure + entry_amount <= Decimal(risk_policy.max_total_position_amount),
+        ),
+        _rule(
+            "SYMBOL_EXPOSURE_LIMIT",
+            symbol_exposure + entry_amount <= Decimal(risk_policy.max_position_amount_per_symbol),
+        ),
+        _rule("OPEN_POSITIONS_LIMIT", open_positions < risk_policy.max_open_positions),
+        _rule("DAILY_ENTRIES_LIMIT", entries_today < risk_policy.max_daily_entries),
+        _rule("DAILY_LOSS_LIMIT", loss_pct < risk_policy.daily_loss_limit_pct),
+        _rule(
+            "CONSECUTIVE_LOSS_LIMIT",
+            consecutive_losses < risk_policy.max_consecutive_losses,
+        ),
+        _rule(
+            "SPREAD_LIMIT",
+            snapshot_spread is not None and snapshot_spread <= risk_policy.max_spread_pct,
+        ),
+        _rule("BROKER_CONNECTION_OK", connection_ok),
+        _rule("NO_ACTIVE_DAILY_LOSS_EVENT", not active_daily_loss_events),
     ]
 
 

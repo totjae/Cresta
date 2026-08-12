@@ -1,5 +1,27 @@
 # Cresta 테스트 계획
 
+### T-RISK-GUARD — 전체 Risk Guard 보강 (2026-08-13)
+
+- `T-RISKCALC-001`: `unrealized_loss`가 OPEN position의 (최신가 - 평균단가) * 수량을 합산하는지 확인한다.
+- `T-RISKCALC-002`: `daily_realized_loss`가 당일 SELL Fill의 (체결가 - 평균단가) * 수량을 합산하는지 확인한다.
+- `T-RISKCALC-003`: `daily_loss_pct`가 REALIZED_PLUS_UNREALIZED일 때 실현+미실현 손실을 합산하고 REALIZED_ONLY일 때 실현만 계산하는지 확인한다.
+- `T-RISKCALC-004`: `open_position_exposure`가 per-symbol/전체 노출을 최신가로 계산하고 가격 부재 시 원가 기준으로 하는지 확인한다.
+- `T-RISKCALC-005`: `daily_entry_count`가 당일 BUY 주문 수를 세는지 확인한다.
+- `T-RISKCALC-006`: `consecutive_loss_count`가 최근 SELL Fill부터 연속 손실 횟수를 세고 이익에서 멈추는지 확인한다.
+- `T-RISKCALC-007`: `spread_pct`가 (ask-bid)/midpoint*100을 계산하는지 확인한다.
+- `T-RISKCALC-008`: `broker_connection_ok`가 worker READY+websocket+heartbeat+gate READY일 때만 통과하고 재동기화 중에는 차단하는지 확인한다.
+- `T-GRD-FULL-001`: clean 상태(위험 없음)에서 BUY가 전체 Risk Guard를 통과하는지 확인한다.
+- `T-GRD-FULL-002`: 전체 노출 한도 초과 시 `TOTAL_EXPOSURE_LIMIT`로 BUY 차단, 주문 0건인지 확인한다.
+- `T-GRD-FULL-003`: 보유 종목 수 한도 초과 시 `OPEN_POSITIONS_LIMIT`로 차단하는지 확인한다.
+- `T-GRD-FULL-004`: 일일 손실 한도 초과 시 `DAILY_LOSS_LIMIT`로 차단하는지 확인한다.
+- `T-GRD-FULL-005`: spread 한도 초과 시 `SPREAD_LIMIT`로 차단하는지 확인한다.
+- `T-GRD-FULL-006`: Broker 연결 단절 시 `BROKER_CONNECTION_OK`로 차단하는지 확인한다.
+- `T-GRD-FULL-007`: 활성 일일손실 risk_event 존재 시 `NO_ACTIVE_DAILY_LOSS_EVENT`로 차단하는지 확인한다.
+- `T-GRD-FULL-008`: SHADOW 단계에서는 전체 Risk Guard 통과해도 주문 0건, `SHADOW_RECORDED`인지 확인한다.
+- `T-RISK-CONFIG-006`: `daily_loss_limit_pct`/`max_consecutive_losses` 범위 초과·잘못된 basis 거부, 유효값 활성화·조회되는지 확인한다.
+
+Evidence: backend 전체 회귀 325개 통과(신규 20), Ruff lint 통과, migration `20260813_0035` 왕복 통과, Frontend TypeScript·14개 component 시험·production build 통과. Ubuntu PostgreSQL 적용·실제 장중 각 위험 주입·회복 인수시험은 대기 중이다.
+
 ### T-APR-ORDER — 승인형 BUY 주문 + FIXED_STOP SELL 주문 연결 (2026-08-13)
 
 - `T-ORD-CREATE-001`: 공통 Order Creation Service가 `OrderIntent`+`TradingOrder(CREATED)`를 원자 생성하고, 같은 `idempotency_key`+동일 payload는 같은 주문을 반환하며, 같은 키+다른 payload는 `IDEMPOTENCY_CONFLICT`로 거부하는지 확인한다.

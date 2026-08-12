@@ -1,5 +1,14 @@
 # Cresta 구현 상태
 
+### 2026-08-13 전체 Risk Guard 보강 (milestone #2)
+
+- BUY Guard에 명세 `GUARD_RISK_SPEC`의 4가지 위험을 모두 추가했다: 일일 손실(REALIZED_PLUS_UNREALIZED 기본, REALIZED_ONLY 선택), 종목/전체 노출 한도, 일일 진입 횟수, 연속 손실 횟수, spread 한도, 연결 위험(BrokerWorkerState READY + WebSocket + heartbeat + gate READY), 활성 일일손실 risk_event 차단. 차단 시 `risk_events` 원장에 scope별(DAILY_LOSS/EXPOSURE/SPREAD/CONNECTION) ACTIVE row를 영속한다(GRD-080).
+- 일일 손실 한도 도달 시 `ENTRY_HALT`(계좌 전체 신규매수 중지)로 `risk_events` ACTIVE row가 영속해 재시작 후에도 유지되며, 회복 전까지 BUY를 막는(`NO_ACTIVE_DAILY_LOSS_EVENT` 규칙). 매도·손절에는 신규매수 한도를 차단 사유로 쓰지 않는다(GRD-083).
+- `RiskPolicyPayload`에 `daily_loss_limit_pct`(0.1~20%, 기본 5), `daily_loss_basis`(REALIZED_ONLY/REALIZED_PLUS_UNREALIZED, 기본 후자), `max_consecutive_losses`(1~10, 기본 3) 필드를 추가하고 안전 기본값·검증·활성화에 반영했다. 기존 활성 정책의 payload는 그대로 두고 누락 필드는 기본값으로 채운다(migration `20260813_0035`는 payload-only no-op).
+- 공통 risk 계산 서비스 `app/risk_calc.py`: 일일 실현 손실(당일 SELL Fill), 미실현 손실(OPEN position 최신가), 일일 손실 %, per-symbol/전체 노출, 일일 진입 횟수, 연속 손실 횟수, spread, broker 연결 상태를 읽기 전용으로 계산한다.
+- `guard.py`의 `persist_guard_evaluation`에 `phase` 파라미터를 추가해 APPROVAL_CREATION/PRE_ORDER/BROKER_SEND 단계를 구분한다(GRD-080). Console RiskPolicyPanel에 일일 손실 한도·기준·연속 손실 입력을 추가했다.
+- backend 전체 회귀 325개 통과(신규 20: risk_calc 11, risk guard 통합 8, risk policy 필드 1), Ruff lint 통과, migration `20260813_0035` 왕복 통과, Frontend TypeScript·14개 component 시험·production build 통과. Ubuntu PostgreSQL 적용·실제 장중 각 위험 주입·회복 인수시험은 대기 중이다.
+
 ### 2026-08-13 승인형 BUY 주문 + FIXED_STOP SELL 주문 연결 (milestone)
 
 - 진입(BUY)과 손절 청산(FIXED_STOP SELL)을 한 쌍으로 열어 포지션이 무방비 상태로 남지 않게 했다. 두 경로는 공통 **Order Creation Service**(`app/order_creation.py`)를 공유하며, 생성된 `CREATED` 주문은 기존 Broker worker FIFO 송신기가 자동으로 키움 모의투자로 보낸다.
@@ -119,7 +128,7 @@
 | HTTP/WebSocket API | `docs/API_SPEC.md` | 구현 중 | 인증·상태·주문/체결·포지션·quote·승인 조회·승인/거절 구현; 거래 명령·stream 미구현 |
 | UI 콘셉트 참고자료 | `stitch_cresta_ai_intraday_trading_system/` | 참고자료 | 실제 Console 구현물이 아님 |
 | 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | 인증·snapshot·worker는 실서버 통과; 주문 Adapter·FIFO polling·UNKNOWN 대조·계좌 event gate·Web MOCK 1주 진단 API 자동시험 통과, 실제 모의주문 미검증 |
-| Guard 리스크·비상정지 | `docs/GUARD_RISK_SPEC.md` | 구현 중 | BUY 최소 Hard Guard(환경·Broker·PAUSE_ENTRY·진입금액·시세·만료)와 고정 손절 trigger 매도 Guard(원본+position origin 검사)·승인 시점 재검사 구현; FIXED_STOP 자동 매도 연결; 전체 노출·예수금·일일진입·spread 평가·비상정지는 미구현 |
+| Guard 리스크·비상정지 | `docs/GUARD_RISK_SPEC.md` | 구현 중 | BUY 전체 Risk Guard(일일손실 REALIZED_PLUS_UNREALIZED/종목·전체 노출/일일진입/연속손실/spread/연결위험/활성손실이벤트)와 고정 손절 trigger 매도 Guard·승인 시점 재검사 구현; risk_events 원장 scope별 영속; ENTRY_HALT; 비상정지(EMERGENCY_LIQUIDATE 전체)는 미구현 |
 | 사용자 설정·적용 | `docs/CONFIGURATION_SPEC.md` | 구현 중 | 실행 권한, Guard 사용자 기본 위험 설정, fail-closed 운영 휴장과 Provider/Model/역할별 배정 UI/API 구현; 종목별 위험 override·영향 미리보기·예약 적용 미구현 |
 | Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, 감시 종목·KRX/NXT SHADOW venue 평가·운영 휴장·Paper 조회·Broker 진단·실행 권한·Guard 위험 설정, Provider 모델·역할·프롬프트·FAILOVER 배정, stage 결과·구조화 응답 조회 구현; 승인 카드·Guard 평가 상세 결과 미구현 |
 | 인증·세션·TOTP | `docs/SECURITY_SPEC.md` | 구현 중 | 로그인 TOTP·세션·CSRF·실패제한 구현; 현재 개발 단계의 로그인 이후 설정·Provider·역할 배정·MOCK 시험 재인증은 제거하고 향후 위험 분석 시 선택적 재도입 예정, 복구·운영 검증 미완료 |
@@ -246,7 +255,8 @@
   - 고정 손절 trigger SHADOW 구현 완료(`StopTrigger` + `risk_events` + 매도 Guard, 주문 0건)
   - **FIXED_STOP 자동 매도 주문 연결 완료**(`APPROVAL_ONLY`에서 `FULFILLED` → SELL `CREATED` 주문, Cresta-managed position만)
   - **승인형 BUY 주문 생성 완료**(`MANUAL_APPROVAL` → `Approval(PENDING)` → 승인 시 `CREATED` 주문; `AUTOMATIC` → 직접 `CREATED`)
-  - 일일손실·spread·연결위험 평가는 `risk_events` 원장을 재사용해 직후 진행(다음 milestone)
+  - **전체 Risk Guard 완료**(#2): 일일손실(REALIZED_PLUS_UNREALIZED)·종목/전체 노출·일일진입·연속손실·spread·연결위험·활성손실이벤트 BUY 차단, risk_events scope별 영속, ENTRY_HALT
+  - 비상정지 전체(EMERGENCY_LIQUIDATE)·호가단위 보정은 후속
 - 기능별 `AUTOMATIC/MANUAL_APPROVAL/DISABLED` 실행 권한 적용
   - BUY `MANUAL_APPROVAL`/`AUTOMATIC`, FIXED_STOP `AUTOMATIC` 적용 완료(stage 게이트)
 - 승인 카드, 만료·거절, 재평가와 원자 OrderIntent·TradingOrder 생성

@@ -42,6 +42,9 @@ export type RiskPolicy = {
   quote_stale_seconds: number;
   max_spread_pct: string;
   max_price_deviation_pct: string;
+  daily_loss_limit_pct: string;
+  daily_loss_basis: "REALIZED_ONLY" | "REALIZED_PLUS_UNREALIZED";
+  max_consecutive_losses: number;
 };
 export type RiskPolicyCurrent = {
   active_version_id: string | null;

@@ -579,7 +579,7 @@ function RiskPolicyPanel({ session, onSessionExpired }: { session: SessionData; 
     setPolicy({ ...policy, [key]: value === "" && nullable ? null : Number(value) });
   }
 
-  function setDecimal(key: "fixed_stop_loss_pct" | "max_spread_pct" | "max_price_deviation_pct", value: string) {
+  function setDecimal(key: "fixed_stop_loss_pct" | "max_spread_pct" | "max_price_deviation_pct" | "daily_loss_limit_pct", value: string) {
     if (policy) setPolicy({ ...policy, [key]: value });
   }
 
@@ -628,6 +628,9 @@ function RiskPolicyPanel({ session, onSessionExpired }: { session: SessionData; 
         <label>시세 지연 한도 (초)<input aria-label="시세 지연 한도" type="number" min="1" max="30" value={policy.quote_stale_seconds} onChange={(event) => setNumber("quote_stale_seconds", event.target.value)} required /></label>
         <label>최대 spread (%)<input aria-label="최대 spread" type="number" min="0.01" max="5" step="0.01" value={policy.max_spread_pct} onChange={(event) => setDecimal("max_spread_pct", event.target.value)} required /></label>
         <label>최대 가격편차 (%)<input aria-label="최대 가격편차" type="number" min="0.01" max="5" step="0.01" value={policy.max_price_deviation_pct} onChange={(event) => setDecimal("max_price_deviation_pct", event.target.value)} required /></label>
+        <label>일일 손실 한도 (%)<input aria-label="일일 손실 한도" type="number" min="0.1" max="20" step="0.1" value={policy.daily_loss_limit_pct} onChange={(event) => setDecimal("daily_loss_limit_pct", event.target.value)} required /></label>
+        <label>일일 손실 기준<select aria-label="일일 손실 기준" value={policy.daily_loss_basis} onChange={(event) => setPolicy({ ...policy, daily_loss_basis: event.target.value as RiskPolicy["daily_loss_basis"] })} required><option value="REALIZED_PLUS_UNREALIZED">실현+미실현</option><option value="REALIZED_ONLY">실현만</option></select></label>
+        <label>최대 연속 손실<input aria-label="최대 연속 손실" type="number" min="1" max="10" value={policy.max_consecutive_losses} onChange={(event) => setNumber("max_consecutive_losses", event.target.value)} required /></label>
       </div>
       <label className="reason-field" htmlFor="risk-policy-reason">위험 설정 변경 사유<input id="risk-policy-reason" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required placeholder="위험 설정을 변경하는 이유" /></label>
       <button className="primary-button" disabled={busy || !reason.trim()}>{busy ? "검증 중" : "위험 설정 검증"}</button>

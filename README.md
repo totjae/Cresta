@@ -25,7 +25,7 @@
 - KST 평일 08:00~20:00에 감시 종목을 5분·10분 슬롯으로 평가하고 TRADING 판단을 SHADOW Guard에 인계하는 별도 AI scheduler
 - ACTIVE 역할 배정 snapshot으로 DIAGNOSTIC DAG를 등록하고 stage claim·lease·fencing·만료 복구를 수행하는 별도 Agent worker
 - Agent 호출별 Adapter 추출 구조화 JSON을 검증 전 단계에서 제한적으로 보관하고 Console에서 필요할 때만 조회하는 응답 이력
-- `USER_DEFAULT / RISK_POLICY`의 진입금액·투자한도·보유/진입 횟수·고정손절·시세·spread·가격편차를 버전으로 검증·활성화하는 Guard 위험 설정 UI/API
+- `USER_DEFAULT / RISK_POLICY`의 진입금액·투자한도·보유/진입 횟수·고정손절·시세·spread·가격편차·일일손실한도(REALIZED_PLUS_UNREALIZED/REALIZED_ONLY)·연속손실횟수를 버전으로 검증·활성화하는 Guard 위험 설정 UI/API
 - `scout-input-v1` canonical 입력·hash와 지표 provenance를 저장하고 이를 사용하는 `deterministic-mock-v2` Scout/Core
 - 인증된 `GET /api/v1/system/broker`와 `kiwoom-worker-status` 안전 상태 조회
 - N100·16GiB 서버용 Docker Compose 자원 제한 초안

@@ -54,6 +54,23 @@ def _gate_ready(db: Session) -> None:
     else:
         gate.status = "READY"
         gate.reason = "TEST"
+    # Broker worker state needed by the full Risk Guard's BROKER_CONNECTION_OK.
+    from app.models import BrokerWorkerState
+
+    worker = db.get(BrokerWorkerState, ACCOUNT_ALIAS)
+    now = datetime.now(UTC)
+    if worker is None:
+        worker = BrokerWorkerState(
+            account_alias=ACCOUNT_ALIAS, environment="MOCK", state="READY",
+            fencing_token=1, websocket_connected=True, subscriptions_ready=True,
+            last_heartbeat_at=now, started_at=now,
+        )
+        db.add(worker)
+    else:
+        worker.state = "READY"
+        worker.websocket_connected = True
+        worker.subscriptions_ready = True
+        worker.last_heartbeat_at = now
     db.flush()
 
 

@@ -59,11 +59,12 @@ def persist_guard_evaluation(
     halt_scope: str | None,
     valid_until: datetime | None,
     now: datetime,
+    phase: str = "PRE_ORDER",
 ) -> GuardEvaluation:
     blocked = [item for item in rules if item["result"] == "BLOCKED"]
     guard = GuardEvaluation(
         execution_id=execution_id,
-        phase="PRE_ORDER",
+        phase=phase,
         subject_type=subject_type,
         subject_id=subject_id,
         result="BLOCKED" if blocked else "PASSED",
