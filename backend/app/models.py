@@ -394,6 +394,38 @@ class Approval(Base):
     )
 
 
+class EmergencyStop(Base):
+    __tablename__ = "emergency_stops"
+    __table_args__ = (
+        UniqueConstraint("account_alias", name="uq_emergency_stops_account"),
+        CheckConstraint("level = 'PAUSE_ENTRY'", name="ck_emergency_stops_level"),
+        CheckConstraint(
+            "state IN ('ACTIVE','RELEASED')", name="ck_emergency_stops_state"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
+    level: Mapped[str] = mapped_column(String(24), nullable=False, default="PAUSE_ENTRY")
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="ACTIVE")
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    activation_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    release_key: Mapped[str | None] = mapped_column(String(128))
+    activated_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    released_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    __mapper_args__: ClassVar[dict[str, object]] = {
+        "version_id_col": version,
+        "version_id_generator": False,
+    }
+
+
 class TradingGate(Base):
     __tablename__ = "trading_gates"
     __table_args__ = (
@@ -820,6 +852,45 @@ class InstrumentVenueState(Base):
     )
 
 
+class MarketCalendarOverride(Base):
+    __tablename__ = "market_calendar_overrides"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('ACTIVE','REVOKED')",
+            name="ck_market_calendar_override_state",
+        ),
+        CheckConstraint(
+            "override_type = 'OPERATIONAL_CLOSURE'",
+            name="ck_market_calendar_override_type",
+        ),
+        Index(
+            "uq_market_calendar_override_active_date",
+            "market_date",
+            unique=True,
+            sqlite_where=text("state = 'ACTIVE'"),
+            postgresql_where=text("state = 'ACTIVE'"),
+        ),
+        Index("ix_market_calendar_override_date_created", "market_date", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    market_date: Mapped[date] = mapped_column(Date, nullable=False)
+    override_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="OPERATIONAL_CLOSURE"
+    )
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="ACTIVE")
+    reason: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_reference: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_by: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    revoked_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class VenueSelectionEvaluation(Base):
     __tablename__ = "venue_selection_evaluations"
     __table_args__ = (
@@ -854,7 +925,7 @@ class VenueSelectionEvaluation(Base):
         CheckConstraint(
             "calendar_reason IN "
             "('WEEKDAY','WEEKEND','PUBLIC_HOLIDAY','LABOR_DAY',"
-            "'YEAR_END_CLOSURE','CALENDAR_UNAVAILABLE')",
+            "'YEAR_END_CLOSURE','CALENDAR_UNAVAILABLE','OPERATIONAL_CLOSURE')",
             name="ck_venue_selection_calendar_reason",
         ),
         Index("ix_venue_selection_symbol_created", "symbol", "created_at"),
@@ -876,6 +947,9 @@ class VenueSelectionEvaluation(Base):
     trading_day_status: Mapped[str] = mapped_column(String(16), nullable=False)
     calendar_reason: Mapped[str] = mapped_column(String(32), nullable=False)
     calendar_policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    calendar_override_id: Mapped[str | None] = mapped_column(
+        ForeignKey("market_calendar_overrides.id")
+    )
     nxt_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
     nxt_eligibility_status: Mapped[str] = mapped_column(String(16), nullable=False)
     sor_supported: Mapped[bool] = mapped_column(Boolean, nullable=False)

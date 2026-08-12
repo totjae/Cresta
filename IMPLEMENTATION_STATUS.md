@@ -1,10 +1,24 @@
 # Cresta 구현 상태
 
+### 2026-08-12 핵심 모의투자 우선순위 전환
+
+- 휴장일·운영 자동화 확장은 보류하고 `AI 판단 → Guard → 승인/자동 권한 → 키움 모의주문 → 체결/포지션` 경로를 우선한다.
+- 첫 안전 게이트인 서버 재시작 후에도 유지되는 `PAUSE_ENTRY`를 구현했다. 신규 BUY Guard와 시스템 준비 상태에 직접 연결하며 기존 포지션 조회·청산 판단은 막지 않는다.
+- 세션·CSRF·멱등키 기반 활성화/해제 API와 대시보드 제어를 추가했고, 상태 변경은 감사 로그에 남는다. 백엔드 전체 회귀·Ruff, migration `20260812_0032` 왕복, Frontend 14개 시험·TypeScript·production build가 통과했다.
+- 다음 핵심 순서는 고정손절 trigger, 승인형 MOCK 주문 생성, 제한적 MOCK 자동주문이다.
+
+### 2026-08-12 거래 캘린더 운영 휴장 override
+
+- KST 날짜별 `OPERATIONAL_CLOSURE`만 허용하는 fail-closed 운영 override를 추가했다. 오늘부터 730일 이내 날짜와 사유·공개 출처 참조가 필수이며 강제 개장과 세션 시간 변경은 지원하지 않는다.
+- `market_calendar_overrides`는 날짜별 활성 행 하나와 `ACTIVE→REVOKED` append-only 이력을 보존한다. 생성·해제 감사 로그를 남기고 SHADOW 평가에는 적용된 override ID, `CLOSED/OPERATIONAL_CLOSURE`와 `krx-calendar-v2`를 canonical input·DB·API에 고정한다.
+- 전략·설정 Console에서 운영 휴장을 등록·해제하고 활성·해제 이력을 확인할 수 있다. 로그인 세션과 CSRF만 사용하며 주문·승인·OrderIntent는 생성하지 않는다.
+- Backend 전체 회귀·Ruff, migration `20260812_0031` upgrade→downgrade→upgrade, Frontend 13개 component 시험·TypeScript·production build가 로컬에서 통과했다. Ubuntu PostgreSQL 적용과 Console 수동 인수시험은 대기 중이다.
+
 ### 2026-08-12 KRX·NXT 공통 거래일 캘린더
 
-- 기존 평일 판정에 대한민국 공휴일·대체공휴일, 근로자의 날과 KRX 연말 휴장을 추가한 `krx-calendar-v1`을 구현했다. 캘린더 판정 실패는 `UNKNOWN/CALENDAR_UNAVAILABLE`로 닫히며 장중 시각이라도 venue 선택은 `WAIT`다.
+- 기존 평일 판정에 대한민국 공휴일·대체공휴일, 근로자의 날과 KRX 연말 휴장을 추가한 공통 캘린더를 구현했다. 운영 휴장 override 통합 후 현행 버전은 `krx-calendar-v2`이며 캘린더 판정 실패는 `UNKNOWN/CALENDAR_UNAVAILABLE`로 닫힌다.
 - 거래시장 SHADOW 평가에는 거래일 상태·사유·캘린더 정책 버전을 canonical input hash와 불변 DB 이력에 포함하고 API·Console에 같은 값을 표시한다. venue 정책은 `venue-selection-v2`로 올렸으며 주문 생성 금지 경계는 유지한다.
-- migration `20260812_0030` 왕복, Backend 전체 시험·Ruff, Frontend TypeScript·12개 component 시험·production build가 로컬에서 통과했다. 임시 휴장·개장시간 변경을 위한 공식 일정 동기화와 운영 override는 후속 범위다.
+- migration `20260812_0030` 왕복과 Ubuntu PostgreSQL 적용을 확인했다. 개장시간 변경과 공식 일정 자동 동기화는 후속 범위다.
 
 ### 2026-08-12 거래시장 SHADOW 평가 Console
 
@@ -89,14 +103,14 @@
 | UI 콘셉트 참고자료 | `stitch_cresta_ai_intraday_trading_system/` | 참고자료 | 실제 Console 구현물이 아님 |
 | 키움 모의투자 Adapter | `docs/KIWOOM_BROKER_SPEC.md` | 구현 중 | 인증·snapshot·worker는 실서버 통과; 주문 Adapter·FIFO polling·UNKNOWN 대조·계좌 event gate·Web MOCK 1주 진단 API 자동시험 통과, 실제 모의주문 미검증 |
 | Guard 리스크·비상정지 | `docs/GUARD_RISK_SPEC.md` | 구현 중 | BUY SHADOW 1차 평가와 `USER_DEFAULT / RISK_POLICY` 안전 기본값·검증·활성화 구현; 전체 노출·예수금·일일진입·spread 평가, 손절 trigger·비상정지는 미구현 |
-| 사용자 설정·적용 | `docs/CONFIGURATION_SPEC.md` | 구현 중 | 실행 권한, Guard 사용자 기본 위험 설정과 Provider/Model/역할별 배정 UI/API 구현; 종목별 위험 override·영향 미리보기·예약 적용 미구현 |
-| Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, 감시 종목·KRX/NXT SHADOW venue 평가·Paper 조회·Broker 진단·실행 권한·Guard 위험 설정, Provider 모델·역할·프롬프트·FAILOVER 배정, stage 결과·구조화 응답 조회 구현; 승인 카드·Guard 평가 상세 결과 미구현 |
+| 사용자 설정·적용 | `docs/CONFIGURATION_SPEC.md` | 구현 중 | 실행 권한, Guard 사용자 기본 위험 설정, fail-closed 운영 휴장과 Provider/Model/역할별 배정 UI/API 구현; 종목별 위험 override·영향 미리보기·예약 적용 미구현 |
+| Web UI | `docs/WEB_UI_SPEC.md` | 구현 중 | 인증 Console, 감시 종목·KRX/NXT SHADOW venue 평가·운영 휴장·Paper 조회·Broker 진단·실행 권한·Guard 위험 설정, Provider 모델·역할·프롬프트·FAILOVER 배정, stage 결과·구조화 응답 조회 구현; 승인 카드·Guard 평가 상세 결과 미구현 |
 | 인증·세션·TOTP | `docs/SECURITY_SPEC.md` | 구현 중 | 로그인 TOTP·세션·CSRF·실패제한 구현; 현재 개발 단계의 로그인 이후 설정·Provider·역할 배정·MOCK 시험 재인증은 제거하고 향후 위험 분석 시 선택적 재도입 예정, 복구·운영 검증 미완료 |
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 감시 종목·키움 `0B`·`0D`, 1분봉과 v2 VWAP·SMA5·상대 거래량·실현 변동성·고점 하락률·spread 영속화 로컬 검증 완료; 체결강도와 v2 실제 장중 수신 미검증 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 구현 중 | 불변 `scout-input-v1`과 `deterministic-mock-v2`, 외부 Provider DIAGNOSTIC 판단, context별 v2 출력 계약과 `agent-server-input-v1` 포지션 파생값을 로컬 검증 완료; 실서버 v5 검증 대기 |
 | 다중 에이전트 오케스트레이션 | `docs/MULTI_AGENT_ORCHESTRATION_SPEC.md` | 구현 중 | Agent Runtime v6의 Intel·Verify·4개 Scout·Candidate Auditor·Core, 서버 입력과 불완전 Scout의 결정론적 Core 축소 구현; v6 로컬 회귀 완료, 실서버 검증 대기 |
 | LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | 40개 Provider template, 35개 단일-key 등록, Native·OpenAI-compatible Adapter, 모델 동기화·역할·Prompt·FAIL_STOP/단일 FAILOVER·service tier·웹 검색·호출 이력 구현; OpenAI·LLM Gateway 실제 SHADOW 호출 검증 완료, 복합 인증 5종·가격 기반 비용 집계 미구현 |
-| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·Scout 입력, LLM Foundation·Agent Runtime v6, 역할 배정·Agent lease·Provider tombstone·Prompt·Evidence Auditor·Market Context와 제한된 구조화 응답 이력을 `20260811_0027`까지 로컬 왕복 완료; Ubuntu는 `0027` 적용 확인 |
+| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·Scout 입력, LLM Foundation·Agent Runtime v6, Evidence·Market Context, venue 평가·적격 상태·캘린더 override와 제한된 구조화 응답 이력을 `20260812_0031`까지 로컬 왕복 완료; Ubuntu는 `0030` 적용 확인 |
 | 판단 실행·승인 | `docs/DECISION_EXECUTION_SPEC.md` | 구현 중 | DIAGNOSTIC/TRADING 경계, scheduler 인계, 멱등 SHADOW execution, 불변 Guard 평가와 안전 차단 구현; 승인·주문 생성은 미구현 |
 | 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 선택형 DART·KRX overlay 감지 부팅 조정 unit 구현; 2026-08-05 기본·키움 재부팅 복구 통과, 신규 source overlay 재부팅 인수시험·백업·경보·복구훈련 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 역사적 검토 | 2026-08-06 Foundation·Agent Runtime v1 착수 게이트 기록이며 현재 상태는 이 문서를 기준으로 한다. |

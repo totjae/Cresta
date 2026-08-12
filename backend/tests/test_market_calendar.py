@@ -9,7 +9,7 @@ def test_regular_weekday_is_open() -> None:
     decision = evaluate_krx_trading_day(date(2026, 8, 12))
     assert decision.status == "OPEN"
     assert decision.reason == "WEEKDAY"
-    assert decision.policy_version == "krx-calendar-v1"
+    assert decision.policy_version == "krx-calendar-v2"
 
 
 def test_weekend_public_holiday_labor_day_and_year_end_are_closed() -> None:

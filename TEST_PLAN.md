@@ -1,5 +1,12 @@
 # Cresta 테스트 계획
 
+### T-GUARD-PAUSE-ENTRY-001 — 영속 신규매수 중지
+
+- 로그인 세션·CSRF·고유 `Idempotency-Key`로 `PAUSE_ENTRY`를 활성화하고 동일 키 재시도가 같은 상태를 반환하는지 확인한다.
+- 활성 상태가 시스템 준비 응답과 BUY Guard의 `EMERGENCY_STOP_ACTIVE` 차단 결과에 반영되는지 확인한다.
+- 해제 후 상태가 `RELEASED`로 바뀌고 활성화·해제 감사 로그가 남는지 확인한다.
+- Console에서 확인과 사유 입력 후 활성화하고 새 시스템 상태를 다시 읽는지 확인한다.
+
 ## 1. 목적
 
 제품·운영·주문 명세의 요구사항을 검증 가능한 시험으로 연결한다. 구현 전에는 계획 상태로 유지하고, 실제 실행 후 결과와 근거를 추가한다.
@@ -582,6 +589,16 @@ Local evidence: `T-AGENT-SHADOW-001`~`010` 집중시험, backend 전체 회귀�
 Local evidence: 서버 입력·Market Context 집중시험, backend 전체 회귀와 Ruff, migration `20260811_0027` upgrade/downgrade/upgrade, frontend TypeScript·12개 component 시험이 통과했다. Ubuntu PostgreSQL migration과 실제 Console 표시, 운영 Market Context source 연결은 다음 배포에서 확인한다.
 ## 거래시장 자동 선택
 
+### 거래 캘린더 운영 휴장
+
+| ID | 시험 | 기대 결과 |
+| --- | --- | --- |
+| T-VEN-CALENDAR-OVERRIDE-001 | 유효한 미래 평일 휴장 등록 | `ACTIVE` 이력이 생성되고 같은 날짜 중복은 409다. |
+| T-VEN-CALENDAR-OVERRIDE-002 | 과거·730일 초과 날짜 또는 짧은 사유/출처 등록 | 날짜·도메인 검증은 422, 요청 schema 길이 검증은 공통 400으로 거부되며 override가 생성되지 않는다. |
+| T-VEN-CALENDAR-OVERRIDE-003 | 활성 휴장일 SHADOW 평가 | `CLOSED/OPERATIONAL_CLOSURE`, `WAIT`, override ID와 canonical hash가 저장된다. |
+| T-VEN-CALENDAR-OVERRIDE-004 | 활성 override 해제 후 재평가 | 기존 평가는 불변이고 새 평가는 기본 캘린더를 사용하며 해제 이력은 조회된다. |
+| T-VEN-CALENDAR-OVERRIDE-005 | 인증·CSRF·주문 경계 | 비인증/CSRF 누락 쓰기는 거부되고 Decision·Approval·OrderIntent·TradingOrder는 0건이다. |
+
 | ID | 시험 |
 | --- | --- |
 | T-VENUE-001 | KST 경계시각 08:00, 08:50, 09:00, 09:00:30, 15:20, 15:30, 15:40, 20:00이 명세 세션으로 정확히 분류된다. |
@@ -601,3 +618,5 @@ Local evidence: 서버 입력·Market Context 집중시험, backend 전체 회�
 | T-VENUE-015 | migration `20260812_0030`의 upgrade→downgrade→upgrade가 통과하며 기존 평가 행은 보수적인 `UNKNOWN/CALENDAR_UNAVAILABLE` 근거로 조회된다. |
 
 Local evidence (2026-08-12): 평일·주말·공휴일·근로자의 날·연말 휴장과 캘린더 장애 fail-closed 집중 시험, Backend 전체 시험·Ruff, migration `20260812_0030` upgrade→downgrade→upgrade, Frontend TypeScript·12개 component 시험·Next.js production build가 통과했다. Ubuntu PostgreSQL 적용과 실제 카드의 캘린더 근거 표시는 대기 중이다.
+
+Local evidence (2026-08-12, 운영 override): 날짜·메타데이터 경계, 중복 활성 방지, 생성·해제 이력, SHADOW 평가의 override ID·hash 고정과 주문 0건 집중시험이 통과했다. Backend 전체 회귀·Ruff, migration `20260812_0031` upgrade→downgrade→upgrade, Frontend 13개 component 시험·TypeScript·Next.js production build가 통과했다. Ubuntu PostgreSQL 적용과 Console 수동 확인은 대기 중이다.

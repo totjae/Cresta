@@ -6,7 +6,7 @@ from functools import lru_cache
 
 import holidays
 
-KRX_CALENDAR_POLICY_VERSION = "krx-calendar-v1"
+KRX_CALENDAR_POLICY_VERSION = "krx-calendar-v2"
 
 
 @dataclass(frozen=True)
@@ -14,6 +14,7 @@ class TradingDayDecision:
     status: str
     reason: str
     policy_version: str = KRX_CALENDAR_POLICY_VERSION
+    override_id: str | None = None
 
 
 @lru_cache(maxsize=16)

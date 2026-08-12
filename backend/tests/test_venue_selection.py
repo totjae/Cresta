@@ -290,7 +290,7 @@ def test_diagnostic_api_persists_shadow_evaluation_without_orders(
     assert body["execution_stage"] == "SHADOW"
     assert body["order_creation_allowed"] is False
     assert body["trading_day_status"] in {"OPEN", "CLOSED"}
-    assert body["calendar_policy_version"] == "krx-calendar-v1"
+    assert body["calendar_policy_version"] == "krx-calendar-v2"
     assert body["calendar_reason"] != "CALENDAR_UNAVAILABLE"
     assert body["nxt_eligibility_status"] == "VERIFIED"
     assert body["selected_venue"] in {"KRX", "NXT", "WAIT"}
@@ -303,7 +303,7 @@ def test_diagnostic_api_persists_shadow_evaluation_without_orders(
     assert stored is not None
     assert stored.trading_day_status == body["trading_day_status"]
     assert stored.calendar_reason == body["calendar_reason"]
-    assert '"calendar_policy_version":"krx-calendar-v1"' in stored.input_json
+    assert '"calendar_policy_version":"krx-calendar-v2"' in stored.input_json
     assert db.scalar(select(func.count()).select_from(VenueSelectionEvaluation)) == 1
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
     assert db.scalar(select(func.count()).select_from(OrderIntent)) == 0

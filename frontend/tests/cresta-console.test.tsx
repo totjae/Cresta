@@ -17,6 +17,7 @@ const healthResponse = {
   decision_execution_status: "SHADOW_ONLY",
   buy_execution_ready: false,
   buy_execution_block_reason: "ORDER_SIZE_NOT_CONFIGURED",
+  pause_entry_active: false,
   analysis_scheduler: {
     state: "RUNNING",
     lease_valid: true,
@@ -113,6 +114,31 @@ describe("CrestaConsole authentication", () => {
     }));
   });
 
+  it("activates persistent PAUSE_ENTRY from the Guard dashboard", async () => {
+    let active = false;
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.spyOn(window, "prompt").mockReturnValue("모의 신규매수 즉시 중지");
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "session-stop", login_id: "admin", expires_at: "2026-08-12T09:00:00Z", csrf_token: "csrf-stop" });
+      if (path === "/api/v1/system/health") return jsonResponse({ ...healthResponse, pause_entry_active: active, buy_execution_block_reason: active ? "EMERGENCY_STOP_ACTIVE" : "ORDER_SIZE_NOT_CONFIGURED" });
+      if (path === "/api/v1/risk/emergency-stop" && init?.method === "POST") {
+        active = true;
+        return jsonResponse({ schema_version: "1.0", request_id: "stop-1", stop_id: "stop-id", account_alias: "KIWOOM_MOCK_PRIMARY", level: "PAUSE_ENTRY", state: "ACTIVE", reason: "모의 신규매수 즉시 중지", version: 1, activated_at: "2026-08-12T01:00:00Z", released_at: null });
+      }
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CrestaConsole />);
+
+    await user.click(await screen.findByRole("button", { name: "신규 매수 즉시 중지" }));
+    expect(await screen.findByText("EMERGENCY_STOP_ACTIVE")).toBeInTheDocument();
+    expect(await screen.findByText("PAUSE_ENTRY가 활성화되었습니다.")).toBeInTheDocument();
+    const call = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/risk/emergency-stop" && init?.method === "POST");
+    expect(call?.[1]?.headers).toEqual(expect.objectContaining({ "X-CSRF-Token": "csrf-stop", "Idempotency-Key": expect.stringContaining("pause-entry-") }));
+  });
+
   it("manages the persistent KRX watchlist from the console", async () => {
     const emptyWatchlist = { schema_version: "1.0", request_id: "watch-1", limit: 3, remaining_slots: 3, items: [] };
     const populatedWatchlist = {
@@ -126,10 +152,10 @@ describe("CrestaConsole authentication", () => {
     };
     const venueSelection = {
       schema_version: "1.0", request_id: "venue-1", selection_id: "selection-1",
-      policy_version: "venue-selection-v1", execution_stage: "SHADOW",
+      policy_version: "venue-selection-v2", execution_stage: "SHADOW",
       order_creation_allowed: false, environment: "MOCK", symbol: "005930", side: "BUY",
       quantity: 1, order_type: "LIMIT", urgency: "NORMAL", session: "DUAL_CONTINUOUS",
-      trading_day_status: "OPEN", calendar_reason: "WEEKDAY", calendar_policy_version: "krx-calendar-v1",
+      trading_day_status: "OPEN", calendar_reason: "WEEKDAY", calendar_policy_version: "krx-calendar-v2", calendar_override_id: null,
       nxt_eligible: true, nxt_eligibility_status: "VERIFIED", sor_supported: false,
       selected_venue: "NXT", state: "SELECTED", reason_codes: ["BETTER_EXECUTABLE_PRICE_NXT"],
       quotes: {
@@ -164,7 +190,7 @@ describe("CrestaConsole authentication", () => {
     expect(screen.getAllByText("SHADOW · 주문 없음").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("BETTER_EXECUTABLE_PRICE_NXT")).toBeInTheDocument();
     expect(screen.getByText("OPEN · WEEKDAY")).toBeInTheDocument();
-    expect(screen.getByText("krx-calendar-v1")).toBeInTheDocument();
+    expect(screen.getByText("krx-calendar-v2")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "SHADOW 평가" }));
     const createCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/watchlist" && init?.method === "POST");
     expect(createCall?.[1]).toEqual(expect.objectContaining({
@@ -322,6 +348,60 @@ describe("execution policy settings", () => {
     expect(await screen.findByText(/Guard 위험 설정이 새 활성 버전/)).toBeInTheDocument();
     expect(await screen.findByText("risk-1")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/auth/reauth/totp")).toBe(false);
+  });
+
+  it("creates and revokes a fail-closed calendar override without reauthentication", async () => {
+    const safePolicy = {
+      buy: "MANUAL_APPROVAL", partial_sell: "MANUAL_APPROVAL", full_sell: "MANUAL_APPROVAL",
+      take_profit: "MANUAL_APPROVAL", fixed_stop_loss: "AUTOMATIC", trailing_stop: "AUTOMATIC",
+      end_of_day_liquidation: "AUTOMATIC", emergency_exit: "AUTOMATIC",
+    };
+    const riskPolicy = {
+      entry_order_amount: null, max_single_order_amount: 1000000,
+      max_position_amount_per_symbol: 1000000, max_total_position_amount: 3000000,
+      max_open_positions: 3, max_daily_entries: 5, fixed_stop_loss_pct: "-2.0",
+      quote_stale_seconds: 2, max_spread_pct: "0.30", max_price_deviation_pct: "0.50",
+    };
+    let item: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-calendar", login_id: "admin", expires_at: "2026-08-12T09:00:00Z", csrf_token: "csrf-calendar" });
+      if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
+      if (path === "/api/v1/settings/execution-policy") return jsonResponse({ active_version_id: null, source: "SAFE_DEFAULT", policy: safePolicy });
+      if (path === "/api/v1/settings/risk-policy") return jsonResponse({ active_version_id: null, source: "SAFE_DEFAULT", policy: riskPolicy });
+      if (path.startsWith("/api/v1/ai/")) return jsonResponse({ items: [] });
+      if (path === "/api/v1/venue-selections/calendar-overrides?limit=100") return jsonResponse({ schema_version: "1.0", request_id: "calendar-list", items: item ? [item] : [] });
+      if (path === "/api/v1/venue-selections/calendar-overrides" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        item = { schema_version: "1.0", request_id: "calendar-create", override_id: "override-1", market_date: body.market_date, override_type: "OPERATIONAL_CLOSURE", state: "ACTIVE", reason: body.reason, source_reference: body.source_reference, created_at: "2026-08-12T01:00:00Z", revoked_at: null };
+        return jsonResponse(item, 201);
+      }
+      if (path === "/api/v1/venue-selections/calendar-overrides/override-1" && init?.method === "DELETE") {
+        item = { ...item, state: "REVOKED", revoked_at: "2026-08-12T01:05:00Z" };
+        return jsonResponse(item);
+      }
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CrestaConsole />);
+
+    await user.click(await screen.findByRole("button", { name: /전략·설정/ }));
+    expect(await screen.findByText("거래 캘린더 운영 휴장")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("운영 휴장 날짜"), "2026-08-13");
+    await user.type(screen.getByLabelText("운영 휴장 사유"), "거래소 임시 휴장 공지");
+    await user.type(screen.getByLabelText("운영 휴장 출처"), "KRX notice 2026-test");
+    await user.click(screen.getByRole("button", { name: "운영 휴장 등록" }));
+    expect(await screen.findByText(/운영 휴장이 활성화/)).toBeInTheDocument();
+    expect(await screen.findByText("2026-08-13")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "해제" }));
+    expect(await screen.findByText(/과거 평가 이력은 그대로 유지/)).toBeInTheDocument();
+    expect(await screen.findByText("해제됨")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/auth/reauth/totp")).toBe(false);
+    const createCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/v1/venue-selections/calendar-overrides" && init?.method === "POST");
+    expect(createCall?.[1]).toEqual(expect.objectContaining({
+      headers: expect.objectContaining({ "X-CSRF-Token": "csrf-calendar" }),
+    }));
   });
 
   it("registers a provider after confirmation and successful model discovery", async () => {

@@ -373,6 +373,7 @@ class SystemHealthResponse(StrictModel):
     decision_execution_status: str
     buy_execution_ready: bool
     buy_execution_block_reason: str | None
+    pause_entry_active: bool
     analysis_scheduler: AnalysisSchedulerStatusResponse
     database_status: str
     paper_broker_status: str
@@ -380,6 +381,25 @@ class SystemHealthResponse(StrictModel):
     market_data_status: str
     trading_gate: TradingGateResponse | None
     counts: SystemCountResponse
+
+
+class EmergencyStopRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    level: Literal["PAUSE_ENTRY"] = "PAUSE_ENTRY"
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class EmergencyStopResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    stop_id: str | None
+    account_alias: str
+    level: Literal["PAUSE_ENTRY"]
+    state: Literal["ACTIVE", "RELEASED"]
+    reason: str | None
+    version: int
+    activated_at: datetime | None
+    released_at: datetime | None
 
 
 class BrokerStatusResponse(StrictModel):
@@ -981,8 +1001,10 @@ class VenueSelectionResponse(StrictModel):
         "LABOR_DAY",
         "YEAR_END_CLOSURE",
         "CALENDAR_UNAVAILABLE",
+        "OPERATIONAL_CLOSURE",
     ]
     calendar_policy_version: str
+    calendar_override_id: str | None
     nxt_eligible: bool
     nxt_eligibility_status: Literal["VERIFIED", "INELIGIBLE", "UNKNOWN"]
     sor_supported: bool
@@ -999,3 +1021,29 @@ class VenueSelectionListResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str
     items: list[VenueSelectionResponse]
+
+
+class CalendarOverrideCreateRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    market_date: date
+    reason: str = Field(min_length=5, max_length=200)
+    source_reference: str = Field(min_length=3, max_length=200)
+
+
+class CalendarOverrideResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    override_id: str
+    market_date: date
+    override_type: Literal["OPERATIONAL_CLOSURE"]
+    state: Literal["ACTIVE", "REVOKED"]
+    reason: str
+    source_reference: str
+    created_at: datetime
+    revoked_at: datetime | None
+
+
+class CalendarOverrideListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[CalendarOverrideResponse]

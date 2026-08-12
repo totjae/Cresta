@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
+from app.calendar_overrides import resolve_trading_day
 from app.market_calendar import TradingDayDecision, evaluate_krx_trading_day
 from app.models import MarketSnapshot, User, VenueSelectionEvaluation
 
@@ -262,6 +263,9 @@ def evaluate_and_store_venue_selection(
 ) -> VenueSelectionEvaluation:
     krx_quote = quote_from_snapshot(krx_snapshot)
     nxt_quote = quote_from_snapshot(nxt_snapshot)
+    trading_day, calendar_override = resolve_trading_day(
+        db, now.astimezone(KST).date()
+    )
     result = select_venue(
         side=side,
         urgency=urgency,
@@ -272,6 +276,7 @@ def evaluate_and_store_venue_selection(
         nxt_quote=nxt_quote,
         now=now,
         max_age_seconds=max_age_seconds,
+        trading_day=trading_day,
     )
     input_record = {
         "schema_version": "venue-selection-input-v1",
@@ -288,6 +293,7 @@ def evaluate_and_store_venue_selection(
         "trading_day_status": result.trading_day_status,
         "calendar_reason": result.calendar_reason,
         "calendar_policy_version": result.calendar_policy_version,
+        "calendar_override_id": trading_day.override_id,
         "nxt_eligible": nxt_eligibility_status == "VERIFIED",
         "nxt_eligibility_status": nxt_eligibility_status,
         "sor_supported": sor_supported,
@@ -312,6 +318,7 @@ def evaluate_and_store_venue_selection(
         trading_day_status=result.trading_day_status,
         calendar_reason=result.calendar_reason,
         calendar_policy_version=result.calendar_policy_version,
+        calendar_override_id=(calendar_override.id if calendar_override else None),
         nxt_eligible=nxt_eligibility_status == "VERIFIED",
         nxt_eligibility_status=nxt_eligibility_status,
         sor_supported=sor_supported,

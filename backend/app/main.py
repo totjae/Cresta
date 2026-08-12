@@ -15,6 +15,7 @@ from app.api.llm import router as llm_router
 from app.api.orders import router as orders_router
 from app.api.positions import router as positions_router
 from app.api.quotes import router as quotes_router
+from app.api.risk import router as risk_router
 from app.api.risk_settings import router as risk_settings_router
 from app.api.settings import router as settings_router
 from app.api.system import router as system_router
@@ -22,6 +23,8 @@ from app.api.venue_selections import router as venue_selections_router
 from app.api.watchlist import router as watchlist_router
 from app.auth.service import AuthenticationError, CsrfError, ReauthProofError
 from app.broker.mock_order_test import MockOrderTestError
+from app.calendar_overrides import CalendarOverrideError
+from app.emergency_stop import EmergencyStopError
 from app.errors import ResourceNotFoundError
 from app.execution_policy import ExecutionPolicyError
 from app.ids import uuid7
@@ -135,6 +138,22 @@ def create_app() -> FastAPI:
             },
         )
 
+    @application.exception_handler(EmergencyStopError)
+    async def emergency_stop_error(
+        request: Request, exc: EmergencyStopError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": "비상정지 요청을 안전하게 처리하지 못했습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": False,
+                }
+            },
+        )
+
     @application.exception_handler(MockDecisionError)
     async def mock_decision_error(request: Request, exc: MockDecisionError) -> JSONResponse:
         return JSONResponse(
@@ -205,6 +224,22 @@ def create_app() -> FastAPI:
             },
         )
 
+    @application.exception_handler(CalendarOverrideError)
+    async def calendar_override_error(
+        request: Request, exc: CalendarOverrideError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": "거래 캘린더 운영 휴장 설정을 처리할 수 없습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": False,
+                }
+            },
+        )
+
     @application.exception_handler(RequestValidationError)
     async def validation_error(request: Request, _: RequestValidationError) -> JSONResponse:
         return JSONResponse(
@@ -259,6 +294,7 @@ def create_app() -> FastAPI:
     application.include_router(orders_router, prefix="/api/v1")
     application.include_router(positions_router, prefix="/api/v1")
     application.include_router(quotes_router, prefix="/api/v1")
+    application.include_router(risk_router, prefix="/api/v1")
     application.include_router(settings_router, prefix="/api/v1")
     application.include_router(risk_settings_router, prefix="/api/v1")
     application.include_router(system_router, prefix="/api/v1")

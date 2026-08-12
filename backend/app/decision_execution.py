@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.emergency_stop import active_pause_entry
 from app.execution_policy import active_policy, policy_payload
 from app.models import (
     AuditLog,
@@ -78,6 +79,7 @@ def _buy_guard_rules(
         )
     )
     gate = db.get(TradingGate, ACCOUNT_ALIAS)
+    emergency_stop = active_pause_entry(db, ACCOUNT_ALIAS)
     fresh = bool(
         snapshot
         and stream
@@ -94,6 +96,7 @@ def _buy_guard_rules(
         _rule("MARKET_DATA_STALE", fresh),
         _rule("SYMBOL_NOT_WATCHED", watched is not None),
         _rule("BROKER_NOT_READY", gate is not None and gate.status == "READY"),
+        _rule("EMERGENCY_STOP_ACTIVE", emergency_stop is None),
         _rule(
             "ORDER_SIZE_NOT_CONFIGURED",
             risk_policy.entry_order_amount is not None,

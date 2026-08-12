@@ -47,6 +47,10 @@ KRX 상장 종목을 사용자가 KRX 또는 NXT에 고정 배정하지 않고, 
 | VEN-011 | NXT 종목 적격성은 `VERIFIED`, `INELIGIBLE`, `UNKNOWN`으로 구분한다. 정상화된 NXT quote 수신은 `VERIFIED/QUOTE_OBSERVED` 근거가 되며 별도 venue 상태 원장에 보존한다. snapshot·원장 부재를 미지원으로 단정하지 않는다. `UNKNOWN`은 NXT 단독 세션에서 `WAIT/NXT_ELIGIBILITY_UNVERIFIED`로 종료한다. |
 | VEN-012 | KRX와 NXT의 장중 세션을 계산하기 전에 공통 국내주식 거래일 캘린더를 적용한다. 토요일·일요일, 대한민국 공휴일과 대체공휴일, 근로자의 날, KRX 연말 휴장일은 시간대와 관계없이 `CLOSED/WAIT`다. |
 | VEN-013 | 거래일 판정은 정책 버전, `OPEN/CLOSED/UNKNOWN` 상태와 `WEEKDAY/WEEKEND/PUBLIC_HOLIDAY/LABOR_DAY/YEAR_END_CLOSURE/CALENDAR_UNAVAILABLE` 근거를 평가 입력 hash·DB·API에 함께 기록한다. 캘린더 라이브러리 오류나 판정 불능은 거래일로 추정하지 않고 `CALENDAR_UNAVAILABLE/WAIT`로 종료한다. |
+| VEN-014 | 거래소 임시 휴장 공지를 반영하는 운영 override는 KST 날짜별 `OPERATIONAL_CLOSURE`만 허용한다. 기본 캘린더가 닫은 날을 강제로 열거나 세션 시간을 임의 변경하는 override는 첫 버전에서 금지한다. |
+| VEN-015 | 운영 override는 오늘부터 730일 이내 날짜, 5~200자의 사유와 3~200자의 공개 출처 참조를 요구한다. 같은 날짜의 활성 override는 하나뿐이며 생성·해제 이력을 삭제하지 않는다. |
+| VEN-016 | 활성 override가 적용된 평가는 `CLOSED/OPERATIONAL_CLOSURE`, 캘린더 정책과 override ID를 입력 hash·DB·API에 고정하고 `WAIT/SESSION_CLOSED`로 종료한다. 해제 후 새 평가에만 기본 캘린더가 적용되며 과거 평가는 바뀌지 않는다. |
+| VEN-017 | override 조회·생성·해제는 로그인 세션과 쓰기 요청 CSRF 검증을 사용한다. 이 기능은 주문·승인·OrderIntent를 생성하지 않으며 Console에서 활성·해제 이력과 적용 날짜를 확인할 수 있어야 한다. |
 
 ## 5. API 계약
 
@@ -58,6 +62,19 @@ KRX 상장 종목을 사용자가 KRX 또는 NXT에 고정 배정하지 않고, 
 
 응답은 추가로 `calendar_policy_version`, `trading_day_status`, `calendar_reason`을 반환한다. 이는 화면 표시와 감사용이며 클라이언트가 세션을 다시 계산하지 않는다.
 
+`GET /api/v1/venue-selections/calendar-overrides`
+
+- 활성 override와 최근 해제 이력을 날짜 역순으로 조회한다.
+
+`POST /api/v1/venue-selections/calendar-overrides`
+
+- `market_date`, `reason`, `source_reference`로 휴장 override를 생성한다.
+- 같은 날짜에 활성 override가 있으면 `409 CALENDAR_OVERRIDE_ALREADY_ACTIVE`를 반환한다.
+
+`DELETE /api/v1/venue-selections/calendar-overrides/{override_id}`
+
+- 행을 삭제하지 않고 `REVOKED`로 전이한다. 이미 해제됐거나 없는 ID는 `404`로 처리한다.
+
 ## 6. 검증 조건
 
 - 08:00·08:49:59에는 NXT, 08:50에는 opening auction, 09:00에는 KRX, 09:00:30에는 dual, 15:20에는 closing auction, 15:40에는 NXT after, 20:00에는 closed로 분류한다.
@@ -67,10 +84,12 @@ KRX 상장 종목을 사용자가 KRX 또는 NXT에 고정 배정하지 않고, 
 - 동일 입력 snapshot과 평가시각의 canonical hash가 재현 가능하다.
 - 평일·주말뿐 아니라 공휴일·근로자의 날·연말 휴장일에도 시간대와 무관하게 `CLOSED/WAIT`가 재현된다.
 
+- 활성 운영 휴장 override는 평일을 `CLOSED/WAIT`로 만들고 평가 응답·hash에 ID가 남는다. 해제 후 새 평가에는 적용되지 않으며 이력은 조회된다.
+
 ## 7. 후속 단계
 
 - 권위 있는 키움 NXT 전체 적격 목록 동기화와 명시적 `INELIGIBLE` 판정. NXT 실시간 호가 stream과 관측 기반 `VERIFIED`는 우선 구현한다.
-- KRX 임시 휴장·개장시간 변경 공지를 반영하는 운영 override와 공식 일정 자동 동기화
+- 개장시간 변경 공지와 공식 일정 자동 동기화. 임시 휴장의 수동 fail-closed override는 우선 구현한다.
 - 실거래 키움 SOR 주문 코드·체결시장 매핑 인수시험
 - Web UI에 양 시장 비교와 선택 근거 표시
 - Guard 송신 직전 재선택 및 기존 미체결 주문의 venue 전환 정책

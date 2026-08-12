@@ -3,20 +3,29 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import AuthContext, get_auth_context, require_csrf
+from app.calendar_overrides import (
+    create_calendar_override,
+    list_calendar_overrides,
+    revoke_calendar_override,
+)
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import (
     InstrumentVenueState,
+    MarketCalendarOverride,
     MarketSnapshot,
     MarketStreamState,
     VenueSelectionEvaluation,
 )
 from app.schemas import (
+    CalendarOverrideCreateRequest,
+    CalendarOverrideListResponse,
+    CalendarOverrideResponse,
     VenueSelectionDiagnosticRequest,
     VenueSelectionListResponse,
     VenueSelectionQuoteResponse,
@@ -60,6 +69,7 @@ def _response(
         trading_day_status=evaluation.trading_day_status,
         calendar_reason=evaluation.calendar_reason,
         calendar_policy_version=evaluation.calendar_policy_version,
+        calendar_override_id=evaluation.calendar_override_id,
         nxt_eligible=evaluation.nxt_eligible,
         nxt_eligibility_status=evaluation.nxt_eligibility_status,
         sor_supported=evaluation.sor_supported,
@@ -71,6 +81,82 @@ def _response(
         evaluated_at=evaluation.evaluated_at,
         created_at=evaluation.created_at,
     )
+
+
+def _calendar_override_response(
+    request_id: str, item: MarketCalendarOverride
+) -> CalendarOverrideResponse:
+    return CalendarOverrideResponse(
+        request_id=request_id,
+        override_id=item.id,
+        market_date=item.market_date,
+        override_type="OPERATIONAL_CLOSURE",
+        state=item.state,
+        reason=item.reason,
+        source_reference=item.source_reference,
+        created_at=item.created_at,
+        revoked_at=item.revoked_at,
+    )
+
+
+@router.get("/calendar-overrides", response_model=CalendarOverrideListResponse)
+def get_calendar_overrides(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=200),
+    _: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+) -> CalendarOverrideListResponse:
+    return CalendarOverrideListResponse(
+        request_id=request.state.request_id,
+        items=[
+            _calendar_override_response(request.state.request_id, item)
+            for item in list_calendar_overrides(db, limit=limit)
+        ],
+    )
+
+
+@router.post(
+    "/calendar-overrides",
+    response_model=CalendarOverrideResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_calendar_override(
+    payload: CalendarOverrideCreateRequest,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> CalendarOverrideResponse:
+    item = create_calendar_override(
+        db,
+        user=context.user,
+        market_date=payload.market_date,
+        reason=payload.reason,
+        source_reference=payload.source_reference,
+        correlation_id=request.state.request_id,
+        request_ip=request.client.host if request.client else "unknown",
+        user_agent=request.headers.get("user-agent", "unknown"),
+    )
+    return _calendar_override_response(request.state.request_id, item)
+
+
+@router.delete(
+    "/calendar-overrides/{override_id}", response_model=CalendarOverrideResponse
+)
+def delete_calendar_override(
+    override_id: str,
+    request: Request,
+    context: AuthContext = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> CalendarOverrideResponse:
+    item = revoke_calendar_override(
+        db,
+        user=context.user,
+        override_id=override_id,
+        correlation_id=request.state.request_id,
+        request_ip=request.client.host if request.client else "unknown",
+        user_agent=request.headers.get("user-agent", "unknown"),
+    )
+    return _calendar_override_response(request.state.request_id, item)
 
 
 @router.get("", response_model=VenueSelectionListResponse)

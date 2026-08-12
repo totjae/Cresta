@@ -54,7 +54,7 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | `positions` | id, account_alias, symbol, quantity, average_price, stop_price, state, version | 활성 account+symbol unique |
 | `position_events` | id, position_id, cause_type, cause_id, before, after | 불변 원장 |
 | `risk_events` | id, scope, rule_code, severity, state, input_snapshot, resolution | 원인·해제 추적 |
-| `emergency_stops` | id, level, state, activated_by, released_by, timestamps | 활성 계좌당 1개 |
+| `emergency_stops` | id, account_alias, level, state, reason, activation/release idempotency key, activated_by, released_by, version, timestamps | 계좌당 현재 상태 1개; 변경 이력은 감사 로그에 보존 |
 | `reconciliation_runs` | id, scope, trigger, state, started_at, completed_at | 단계·checkpoint 포함 |
 | `reconciliation_mismatches` | id, run_id, code, symbol, severity, state, broker_value, internal_value | 해결 이력 |
 | `broker_leases` | account_alias, owner_id, fencing_token, expires_at, version | account_alias PK |
@@ -336,7 +336,10 @@ market_snapshots(symbol, market, observed_at desc)
 
 `instrument_venue_states`는 종목·venue별 현재 적격 상태와 근거를 보존한다. 첫 구현은 정상 NXT quote 관측으로 `VERIFIED/QUOTE_OBSERVED`만 기록하며, quote 부재를 `INELIGIBLE`로 기록하지 않는다. 평가 시각의 적격 상태는 `venue_selection_evaluations`에도 복제해 과거 판단을 재현한다.
 
+`market_calendar_overrides`는 날짜별 임시 휴장 운영 이력을 append-only로 보존한다. `market_date`, `ACTIVE/REVOKED` 상태, 사유, 공개 출처 참조, 생성·해제 사용자와 시각을 저장하고 날짜별 활성 행은 하나로 제한한다. 해제는 삭제가 아니라 상태 전이며 강제 개장 값은 저장하지 않는다. `venue_selection_evaluations.calendar_override_id`는 평가 당시 적용된 행을 참조해 과거 판단을 재현한다.
+
 - Migration `20260812_0028`은 SHADOW 거래시장 선택 평가 원장을 추가한다.
 - Migration `20260812_0029`는 `instrument_venue_states`를 추가한다. downgrade는 상태 원장만 제거하며 기존 market snapshot과 SHADOW 평가를 보존한다.
 - Migration `20260812_0030`은 거래시장 평가에 거래일 상태·캘린더 근거·정책 버전을 추가한다.
+- Migration `20260812_0031`은 운영 휴장 이력과 평가별 적용 override 참조를 추가한다. downgrade는 평가 참조와 override 원장을 제거하되 기존 venue 평가의 기본 캘린더 근거는 보존한다.
 - 현재 schema head는 `20260812_0030`이다.

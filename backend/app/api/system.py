@@ -12,6 +12,7 @@ from app.broker.mock_order_test import create_mock_order_test
 from app.broker.worker_state import get_broker_status
 from app.config import Settings, get_settings
 from app.db import get_db
+from app.emergency_stop import active_pause_entry
 from app.models import MarketStreamState, Position, TradingGate, TradingOrder
 from app.schemas import (
     AnalysisSchedulerStatusResponse,
@@ -62,6 +63,7 @@ def system_health(
 ) -> SystemHealthResponse:
     db.scalar(select(1))
     gate = db.get(TradingGate, "PAPER")
+    pause_entry = active_pause_entry(db)
     scheduler = get_scheduler_status(db)
     counts = SystemCountResponse(
         orders=int(
@@ -109,7 +111,10 @@ def system_health(
         execution_stage=settings.execution_stage,
         decision_execution_status="SHADOW_ONLY",
         buy_execution_ready=False,
-        buy_execution_block_reason="ORDER_SIZE_NOT_CONFIGURED",
+        buy_execution_block_reason=(
+            "EMERGENCY_STOP_ACTIVE" if pause_entry is not None else "ORDER_SIZE_NOT_CONFIGURED"
+        ),
+        pause_entry_active=pause_entry is not None,
         analysis_scheduler=AnalysisSchedulerStatusResponse(
             state=scheduler.state,
             lease_valid=scheduler.lease_valid,

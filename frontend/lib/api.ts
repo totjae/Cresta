@@ -247,8 +247,9 @@ export type VenueSelectionData = {
   urgency: "NORMAL" | "EMERGENCY";
   session: string;
   trading_day_status: "OPEN" | "CLOSED" | "UNKNOWN";
-  calendar_reason: "WEEKDAY" | "WEEKEND" | "PUBLIC_HOLIDAY" | "LABOR_DAY" | "YEAR_END_CLOSURE" | "CALENDAR_UNAVAILABLE";
+  calendar_reason: "WEEKDAY" | "WEEKEND" | "PUBLIC_HOLIDAY" | "LABOR_DAY" | "YEAR_END_CLOSURE" | "CALENDAR_UNAVAILABLE" | "OPERATIONAL_CLOSURE";
   calendar_policy_version: string;
+  calendar_override_id: string | null;
   nxt_eligible: boolean;
   nxt_eligibility_status: "VERIFIED" | "INELIGIBLE" | "UNKNOWN";
   sor_supported: boolean;
@@ -261,6 +262,19 @@ export type VenueSelectionData = {
   created_at: string;
 };
 
+export type CalendarOverrideData = {
+  schema_version: "1.0";
+  request_id: string;
+  override_id: string;
+  market_date: string;
+  override_type: "OPERATIONAL_CLOSURE";
+  state: "ACTIVE" | "REVOKED";
+  reason: string;
+  source_reference: string;
+  created_at: string;
+  revoked_at: string | null;
+};
+
 export type SystemHealth = {
   schema_version: "1.0";
   request_id: string;
@@ -270,6 +284,7 @@ export type SystemHealth = {
   decision_execution_status: string;
   buy_execution_ready: boolean;
   buy_execution_block_reason: string | null;
+  pause_entry_active: boolean;
   analysis_scheduler: {
     state: string;
     lease_valid: boolean;
@@ -296,6 +311,19 @@ export type SystemHealth = {
     updated_at: string;
   };
   counts: { orders: number; active_orders: number; open_positions: number };
+};
+
+export type EmergencyStopData = {
+  schema_version: "1.0";
+  request_id: string;
+  stop_id: string | null;
+  account_alias: string;
+  level: "PAUSE_ENTRY";
+  state: "ACTIVE" | "RELEASED";
+  reason: string | null;
+  version: number;
+  activated_at: string | null;
+  released_at: string | null;
 };
 
 export type OrderSummary = {
@@ -584,6 +612,26 @@ export const systemApi = {
         ...payload,
         confirmation: "KIWOOM_MOCK_ONE_SHARE",
       }),
+    });
+  },
+};
+
+export const riskApi = {
+  emergencyStop(signal?: AbortSignal) {
+    return request<EmergencyStopData>("/api/v1/risk/emergency-stop", { signal });
+  },
+  activatePauseEntry(csrfToken: string, reason: string) {
+    return request<EmergencyStopData>("/api/v1/risk/emergency-stop", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken, "Idempotency-Key": `pause-entry-${crypto.randomUUID()}` },
+      body: JSON.stringify({ schema_version: "1.0", level: "PAUSE_ENTRY", reason }),
+    });
+  },
+  releasePauseEntry(csrfToken: string, reason: string) {
+    return request<EmergencyStopData>("/api/v1/risk/emergency-stop/release", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken, "Idempotency-Key": `pause-entry-release-${crypto.randomUUID()}` },
+      body: JSON.stringify({ schema_version: "1.0", level: "PAUSE_ENTRY", reason }),
     });
   },
 };
@@ -1011,5 +1059,32 @@ export const venueSelectionApi = {
         urgency: input.urgency,
       }),
     });
+  },
+  calendarOverrides(signal?: AbortSignal) {
+    return request<{ schema_version: "1.0"; request_id: string; items: CalendarOverrideData[] }>(
+      "/api/v1/venue-selections/calendar-overrides?limit=100",
+      { signal },
+    );
+  },
+  createCalendarOverride(
+    csrfToken: string,
+    input: { marketDate: string; reason: string; sourceReference: string },
+  ) {
+    return request<CalendarOverrideData>("/api/v1/venue-selections/calendar-overrides", {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        schema_version: "1.0",
+        market_date: input.marketDate,
+        reason: input.reason,
+        source_reference: input.sourceReference,
+      }),
+    });
+  },
+  revokeCalendarOverride(csrfToken: string, overrideId: string) {
+    return request<CalendarOverrideData>(
+      `/api/v1/venue-selections/calendar-overrides/${encodeURIComponent(overrideId)}`,
+      { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } },
+    );
   },
 };

@@ -69,6 +69,7 @@
 | POST | `/approvals/{id}/reject` | 승인 요청 거절 |
 | POST | `/risk/emergency-stop` | 비상정지 활성화 및 미체결 취소 요청 |
 | POST | `/risk/emergency-stop/release` | 재인증 후 비상정지 해제 |
+| GET | `/risk/emergency-stop` | 현재 계좌의 영속 `PAUSE_ENTRY` 상태 조회 |
 | GET | `/system/health` | 데이터·브로커·큐·DB 상태 |
 | GET | `/system/broker` | 키움 환경, 연결, 토큰 만료 예정, Active worker와 호출 제한 상태 |
 | POST | `/system/broker/mock-order-test` | MOCK·KRX 매수 1주 연결 시험 주문 대기열 생성; 현재는 세션·CSRF·확인문구를 요구하고 TOTP 재인증은 API-DEV 정책에 따라 보류 |
@@ -398,3 +399,11 @@ POST /api/v1/ai/providers/{provider_id}/credential
 | API-152 | Agent run 목록·상세 응답은 nullable `server_input_policy_version`, `market_context_snapshot_id`, `market_context_snapshot_hash`를 제공한다. position 원문 snapshot과 Risk Policy payload는 응답하지 않는다. |
 | API-153 | v5 run은 `agent-server-input-v1`과 선택된 Market Context reference를 반환하고, context가 없으면 ID·hash를 null로 반환한다. null은 API 오류가 아니라 Scout 결측 입력을 뜻한다. |
 | API-154 | Market Context를 외부에서 생성·수정하는 운영 HTTP endpoint는 제공하지 않는다. |
+
+## 거래 캘린더 운영 휴장 API
+
+- `GET /api/v1/venue-selections/calendar-overrides`는 활성 override와 최근 해제 이력을 반환한다.
+- `POST /api/v1/venue-selections/calendar-overrides`는 오늘부터 730일 이내 `market_date`, 5~200자 `reason`, 3~200자 `source_reference`를 받아 `OPERATIONAL_CLOSURE`를 생성한다.
+- `DELETE /api/v1/venue-selections/calendar-overrides/{override_id}`는 행을 지우지 않고 `REVOKED`로 전이한다.
+- 쓰기 요청은 CSRF를 요구하며 별도 TOTP 재인증은 요구하지 않는다. 중복 활성 날짜는 `409 CALENDAR_OVERRIDE_ALREADY_ACTIVE`, 없거나 이미 해제된 ID는 `404 CALENDAR_OVERRIDE_NOT_FOUND`다.
+- 거래시장 평가 응답은 적용된 `calendar_override_id`를 반환하며 미적용 시 `null`이다.

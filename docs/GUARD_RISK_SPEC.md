@@ -145,6 +145,10 @@ data_risk:
 
 ### 3.6 비상정지 수준
 
+첫 MOCK 실행 단계에서는 `PAUSE_ENTRY`를 우선 구현한다. 이 상태는 서버 재시작 후에도 유지되며 신규 `BUY`의 Guard 평가를 항상 차단한다. 기존 포지션 조회와 청산 판단은 차단하지 않는다. `CANCEL_OPEN_ORDERS`와 `EMERGENCY_LIQUIDATE`는 주문 취소·청산 경로가 완성된 뒤 별도 단계로 연다.
+
+MOCK 단계의 활성화·해제는 로그인 세션, CSRF, `Idempotency-Key`와 변경 사유를 요구한다. 로그인 외 TOTP 재인증은 현재 요구하지 않으며 실거래 단계 진입 전에 다시 검토한다.
+
 ```text
 PAUSE_ENTRY
 신규매수만 중지

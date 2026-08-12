@@ -35,6 +35,7 @@ import {
   AgentStageData,
   authApi,
   BrokerStatus,
+  CalendarOverrideData,
   decisionApi,
   DecisionData,
   ExecutionMode,
@@ -51,6 +52,7 @@ import {
   OrderSummary,
   positionApi,
   PositionSummary,
+  riskApi,
   RiskPolicy,
   SessionData,
   settingsApi,
@@ -225,15 +227,22 @@ function ConsoleShell({
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [healthError, setHealthError] = useState("");
 
-  useEffect(() => {
-    const controller = new AbortController();
-    systemApi.health(controller.signal).then(setHealth).catch((reason: unknown) => {
+  const loadHealth = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setHealth(await systemApi.health(signal));
+      setHealthError("");
+    } catch (reason) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
       if (reason instanceof ApiError && reason.status === 401) onSessionExpired();
       else setHealthError("시스템 준비 상태를 불러오지 못했습니다.");
-    });
-    return () => controller.abort();
+    }
   }, [onSessionExpired]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadHealth(controller.signal);
+    return () => controller.abort();
+  }, [loadHealth]);
 
   function selectPage(nextPage: ConsolePage) {
     setPage(nextPage);
@@ -270,7 +279,7 @@ function ConsoleShell({
 
         <div className="content">
           {(error || healthError) && <div className="console-alert" role="alert"><CircleAlert size={17} /> {error || healthError}</div>}
-          {page === "dashboard" && <DashboardPage session={session} health={health} />}
+          {page === "dashboard" && <DashboardPage session={session} health={health} onHealthChanged={() => loadHealth()} />}
           {page === "watchlist" && <WatchlistPage session={session} onSessionExpired={onSessionExpired} />}
           {page === "orders" && <OrdersPage onSessionExpired={onSessionExpired} />}
           {page === "positions" && <PositionsPage onSessionExpired={onSessionExpired} />}
@@ -288,9 +297,33 @@ function PageHeading({ kicker, title, description }: { kicker: string; title: st
   return <div className="page-heading"><div><span className="eyebrow"><Gauge size={14} /> {kicker}</span><h1>{title}</h1><p>{description}</p></div></div>;
 }
 
-function DashboardPage({ session, health }: { session: SessionData; health: SystemHealth | null }) {
+function DashboardPage({ session, health, onHealthChanged }: { session: SessionData; health: SystemHealth | null; onHealthChanged: () => Promise<void> }) {
   const paperReady = health?.paper_broker_status === "AVAILABLE";
   const readiness = paperReady ? 2 : 1;
+  const [stopBusy, setStopBusy] = useState(false);
+  const [stopMessage, setStopMessage] = useState("");
+
+  async function togglePauseEntry() {
+    const active = Boolean(health?.pause_entry_active);
+    const operation = active ? "해제" : "활성화";
+    if (!window.confirm(`신규 매수 중지를 ${operation}하시겠습니까?`)) return;
+    const reason = window.prompt(`${operation} 사유를 5자 이상 입력하세요.`)?.trim();
+    if (!reason || reason.length < 5) {
+      setStopMessage("사유를 5자 이상 입력해 주세요.");
+      return;
+    }
+    setStopBusy(true);
+    try {
+      if (active) await riskApi.releasePauseEntry(session.csrf_token, reason);
+      else await riskApi.activatePauseEntry(session.csrf_token, reason);
+      await onHealthChanged();
+      setStopMessage(`PAUSE_ENTRY가 ${operation}되었습니다.`);
+    } catch {
+      setStopMessage(`PAUSE_ENTRY ${operation}에 실패했습니다.`);
+    } finally {
+      setStopBusy(false);
+    }
+  }
   return <>
     <div className="page-heading"><div><span className="eyebrow"><Gauge size={14} /> CONTROL CENTER</span><h1>대시보드</h1><p>시스템 연결과 거래 준비 상태를 확인합니다.</p></div><div className="sync-stamp"><Clock3 size={15} /> 세션 활성 · {new Date(session.expires_at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 만료</div></div>
     <section className="readiness-hero">
@@ -305,7 +338,7 @@ function DashboardPage({ session, health }: { session: SessionData; health: Syst
       <StatusCard icon={Bot} tone={health?.analysis_scheduler?.lease_valid ? "ok" : "wait"} title="AI Scheduler" status={health?.analysis_scheduler?.state ?? "LOADING"} description={`다음 판단: ${health?.analysis_scheduler?.next_due_at ? formatDateTime(health.analysis_scheduler.next_due_at) : "대기"}`} />
     </section>
     <section className="dashboard-grid">
-      <article className="panel guard-panel"><div className="panel-head"><div><ShieldCheck size={18} /><span>Cresta Guard</span></div><span className="status-pill ok">ENFORCED</span></div><div className="guard-body"><div className="shield-visual"><ShieldCheck size={36} /></div><div><h3>거래 게이트 우선</h3><p>Paper Broker가 조회 가능해도 게이트가 READY가 아니면 신규 주문은 생성되지 않습니다.</p></div></div><div className="policy-row"><span>판단 실행 단계</span><b>{health?.execution_stage ?? "LOADING"} · {health?.decision_execution_status ?? "UNKNOWN"}</b></div><div className="policy-row"><span>BUY 기능 게이트</span><b>{health?.buy_execution_ready ? "READY" : health?.buy_execution_block_reason ?? "BLOCKED"}</b></div><div className="policy-row"><span>거래 게이트</span><b>{health?.trading_gate?.status ?? "초기화 전"}</b></div><div className="policy-row"><span>차단 사유</span><b>{health?.trading_gate?.reason ?? "없음"}</b></div></article>
+      <article className="panel guard-panel"><div className="panel-head"><div><ShieldCheck size={18} /><span>Cresta Guard</span></div><span className={`status-pill ${health?.pause_entry_active ? "danger" : "ok"}`}>{health?.pause_entry_active ? "PAUSE_ENTRY" : "ENFORCED"}</span></div><div className="guard-body"><div className="shield-visual"><ShieldCheck size={36} /></div><div><h3>거래 게이트 우선</h3><p>PAUSE_ENTRY는 서버 재시작 후에도 유지되며 신규 BUY만 즉시 차단합니다.</p></div></div><div className="policy-row"><span>판단 실행 단계</span><b>{health?.execution_stage ?? "LOADING"} · {health?.decision_execution_status ?? "UNKNOWN"}</b></div><div className="policy-row"><span>BUY 기능 게이트</span><b>{health?.buy_execution_ready ? "READY" : health?.buy_execution_block_reason ?? "BLOCKED"}</b></div><div className="policy-row"><span>신규 매수 중지</span><b>{health?.pause_entry_active ? "ACTIVE" : "RELEASED"}</b></div><button className={health?.pause_entry_active ? "secondary-button" : "secondary-button danger-button"} type="button" disabled={stopBusy || !health} onClick={() => void togglePauseEntry()}>{stopBusy ? "처리 중" : health?.pause_entry_active ? "신규 매수 중지 해제" : "신규 매수 즉시 중지"}</button>{stopMessage && <p className="form-help" role="status">{stopMessage}</p>}</article>
       <article className="panel"><div className="panel-head"><div><ListChecks size={18} /><span>Paper 원장 요약</span></div><span className="status-pill neutral">READ ONLY</span></div><div className="metric-list"><div><span>전체 주문</span><strong>{health?.counts.orders ?? "—"}</strong></div><div><span>진행 주문</span><strong>{health?.counts.active_orders ?? "—"}</strong></div><div><span>보유 포지션</span><strong>{health?.counts.open_positions ?? "—"}</strong></div></div></article>
       <article className="panel activity-panel"><div className="panel-head"><div><Activity size={18} /><span>현재 연동 범위</span></div></div><div className="empty-state"><Radio size={26} /><h3>Paper 조회 전용</h3><p>주문·체결·포지션 조회만 활성화했습니다. 운영 Web에서는 임의 주문이나 체결을 만들 수 없습니다.</p></div></article>
     </section>
@@ -601,6 +634,81 @@ function RiskPolicyPanel({ session, onSessionExpired }: { session: SessionData; 
   </section>;
 }
 
+function CalendarOverridePanel({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {
+  const [items, setItems] = useState<CalendarOverrideData[]>([]);
+  const [marketDate, setMarketDate] = useState("");
+  const [reason, setReason] = useState("");
+  const [sourceReference, setSourceReference] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const result = await venueSelectionApi.calendarOverrides(signal);
+      setItems(result.items);
+      setMessage("");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("거래 캘린더 운영 이력을 불러오지 못했습니다.");
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+
+  async function create(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setMessage("");
+    try {
+      await venueSelectionApi.createCalendarOverride(session.csrf_token, { marketDate, reason, sourceReference });
+      setMarketDate(""); setReason(""); setSourceReference("");
+      await load();
+      setMessage("운영 휴장이 활성화되었습니다. 해당 날짜의 새 시장 선택은 WAIT 처리됩니다.");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else if (error instanceof ApiError && error.message === "CALENDAR_OVERRIDE_ALREADY_ACTIVE") setMessage("해당 날짜에는 이미 활성 운영 휴장이 있습니다.");
+      else setMessage("운영 휴장을 등록하지 못했습니다. 날짜와 공지 근거를 확인해 주세요.");
+    } finally { setBusy(false); }
+  }
+
+  async function revoke(overrideId: string) {
+    setBusy(true); setMessage("");
+    try {
+      await venueSelectionApi.revokeCalendarOverride(session.csrf_token, overrideId);
+      await load();
+      setMessage("운영 휴장을 해제했습니다. 과거 평가 이력은 그대로 유지됩니다.");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("운영 휴장을 해제하지 못했습니다. 최신 상태를 다시 확인해 주세요.");
+    } finally { setBusy(false); }
+  }
+
+  const kstToday = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const maxDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Date.now() + 730 * 86400000));
+
+  return <section className="panel execution-policy-panel calendar-override-panel" aria-labelledby="calendar-override-title">
+    <div className="panel-head"><div><Clock3 size={18} /><span id="calendar-override-title">거래 캘린더 운영 휴장</span></div><span className="status-pill neutral">FAIL-CLOSED</span></div>
+    <p className="venue-note">거래소 임시 휴장 공지만 반영합니다. 강제 개장은 지원하지 않으며 활성 날짜의 시장 선택은 WAIT 처리됩니다.</p>
+    {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
+    <form className="calendar-override-form" onSubmit={create}>
+      <label>휴장 날짜<input aria-label="운영 휴장 날짜" type="date" min={kstToday} max={maxDate} value={marketDate} onChange={(event) => setMarketDate(event.target.value)} required /></label>
+      <label>사유<input aria-label="운영 휴장 사유" minLength={5} maxLength={200} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="예: 거래소 임시 휴장 공지" required /></label>
+      <label>공개 출처 참조<input aria-label="운영 휴장 출처" minLength={3} maxLength={200} value={sourceReference} onChange={(event) => setSourceReference(event.target.value)} placeholder="공지 번호 또는 공개 URL" required /></label>
+      <button className="primary-button" disabled={busy || !marketDate || reason.trim().length < 5 || sourceReference.trim().length < 3}>{busy ? "처리 중" : "운영 휴장 등록"}</button>
+    </form>
+    <div className="calendar-override-history">
+      {!items.length ? <div className="empty-state ledger-empty"><Clock3 size={25} /><h3>운영 휴장 이력이 없습니다.</h3></div> : items.map((item) => <article key={item.override_id} className="calendar-override-row">
+        <div><strong>{item.market_date}</strong><span>{item.reason}</span><small>{item.source_reference} · {item.state}</small></div>
+        {item.state === "ACTIVE" ? <button type="button" className="secondary-button" disabled={busy} onClick={() => void revoke(item.override_id)}>해제</button> : <span className="status-pill neutral">해제됨</span>}
+      </article>)}
+    </div>
+  </section>;
+}
+
 function SettingsPage({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {
   const [policy, setPolicy] = useState<ExecutionPolicy | null>(null);
   const [source, setSource] = useState("");
@@ -664,6 +772,7 @@ function SettingsPage({ session, onSessionExpired }: { session: SessionData; onS
       </form>}
     </section>
     <RiskPolicyPanel session={session} onSessionExpired={onSessionExpired} />
+    <CalendarOverridePanel session={session} onSessionExpired={onSessionExpired} />
     <LlmFoundationPanel session={session} onSessionExpired={onSessionExpired} />
     {pendingVersion && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="policy-confirm-title"><span className="section-kicker">SETTING CONFIRMATION</span><h2 id="policy-confirm-title">실행 권한 활성화</h2><p>검증된 버전을 운영 설정에 적용합니다. 활성화 전 선택한 실행 모드를 다시 확인해 주세요.</p><form onSubmit={activate}><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setPendingVersion("")} disabled={busy}>취소</button><button type="submit" className="primary-button" disabled={busy}>{busy ? "적용 중" : "활성화"}</button></div></form></section></div>}
   </>;
