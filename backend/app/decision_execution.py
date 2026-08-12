@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.approvals import create_approval
 from app.config import Settings
 from app.emergency_stop import active_pause_entry
 from app.execution_policy import active_policy, policy_payload
@@ -113,7 +114,17 @@ def route_trading_decision(
     settings: Settings,
     now: datetime | None = None,
 ) -> DecisionExecution | None:
-    """Persist one idempotent SHADOW execution; never create approval or order rows."""
+    """Route one idempotent TRADING decision through Guard to its terminal state.
+
+    In the ``SHADOW`` stage no approval or order is ever created — the execution
+    ends in ``SHADOW_RECORDED`` (or ``GUARD_BLOCKED``). In the ``APPROVAL_ONLY``
+    stage a BUY decision whose hard Guard passes either creates a ``PENDING``
+    approval (``MANUAL_APPROVAL`` mode) or, for ``AUTOMATIC`` mode, creates the
+    CREATED order directly via the shared order creation service. Sell actions
+    remain rule-triggered (FIXED_STOP) rather than decision-driven; non-BUY
+    supported actions stay ``ACTION_NOT_IMPLEMENTED`` until the take-profit
+    milestone wires them through the same service.
+    """
     if decision.purpose != "TRADING":
         return None
 
@@ -190,6 +201,35 @@ def route_trading_decision(
         if blocked:
             execution.state = "GUARD_BLOCKED"
             execution.result_code = str(blocked[0]["code"])
+        elif action == "BUY" and settings.execution_stage == "APPROVAL_ONLY":
+            if mode == "MANUAL_APPROVAL":
+                # Defer order creation to user approval; the approval service
+                # re-runs the Guard and price-deviation check before creating
+                # the CREATED order on approval.
+                approval = create_approval(
+                    db,
+                    execution=execution,
+                    decision=decision,
+                    user=user,
+                    settings=settings,
+                    now=current,
+                )
+                execution.approval_id = approval.id
+                # create_approval commits and sets execution.state APPROVAL_PENDING.
+            elif mode == "AUTOMATIC":
+                execution = _create_buy_order(
+                    db,
+                    execution=execution,
+                    decision=decision,
+                    user=user,
+                    risk_policy=risk_policy,
+                    settings=settings,
+                    correlation_id=correlation_id,
+                    current=current,
+                )
+            else:
+                execution.state = "SHADOW_RECORDED"
+                execution.result_code = "SHADOW_ONLY"
         else:
             execution.state = "SHADOW_RECORDED"
             execution.result_code = "SHADOW_ONLY"
@@ -217,4 +257,76 @@ def route_trading_decision(
     )
     db.commit()
     db.refresh(execution)
+    return execution
+
+
+def _buy_quantity(entry_order_amount, price) -> int:
+    """Whole-share quantity for an automatic BUY (mirrors approvals service)."""
+    from decimal import ROUND_DOWN, Decimal
+
+    if entry_order_amount is None or price is None or price <= 0:
+        return 0
+    return int((entry_order_amount / price).quantize(Decimal(1), rounding=ROUND_DOWN))
+
+
+def _create_buy_order(
+    db: Session,
+    *,
+    execution: DecisionExecution,
+    decision: Decision,
+    user: User,
+    risk_policy: RiskPolicyPayload,
+    settings: Settings,
+    correlation_id: str,
+    current: datetime,
+) -> DecisionExecution:
+    """Create the CREATED BUY order directly (AUTOMATIC mode, APPROVAL_ONLY stage)."""
+    from app.approvals import _marketable_buy_price  # reuse the same pricing helper
+    from app.order_creation import OrderCreationError, OrderRequest, create_order
+
+    snapshot = db.get(MarketSnapshot, decision.input_snapshot_id)
+    price = _marketable_buy_price(snapshot)
+    quantity = _buy_quantity(risk_policy.entry_order_amount, price)
+    if quantity <= 0 or price is None:
+        execution.state = "GUARD_BLOCKED"
+        execution.result_code = "ORDER_SIZE_NOT_CONFIGURED"
+        return execution
+    request = OrderRequest(
+        symbol=decision.symbol,
+        market=decision.market,
+        side="BUY",
+        action="BUY",
+        order_type="LIMIT",
+        limit_price=price,
+        quantity=quantity,
+        idempotency_key=f"auto-buy:{decision.id}",
+        request_payload={
+            "environment": "MOCK",
+            "symbol": decision.symbol,
+            "market": decision.market,
+            "side": "BUY",
+            "action": "BUY",
+            "order_type": "LIMIT",
+            "limit_price": str(price),
+            "quantity": quantity,
+            "decision_id": decision.id,
+            "idempotency_key": f"auto-buy:{decision.id}",
+        },
+        correlation_id=correlation_id,
+    )
+    try:
+        order = create_order(
+            db,
+            user=user,
+            request=request,
+            audit_action="AUTOMATIC_BUY_ORDER_CREATED",
+            now=current,
+        )
+    except OrderCreationError as exc:
+        execution.state = "FAILED_SAFE"
+        execution.result_code = exc.code
+        return execution
+    execution.state = "ORDER_CREATED"
+    execution.result_code = "ORDER_CREATED"
+    execution.order_intent_id = order.intent_id
     return execution

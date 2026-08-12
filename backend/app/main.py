@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.agents.runtime import AgentRuntimeError
 from app.api.agent_runs import router as agent_runs_router
+from app.api.approvals import router as approvals_router
 from app.api.auth import router as auth_router
 from app.api.decisions import router as decisions_router
 from app.api.llm import router as llm_router
@@ -21,6 +22,7 @@ from app.api.settings import router as settings_router
 from app.api.system import router as system_router
 from app.api.venue_selections import router as venue_selections_router
 from app.api.watchlist import router as watchlist_router
+from app.approvals import ApprovalError
 from app.auth.service import AuthenticationError, CsrfError, ReauthProofError
 from app.broker.mock_order_test import MockOrderTestError
 from app.calendar_overrides import CalendarOverrideError
@@ -240,6 +242,20 @@ def create_app() -> FastAPI:
             },
         )
 
+    @application.exception_handler(ApprovalError)
+    async def approval_error(request: Request, exc: ApprovalError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": "승인 요청을 처리할 수 없습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": False,
+                }
+            },
+        )
+
     @application.exception_handler(RequestValidationError)
     async def validation_error(request: Request, _: RequestValidationError) -> JSONResponse:
         return JSONResponse(
@@ -288,6 +304,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     application.include_router(auth_router, prefix="/api/v1")
+    application.include_router(approvals_router, prefix="/api/v1")
     application.include_router(decisions_router, prefix="/api/v1")
     application.include_router(llm_router, prefix="/api/v1")
     application.include_router(agent_runs_router, prefix="/api/v1")

@@ -442,6 +442,46 @@ class MockOrderTestResponse(StrictModel):
     requested_quantity: int = 1
 
 
+class ApprovalResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    approval_id: str
+    execution_id: str
+    decision_id: str
+    user_id: str
+    state: str
+    symbol: str
+    market: str
+    action: str
+    reference_price: Decimal | None
+    quantity: int
+    order_id: str | None
+    result_code: str | None
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class ApprovalListResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    items: list[ApprovalResponse]
+
+
+class ApprovalActionRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    idempotency_key: str = Field(min_length=16, max_length=128)
+
+
+class ApprovalActionResponse(StrictModel):
+    schema_version: str = "1.0"
+    request_id: str
+    approval_id: str
+    state: str
+    order_id: str | None
+    result_code: str | None
+
+
 class QuoteResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str

@@ -103,8 +103,10 @@ class Settings(BaseSettings):
             raise RuntimeError("Only MOCK broker environment is allowed in the first release")
         if self.live_trading_enabled:
             raise RuntimeError("Live trading must remain disabled in the first release")
-        if self.execution_stage != "SHADOW":
-            raise RuntimeError("Only the SHADOW decision execution stage is currently implemented")
+        if self.execution_stage not in ("SHADOW", "APPROVAL_ONLY"):
+            raise RuntimeError(
+                "Only the SHADOW and APPROVAL_ONLY decision execution stages are currently implemented"
+            )
         if self.analysis_scheduler_poll_seconds * 2 >= self.analysis_scheduler_lease_seconds:
             raise RuntimeError("Analysis scheduler poll must be less than half the lease duration")
         if self.agent_worker_poll_seconds * 2 >= self.agent_worker_lease_seconds:

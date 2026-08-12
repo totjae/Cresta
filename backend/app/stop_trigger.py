@@ -67,6 +67,12 @@ TRADABLE_SESSIONS = {
     "KRX_ONLY",
     "DUAL_CONTINUOUS",
 }
+# Fixed-stop loss execution mode default is AUTOMATIC (app.execution_policy
+# SAFE_DEFAULT_POLICY.fixed_stop_loss). The stop trigger is account-scoped and
+# has no user context to resolve a per-user execution policy version, so in the
+# APPROVAL_ONLY stage it auto-sells when the hard sell Guard passes; a DISABLED
+# policy would require a later user-aware wiring step.
+FIXED_STOP_AUTO_SELL_STAGES = {"APPROVAL_ONLY", "MOCK_AUTOMATIC"}
 
 
 class StopTriggerError(Exception):
@@ -142,6 +148,23 @@ def _rule(code: str, passed: bool) -> dict[str, object]:
     return {"code": code, "result": "PASSED" if passed else "BLOCKED"}
 
 
+class _SystemAuditActor:
+    """Minimal stand-in for the order-creation audit actor.
+
+    The fixed-stop trigger is system-driven (no user session), but
+    ``create_order`` records a ``User.id``-shaped ``actor_id`` on the audit
+    log. ``AuditLog.actor_id`` is a free ``String(36)`` (not a FK), so a stable
+    sentinel identifier is safe and keeps the audit trail honest about who
+    acted.
+    """
+
+    id = "SYSTEM_FIXED_STOP_TRIGGER"
+
+
+def _system_audit_user(db: Session) -> _SystemAuditActor:
+    return _SystemAuditActor()
+
+
 def _sell_guard_rules(
     db: Session,
     *,
@@ -171,6 +194,10 @@ def _sell_guard_rules(
         _rule(
             "POSITION_VERSION_MATCH",
             position.version == trigger.position_version,
+        ),
+        _rule(
+            "POSITION_ORIGIN_CRESTA_MANAGED",
+            getattr(position, "origin", "CRESTA_MANAGED") == "CRESTA_MANAGED",
         ),
         _rule(
             "SELL_QUANTITY_AVAILABLE",
@@ -443,10 +470,106 @@ def _evaluate_position(
         trigger.state = "EXIT_PENDING"
         trigger.result_code = rule_code
     else:
-        trigger.state = "SHADOW_RECORDED"
-        trigger.result_code = None
+        if _should_auto_sell(settings, snapshot):
+            _emit_fixed_stop_order(
+                db,
+                trigger=trigger,
+                position=position,
+                snapshot=snapshot,
+                stop_price=stop_price,
+                correlation_id=correlation_id,
+                now=now,
+            )
+        else:
+            trigger.state = "SHADOW_RECORDED"
+            trigger.result_code = None
     trigger.updated_at = now
     db.flush()
+
+
+def _should_auto_sell(settings: Settings, snapshot: MarketSnapshot | None) -> bool:
+    """True when the fixed-stop trigger may create a real SELL order.
+
+    Requires a non-SHADOW stage and an executable bid price to sell into. The
+    execution-policy ``fixed_stop_loss`` mode is AUTOMATIC by default; a user
+    setting it to DISABLED will be honored once user-aware wiring is added.
+    """
+    return settings.execution_stage in FIXED_STOP_AUTO_SELL_STAGES and snapshot is not None
+
+
+def _emit_fixed_stop_order(
+    db: Session,
+    *,
+    trigger: StopTrigger,
+    position: Position,
+    snapshot: MarketSnapshot | None,
+    stop_price: Decimal,
+    correlation_id: str,
+    now: datetime,
+) -> None:
+    """Create the CREATED SELL order for a firing fixed-stop trigger.
+
+    Uses the best bid (MARKETABLE_LIMIT sell) and the full position quantity.
+    On success the trigger becomes FULFILLED and its risk event is resolved. If
+    order creation fails the trigger stays EXIT_PENDING so the next tick retries.
+    """
+    from app.order_creation import OrderCreationError, OrderRequest, create_order
+
+    if snapshot is None or snapshot.best_bid_price is None or snapshot.best_bid_price <= 0:
+        trigger.state = "EXIT_PENDING"
+        trigger.result_code = "NO_FRESH_EXECUTABLE_KRX_QUOTE"
+        return
+    price = snapshot.best_bid_price
+    quantity = position.quantity
+    request = OrderRequest(
+        symbol=position.symbol,
+        market="KRX",
+        side="SELL",
+        action="FIXED_STOP",
+        order_type="LIMIT",
+        limit_price=price,
+        quantity=quantity,
+        idempotency_key=f"fixed-stop:{trigger.id}",
+        request_payload={
+            "environment": "MOCK",
+            "symbol": position.symbol,
+            "market": "KRX",
+            "side": "SELL",
+            "action": "FIXED_STOP",
+            "order_type": "LIMIT",
+            "limit_price": str(price),
+            "quantity": quantity,
+            "trigger_id": trigger.id,
+            "position_id": position.id,
+            "position_version": position.version,
+            "stop_price": str(stop_price),
+            "idempotency_key": f"fixed-stop:{trigger.id}",
+        },
+        correlation_id=correlation_id,
+    )
+    # The order creation service needs a User for the audit row; the stop
+    # trigger is system-driven so reuse a system sentinel by looking up the
+    # owning user is not available at account scope. We pass a minimal system
+    # actor via a throwaway User-shaped object only for the audit actor_id.
+    system_user = _system_audit_user(db)
+    try:
+        create_order(
+            db,
+            user=system_user,
+            request=request,
+            audit_action="FIXED_STOP_SELL_ORDER_CREATED",
+            now=now,
+        )
+    except OrderCreationError as exc:
+        trigger.state = "EXIT_PENDING"
+        trigger.result_code = exc.code
+        return
+    trigger.state = "FULFILLED"
+    trigger.result_code = "ORDER_CREATED"
+    if trigger.risk_event_id:
+        resolve_risk_event(
+            db, trigger.risk_event_id, resolution="ORDER_CREATED", now=now
+        )
 
 
 def _re_evaluate_trigger(
@@ -528,8 +651,19 @@ def _re_evaluate_trigger(
             resolve_risk_event(
                 db, trigger.risk_event_id, resolution="BROKER_RECOVERED", now=now
             )
-        trigger.state = "SHADOW_RECORDED"
-        trigger.result_code = None
+        if _should_auto_sell(settings, snapshot):
+            _emit_fixed_stop_order(
+                db,
+                trigger=trigger,
+                position=position,
+                snapshot=snapshot,
+                stop_price=stop_price,
+                correlation_id=trigger.correlation_id,
+                now=now,
+            )
+        else:
+            trigger.state = "SHADOW_RECORDED"
+            trigger.result_code = None
     trigger.updated_at = now
     db.flush()
 

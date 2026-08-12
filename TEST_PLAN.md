@@ -1,5 +1,22 @@
 # Cresta 테스트 계획
 
+### T-APR-ORDER — 승인형 BUY 주문 + FIXED_STOP SELL 주문 연결 (2026-08-13)
+
+- `T-ORD-CREATE-001`: 공통 Order Creation Service가 `OrderIntent`+`TradingOrder(CREATED)`를 원자 생성하고, 같은 `idempotency_key`+동일 payload는 같은 주문을 반환하며, 같은 키+다른 payload는 `IDEMPOTENCY_CONFLICT`로 거부하는지 확인한다.
+- `T-APR-001`: `APPROVAL_ONLY` + `MANUAL_APPROVAL` BUY가 Guard 통과 시 `Approval(PENDING)`을 만들고 주문은 0건인지 확인한다.
+- `T-APR-002`: PENDING 승인을 승인하면 Guard·가격편차 재검사 후 `CREATED` BUY 주문을 원자 생성하고 `Approval(APPROVED)`·`DecisionExecution(ORDER_CREATED)`로 전환되는지 확인한다.
+- `T-APR-003`: 같은 `idempotency_key`로 승인 재시도 시 주문이 1건만 생성되는지 확인한다.
+- `T-APR-004`: PENDING 승인 거절 시 주문 0건, `Approval(REJECTED)`·`DecisionExecution(REJECTED)`로 종료되는지 확인한다.
+- `T-APR-005`: `SHADOW` 단계에서는 `MANUAL_APPROVAL`/`AUTOMATIC` 모두 Approval·주문 0건, `SHADOW_RECORDED`로 유지되는지 확인한다.
+- `T-APR-006`: 만료된 승인 승인 시도는 `EXPIRED`로 종료되고 주문 0건인지 확인한다.
+- `T-APR-007`: `APPROVAL_ONLY` + `AUTOMATIC` BUY는 승인 없이 직접 `CREATED` 주문을 생성하고 Approval 0건인지 확인한다.
+- `T-STOP-SELL-001`: `APPROVAL_ONLY`에서 발화한 FIXED_STOP trigger가 `FULFILLED`로 전환되며 SELL `CREATED` 주문을 생성하는지 확인한다.
+- `T-STOP-SELL-002`: `SHADOW` 단계에서는 trigger가 `SHADOW_RECORDED`로 유지되고 주문 0건인지 확인한다.
+- `T-STOP-SELL-003`: `EXTERNAL` position은 자동 매도되지 않고 `EXIT_PENDING`(`POSITION_ORIGIN_CRESTA_MANAGED`)으로 차단되는지 확인한다.
+- `T-PROV-001`: Position이 기본 `CRESTA_MANAGED`이고 `EXTERNAL` 태깅이 가능한지 확인한다.
+
+Evidence: backend 전체 회귀 305개 통과(신규 16), Ruff lint 통과, migration `20260813_0034` upgrade→downgrade→upgrade 왕복 통과, Frontend TypeScript·14개 component 시험·production build 통과. Ubuntu PostgreSQL 적용·실제 장중 승인·손절 주문 송신·키움 체결·CSRF/401 API 인수시험은 대기 중이다.
+
 ### T-STOP-001 — 고정 손절 trigger SHADOW (2026-08-12)
 
 - `T-STOP-001`: `compute_stop_price`가 평균단가와 `fixed_stop_loss_pct`로 손절가를 계산하고 허용 범위(0.1%~20%) 경계를 통과하는지 확인한다.

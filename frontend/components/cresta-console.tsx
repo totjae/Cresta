@@ -33,6 +33,8 @@ import {
   AgentInvocationOutputData,
   AgentRunData,
   AgentStageData,
+  approvalApi,
+  ApprovalData,
   authApi,
   BrokerStatus,
   CalendarOverrideData,
@@ -1117,7 +1119,79 @@ function DecisionsPage({ session, onSessionExpired }: { session: SessionData; on
     <AgentRuntimePanel session={session} onSessionExpired={onSessionExpired} />
     <section className="panel decision-control"><div className="panel-head"><div><Bot size={18} /><span>최신 snapshot 진단</span></div><span className="status-pill neutral">deterministic-mock-v2</span></div><form className="diagnostic-form" onSubmit={evaluate}><label htmlFor="decision-symbol">종목코드</label><input id="decision-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required /><label htmlFor="decision-market">시장</label><select id="decision-market" value={market} onChange={(event) => setMarket(event.target.value as "KRX" | "NXT")}><option value="KRX">KRX</option><option value="NXT">NXT</option></select><button className="primary-button" disabled={busy || symbol.length !== 6}>{busy ? "판단 중" : "Mock 판단 실행"}</button></form></section>
     <section className="decision-grid">{items.length === 0 ? <article className="panel empty-state"><Bot size={26} /><h3>저장된 AI 판단이 없습니다</h3><p>최신 시세 snapshot이 준비된 종목으로 진단을 실행하세요.</p></article> : items.map((item) => <article className="panel decision-card" key={item.decision_id}><div className="panel-head"><div><Bot size={17} /><span>{item.symbol} · {item.market}</span></div><OrderStatus status={item.execution?.state ?? item.purpose} /></div><div className="decision-action"><strong>{item.core.action}</strong><span>confidence {Number(item.core.confidence).toFixed(2)}</span></div><dl><div><dt>Scout</dt><dd>{item.scout.trend_state} · {item.scout.entry_score}점</dd></div><div><dt>판단 목적</dt><dd>{item.purpose}</dd></div><div><dt>실행 단계</dt><dd>{item.execution?.stage ?? "진단 전용"}</dd></div><div><dt>실행 결과</dt><dd>{item.execution?.state ?? "실행 없음"}</dd></div><div><dt>입력 schema</dt><dd>{item.input_schema_version ?? "legacy"}</dd></div><div><dt>지표 버전</dt><dd>{item.indicator_calculator_version ?? "미준비"}</dd></div><div><dt>입력 hash</dt><dd className="mono">{item.input_hash ? item.input_hash.slice(0, 12) : "없음"}</dd></div><div><dt>snapshot</dt><dd className="mono">{item.input_snapshot_id}</dd></div></dl><p className="reason-codes">{item.core.reason_codes.join(" · ")}</p><small>{formatDateTime(item.created_at)} · {item.model_id}</small></article>)}</section>
+    <ApprovalsPanel session={session} onSessionExpired={onSessionExpired} />
   </>;
+}
+
+function approvalStateLabel(state: string): string {
+  switch (state) {
+    case "PENDING": return "승인 대기";
+    case "APPROVED": return "승인됨";
+    case "REJECTED": return "거절됨";
+    case "EXPIRED": return "만료";
+    case "INVALIDATED": return "무효화";
+    default: return state;
+  }
+}
+
+function ApprovalsPanel({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {
+  const [items, setItems] = useState<ApprovalData[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [confirm, setConfirm] = useState<{ approval: ApprovalData; action: "approve" | "reject" } | null>(null);
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try { setItems((await approvalApi.list(signal)).items); }
+    catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("승인 목록을 불러오지 못했습니다.");
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    const timer = window.setInterval(() => void load(), 5000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [load]);
+
+  async function act(approval: ApprovalData, action: "approve" | "reject") {
+    setBusyId(approval.approval_id); setMessage("");
+    const key = `${action}-${approval.approval_id}-${crypto.randomUUID()}`;
+    try {
+      const result = action === "approve"
+        ? await approvalApi.approve(session.csrf_token, approval.approval_id, key)
+        : await approvalApi.reject(session.csrf_token, approval.approval_id, key);
+      setMessage(`승인 ${approval.approval_id.slice(0, 8)}이 ${approvalStateLabel(result.state)}${result.order_id ? " · 주문 " + result.order_id.slice(0, 8) : ""}으로 처리되었습니다.`);
+      await load();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onSessionExpired();
+      else setMessage("승인 처리 중 오류가 발생했습니다. 만료·가격 이탈·Guard 차단일 수 있습니다.");
+    } finally { setBusyId(null); setConfirm(null); }
+  }
+
+  return <section className="panel approval-panel" aria-labelledby="approvals-title">
+    <div className="panel-head"><div><ShieldCheck size={18} /><span id="approvals-title">승인 대기 주문</span></div><span className="status-pill neutral">MANUAL_APPROVAL · BUY</span></div>
+    <div className="console-alert" role="note"><CircleAlert size={17} /> 승인 시점에 Guard·가격편차를 재검사합니다. 통과한 주문만 CREATED로 생성되어 키움 모의투자로 송신됩니다.</div>
+    {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
+    {items.length === 0 ? <div className="empty-state"><Bot size={22} /><p>대기 중인 승인이 없습니다. APPROVAL_ONLY 단계에서 BUY 판단이 Guard를 통과하면 이곳에 표시됩니다.</p></div>
+      : <div className="approval-grid">{items.map((item) => <article className="panel approval-card" key={item.approval_id}>
+        <div className="panel-head"><div><Bot size={16} /><span>{item.symbol} · {item.market}</span></div><OrderStatus status={item.state} /></div>
+        <div className="decision-action"><strong>{item.action}</strong><span>{item.quantity}주 · 기준가 {item.reference_price ?? "—"}</span></div>
+        <dl><div><dt>상태</dt><dd>{approvalStateLabel(item.state)}</dd></div><div><dt>만료</dt><dd>{formatDateTime(item.expires_at)}</dd></div><div><dt>결과</dt><dd>{item.result_code ?? "—"}</dd></div>{item.order_id && <div><dt>주문</dt><dd className="mono">{item.order_id.slice(0, 12)}</dd></div>}</dl>
+        <div className="modal-actions">
+          <button className="primary-button" disabled={busyId === item.approval_id || item.state !== "PENDING"} onClick={() => setConfirm({ approval: item, action: "approve" })}>승인</button>
+          <button className="secondary-button" disabled={busyId === item.approval_id || item.state !== "PENDING"} onClick={() => setConfirm({ approval: item, action: "reject" })}>거절</button>
+        </div>
+      </article>)}</div>}
+    {confirm && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="approval-confirm-title">
+      <span className="section-kicker">APPROVAL CONFIRMATION</span>
+      <h2 id="approval-confirm-title">{confirm.action === "approve" ? "BUY 주문 승인" : "BUY 주문 거절"}</h2>
+      <p>{confirm.action === "approve" ? `${confirm.approval.symbol} ${confirm.approval.quantity}주 BUY 주문을 생성해 키움 모의투자로 송신합니다.` : "이 BUY 판단을 거절합니다. 주문은 생성되지 않습니다."}</p>
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setConfirm(null)} disabled={busyId === confirm.approval.approval_id}>취소</button><button className={confirm.action === "approve" ? "primary-button" : "secondary-button"} disabled={busyId === confirm.approval.approval_id} onClick={() => void act(confirm.approval, confirm.action)}>{busyId === confirm.approval.approval_id ? "처리 중" : confirm.action === "approve" ? "승인" : "거절"}</button></div>
+    </section></div>}
+  </section>;
 }
 
 const agentRuntimeRoles = [

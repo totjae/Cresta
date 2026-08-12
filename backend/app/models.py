@@ -387,11 +387,18 @@ class Approval(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     actor_id: Mapped[str | None] = mapped_column(String(36))
     reauth_proof_id: Mapped[str | None] = mapped_column(String(36))
+    order_id: Mapped[str | None] = mapped_column(String(36))
+    result_code: Mapped[str | None] = mapped_column(String(64))
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+    __mapper_args__: ClassVar[dict[str, object]] = {
+        "version_id_col": version,
+        "version_id_generator": False,
+    }
 
 
 class EmergencyStop(Base):
@@ -725,6 +732,9 @@ class Position(Base):
         UniqueConstraint("account_alias", "symbol", name="uq_positions_account_symbol"),
         CheckConstraint("quantity >= 0", name="ck_positions_quantity_nonnegative"),
         CheckConstraint("state IN ('OPEN','CLOSED')", name="ck_positions_state"),
+        CheckConstraint(
+            "origin IN ('CRESTA_MANAGED','EXTERNAL')", name="ck_positions_origin"
+        ),
         Index("ix_positions_account_symbol", "account_alias", "symbol"),
     )
 
@@ -734,6 +744,9 @@ class Position(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     average_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal(0))
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="CLOSED")
+    origin: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="CRESTA_MANAGED"
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
