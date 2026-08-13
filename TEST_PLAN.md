@@ -3,6 +3,7 @@
 ### 2026-08-14 키움 projection Console 조회
 
 - `T-READ-001`: `KIWOOM_MOCK_PRIMARY`의 `EXTERNAL` OPEN 포지션이 인증된 `/positions` 목록·상세와 시스템 `open_positions` 집계에 포함되고, legacy `PAPER` 포지션 조회가 유지되는지 확인한다.
+- Evidence: backend 포지션·reconciliation 집중시험 20개, Ruff, 해당 Frontend component 시험과 TypeScript 검사 통과. Ubuntu 서버 배포 후 API·Frontend·Nginx healthy, worker `READY`, 키움 MOCK projection 1건(`005930`, 1주, 평균 269000원, `OPEN/EXTERNAL`)을 확인했다. 전체 Frontend 회귀의 운영 휴장 시험 1개 timeout은 별도 기존 시험 안정화 대상으로 남긴다.
 
 ### T-EVIDENCE-RECONCILE — 장중 근거 정리와 시간 결정론 회귀 (2026-08-13)
 

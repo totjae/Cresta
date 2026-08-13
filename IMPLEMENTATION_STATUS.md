@@ -3,6 +3,7 @@
 ### 2026-08-14 키움 projection Console 조회 보정
 
 - `/positions`와 대시보드 집계가 legacy `PAPER`에만 고정되어 키움 기준 `KIWOOM_MOCK_PRIMARY` 포지션을 숨기던 조회 경계를 수정했다. MOCK Console은 두 원장을 명시적으로 포함하며 포지션 관리 출처(`CRESTA_MANAGED`/`EXTERNAL`)를 화면에 표시한다.
+- backend 포지션·reconciliation 집중시험 20개, Ruff, 포지션 UI 집중시험과 TypeScript 검사가 통과했다. 전체 Frontend 14개 중 기존 운영 휴장 비동기 시험 1개는 이번 변경과 무관하게 timeout됐다. Ubuntu 서버에 `5e1e04e`를 배포해 API·Frontend·Nginx health와 worker `READY`, DB의 `KIWOOM_MOCK_PRIMARY / 005930 / 1주 / 269000원 / OPEN / EXTERNAL` projection을 확인했다.
 
 ### 2026-08-14 키움 Broker 기준 계좌 projection
 
