@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -29,7 +30,10 @@ from app.execution_policy import (
 )
 from app.models import (
     Approval,
+    AuditLog,
     Decision,
+    GuardEvaluation,
+    MarketSnapshot,
     MarketStreamState,
     TradingGate,
     TradingOrder,
@@ -125,8 +129,6 @@ def _stream_fresh(db: Session, snapshot_id: str) -> None:
 
 def _decision(db: Session, *, action: str = "BUY", ask: Decimal = Decimal("101.1")) -> Decision:
     now = datetime.now(UTC)
-    from app.models import MarketSnapshot
-
     snapshot = MarketSnapshot(
         symbol="005930", market="KRX", source="TEST", sequence_or_hash=f"approval-{action}-{ask}",
         source_sequence=1, payload_hash="a" * 64, last_price=ask,
@@ -152,6 +154,47 @@ def _decision(db: Session, *, action: str = "BUY", ask: Decimal = Decimal("101.1
     db.commit()
     db.refresh(decision)
     return decision
+
+
+def _advance_snapshot(
+    db: Session,
+    *,
+    ask: Decimal,
+    received_at: datetime | None = None,
+    quality: str = "NORMAL",
+) -> MarketSnapshot:
+    observed = received_at or datetime.now(UTC)
+    snapshot = MarketSnapshot(
+        symbol="005930",
+        market="KRX",
+        source="TEST",
+        sequence_or_hash=f"approval-latest-{ask}-{quality}",
+        source_sequence=2,
+        payload_hash="b" * 64,
+        last_price=ask,
+        open_price=ask,
+        high_price=ask,
+        low_price=ask,
+        cumulative_volume=10001,
+        best_bid_price=ask - Decimal("0.1"),
+        best_bid_quantity=100,
+        best_ask_price=ask,
+        best_ask_quantity=100,
+        trading_status="TRADING",
+        quality=quality,
+        recovery_snapshot=False,
+        event_at=observed,
+        received_at=observed,
+    )
+    db.add(snapshot)
+    db.flush()
+    stream = db.get(MarketStreamState, ("KRX", "005930"))
+    assert stream is not None
+    stream.current_snapshot_id = snapshot.id
+    stream.quality = quality
+    stream.last_received_at = observed
+    db.commit()
+    return snapshot
 
 
 def _approval_only_settings(settings: Settings) -> Settings:
@@ -201,6 +244,126 @@ def test_approve_pending_creates_created_order(
     assert order.side == "BUY" and order.requested_quantity > 0
     db.refresh(execution)
     assert execution.state == "ORDER_CREATED"
+
+
+def test_approve_uses_latest_snapshot_and_keeps_reference_quantity(
+    db: Session, admin: User, settings: Settings
+) -> None:
+    decision = _seed_full(db, admin, settings)
+    execution = route_trading_decision(
+        db, decision=decision, user=admin, correlation_id="approval-correlation", settings=settings
+    )
+    pending = db.get(Approval, execution.approval_id)
+    assert pending is not None
+    scope = json.loads(pending.scope_snapshot_json)
+    reference_quantity = int(scope["quantity"])
+    latest = _advance_snapshot(db, ask=Decimal("100.7"))
+
+    approval = approve_service(
+        db,
+        approval_id=execution.approval_id,
+        user=admin,
+        settings=settings,
+        correlation_id="approve-latest",
+        idempotency_key="approve-latest-key",
+    )
+
+    order = db.get(TradingOrder, approval.order_id)
+    assert order is not None
+    assert order.limit_price == Decimal("100.7")
+    assert order.requested_quantity == reference_quantity
+    guard = db.scalar(
+        select(GuardEvaluation).where(
+            GuardEvaluation.execution_id == execution.id,
+            GuardEvaluation.subject_type == "APPROVAL",
+        )
+    )
+    assert guard is not None and guard.snapshot_id == latest.id
+    assert scope["reference_snapshot_id"] == decision.input_snapshot_id
+    audit = db.scalar(
+        select(AuditLog).where(AuditLog.action == "APPROVAL_APPROVED")
+    )
+    assert audit is not None
+    metadata = json.loads(audit.metadata_json)
+    assert metadata["reference_snapshot_id"] == decision.input_snapshot_id
+    assert metadata["approval_snapshot_id"] == latest.id
+
+
+def test_approve_invalidates_when_latest_snapshot_is_stale(
+    db: Session, admin: User, settings: Settings
+) -> None:
+    decision = _seed_full(db, admin, settings)
+    execution = route_trading_decision(
+        db, decision=decision, user=admin, correlation_id="approval-correlation", settings=settings
+    )
+    current = datetime.now(UTC)
+    latest = _advance_snapshot(
+        db,
+        ask=Decimal("101.2"),
+        received_at=current - timedelta(seconds=10),
+    )
+
+    with pytest.raises(ApprovalError) as exc_info:
+        approve_service(
+            db,
+            approval_id=execution.approval_id,
+            user=admin,
+            settings=settings,
+            correlation_id="approve-stale",
+            idempotency_key="approve-stale-key",
+            now=current,
+        )
+
+    assert exc_info.value.code == "MARKET_DATA_STALE"
+    approval = db.get(Approval, execution.approval_id)
+    assert approval is not None and approval.state == "INVALIDATED"
+    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
+    guard = db.scalar(
+        select(GuardEvaluation).where(
+            GuardEvaluation.execution_id == execution.id,
+            GuardEvaluation.subject_type == "APPROVAL",
+        )
+    )
+    assert guard is not None and guard.snapshot_id == latest.id
+    audit = db.scalar(
+        select(AuditLog).where(AuditLog.action == "APPROVAL_INVALIDATED")
+    )
+    assert audit is not None
+    metadata = json.loads(audit.metadata_json)
+    assert metadata["reference_snapshot_id"] == decision.input_snapshot_id
+    assert metadata["approval_snapshot_id"] == latest.id
+
+
+def test_approve_invalidates_when_latest_price_exceeds_deviation(
+    db: Session, admin: User, settings: Settings
+) -> None:
+    decision = _seed_full(db, admin, settings)
+    execution = route_trading_decision(
+        db, decision=decision, user=admin, correlation_id="approval-correlation", settings=settings
+    )
+    latest = _advance_snapshot(db, ask=Decimal("102.0"))
+
+    with pytest.raises(ApprovalError) as exc_info:
+        approve_service(
+            db,
+            approval_id=execution.approval_id,
+            user=admin,
+            settings=settings,
+            correlation_id="approve-deviation",
+            idempotency_key="approve-deviation-key",
+        )
+
+    assert exc_info.value.code == "PRICE_DEVIATION_EXCEEDED"
+    approval = db.get(Approval, execution.approval_id)
+    assert approval is not None and approval.state == "INVALIDATED"
+    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
+    guard = db.scalar(
+        select(GuardEvaluation).where(
+            GuardEvaluation.execution_id == execution.id,
+            GuardEvaluation.subject_type == "APPROVAL",
+        )
+    )
+    assert guard is not None and guard.snapshot_id == latest.id
 
 
 def test_approve_is_idempotent_on_same_key(db: Session, admin: User, settings: Settings) -> None:

@@ -80,8 +80,9 @@ def _buy_guard_rules(
     settings: Settings,
     risk_policy: RiskPolicyPayload,
     now: datetime,
+    *,
+    snapshot: MarketSnapshot | None,
 ) -> list[dict[str, object]]:
-    snapshot = db.get(MarketSnapshot, decision.input_snapshot_id)
     stream = db.get(MarketStreamState, (decision.market, decision.symbol))
     watched = db.scalar(
         select(WatchlistItem.id).where(
@@ -226,7 +227,16 @@ def route_trading_decision(
         if action not in SUPPORTED_ACTIONS:
             rules = [_rule("ACTION_NOT_IMPLEMENTED", False)]
         elif action == "BUY":
-            rules = _buy_guard_rules(db, decision, user, settings, risk_policy, current)
+            decision_snapshot = db.get(MarketSnapshot, decision.input_snapshot_id)
+            rules = _buy_guard_rules(
+                db,
+                decision,
+                user,
+                settings,
+                risk_policy,
+                current,
+                snapshot=decision_snapshot,
+            )
         else:
             rules = [_rule("ACTION_NOT_IMPLEMENTED", False)]
         blocked = [item for item in rules if item["result"] == "BLOCKED"]

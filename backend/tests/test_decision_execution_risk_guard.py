@@ -156,7 +156,14 @@ def test_buy_passes_full_risk_guard_when_clean(
     db: Session, admin: User, settings: Settings
 ) -> None:
     decision = _seed(db, admin, settings)
-    execution = route_trading_decision(db, decision=decision, user=admin, correlation_id="clean", settings=settings)
+    execution = route_trading_decision(
+        db,
+        decision=decision,
+        user=admin,
+        correlation_id="clean",
+        settings=settings,
+        now=NOW,
+    )
     assert execution is not None
     assert execution.state != "GUARD_BLOCKED"
     assert _blocked_codes(db, execution.id) == set()
@@ -176,7 +183,14 @@ def test_buy_blocked_when_total_exposure_exceeded(
     db.add(pos)
     db.commit()
     decision = _decision(db)
-    execution = route_trading_decision(db, decision=decision, user=admin, correlation_id="exposure", settings=settings)
+    execution = route_trading_decision(
+        db,
+        decision=decision,
+        user=admin,
+        correlation_id="exposure",
+        settings=settings,
+        now=NOW,
+    )
     assert execution.state == "GUARD_BLOCKED"
     assert "TOTAL_EXPOSURE_LIMIT" in _blocked_codes(db, execution.id)
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
@@ -189,7 +203,14 @@ def test_buy_blocked_when_open_positions_limit(
     db.add(Position(account_alias=ACCOUNT_ALIAS, symbol="005931", quantity=5, average_price=Decimal(60000), state="OPEN"))
     db.commit()
     decision = _decision(db)
-    execution = route_trading_decision(db, decision=decision, user=admin, correlation_id="open-pos", settings=settings)
+    execution = route_trading_decision(
+        db,
+        decision=decision,
+        user=admin,
+        correlation_id="open-pos",
+        settings=settings,
+        now=NOW,
+    )
     assert "OPEN_POSITIONS_LIMIT" in _blocked_codes(db, execution.id)
 
 
@@ -208,7 +229,14 @@ def test_buy_blocked_when_daily_loss_exceeded(
     db.add(Position(account_alias=ACCOUNT_ALIAS, symbol="005930", quantity=10, average_price=Decimal(300), state="OPEN"))
     db.commit()
     decision = _decision(db)
-    execution = route_trading_decision(db, decision=decision, user=admin, correlation_id="daily-loss", settings=settings)
+    execution = route_trading_decision(
+        db,
+        decision=decision,
+        user=admin,
+        correlation_id="daily-loss",
+        settings=settings,
+        now=NOW,
+    )
     assert "DAILY_LOSS_LIMIT" in _blocked_codes(db, execution.id)
 
 
@@ -222,7 +250,14 @@ def test_buy_blocked_when_spread_too_wide(
     _snapshot(db, bid=Decimal(100), ask=Decimal(105))
     db.commit()
     decision = _decision(db)
-    execution = route_trading_decision(db, decision=decision, user=admin, correlation_id="spread", settings=settings)
+    execution = route_trading_decision(
+        db,
+        decision=decision,
+        user=admin,
+        correlation_id="spread",
+        settings=settings,
+        now=NOW,
+    )
     assert "SPREAD_LIMIT" in _blocked_codes(db, execution.id)
 
 
@@ -234,7 +269,14 @@ def test_buy_blocked_when_broker_connection_down(
     worker.websocket_connected = False
     db.commit()
     decision = _decision(db)
-    execution = route_trading_decision(db, decision=decision, user=admin, correlation_id="conn", settings=settings)
+    execution = route_trading_decision(
+        db,
+        decision=decision,
+        user=admin,
+        correlation_id="conn",
+        settings=settings,
+        now=NOW,
+    )
     assert "BROKER_CONNECTION_OK" in _blocked_codes(db, execution.id)
 
 
@@ -249,7 +291,14 @@ def test_buy_blocked_when_active_daily_loss_event(
     )
     db.commit()
     decision = _decision(db)
-    execution = route_trading_decision(db, decision=decision, user=admin, correlation_id="halt-event", settings=settings)
+    execution = route_trading_decision(
+        db,
+        decision=decision,
+        user=admin,
+        correlation_id="halt-event",
+        settings=settings,
+        now=NOW,
+    )
     assert "NO_ACTIVE_DAILY_LOSS_EVENT" in _blocked_codes(db, execution.id)
 
 
@@ -262,6 +311,13 @@ def test_shadow_stage_still_zero_orders_under_full_guard(
     _snapshot(db)
     _activate_risk(db, admin)
     decision = _decision(db)
-    execution = route_trading_decision(db, decision=decision, user=admin, correlation_id="shadow", settings=settings)
+    execution = route_trading_decision(
+        db,
+        decision=decision,
+        user=admin,
+        correlation_id="shadow",
+        settings=settings,
+        now=NOW,
+    )
     assert execution.state == "SHADOW_RECORDED"
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0

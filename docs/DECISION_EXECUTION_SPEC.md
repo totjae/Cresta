@@ -107,12 +107,14 @@ ROUTING
 
 | ID | 요구사항 |
 | --- | --- |
-| EXE-040 | 승인은 execution, 판단·snapshot, 행동, 정확한 수량, 기준가격·허용범위, 설정 버전, Guard 평가와 만료시각에 결합한다. |
+| EXE-040 | 승인은 execution, 판단과 그 불변 reference snapshot, 행동, 정확한 수량, 기준가격·허용범위, 설정 버전, Guard 평가와 만료시각에 결합한다. reference snapshot과 기준가격·수량은 승인 대기 중 새 시세가 들어와도 바꾸지 않는다. |
 | EXE-041 | 승인은 사용자 소유권, CSRF, Idempotency-Key, expected version과 승인 ID·version에 결합된 1회용 TOTP 재인증 proof를 요구한다. |
 | EXE-042 | 거절은 TOTP 재인증 없이 가능하지만 인증 세션, CSRF, Idempotency-Key와 expected version을 요구하며 주문을 만들지 않는다. |
-| EXE-043 | 만료, 가격범위 이탈, snapshot·position·설정 version 변경, 거래 세션 변경 또는 Guard 차단은 승인을 `INVALIDATED` 또는 `EXPIRED`로 끝내고 새 판단을 요구한다. |
+| EXE-043 | 만료, 가격범위 이탈, 최신 snapshot의 부재·지연·품질 저하, position·설정 version 변경, 거래 세션 변경 또는 Guard 차단은 승인을 `INVALIDATED` 또는 `EXPIRED`로 끝내고 새 판단을 요구한다. 정상적인 실시간 snapshot 갱신과 ID 변경만으로 승인을 무효화하지 않는다. |
 | EXE-044 | 승인 처리 transaction은 proof 소비, 승인 상태 전이, 최신 Guard 평가, 주문 의도·`CREATED` 주문과 감사를 원자적으로 저장한다. 하나라도 실패하면 전부 rollback한다. |
 | EXE-045 | `APPROVED`는 주문 생성 transaction이 성공했을 때만 기록한다. 승인만 완료되고 주문이 없는 중간 상태를 commit하지 않는다. |
+| EXE-046 | 승인 처리 transaction은 해당 `market + symbol`의 `market_stream_states` 행을 잠그고 그 행이 가리키는 최신 snapshot 하나를 승인 시점 snapshot으로 선택한다. Guard의 freshness·품질·spread와 주문가격은 이 snapshot으로 평가하며 Guard evaluation에는 이 최신 snapshot ID를 기록한다. |
+| EXE-047 | 가격편차는 승인에 고정된 reference 가격과 승인 시점 최신 snapshot의 주문 기준가격을 비교한다. 허용 범위 안이면 승인에 고정된 수량으로 주문하고, 범위를 벗어나면 수량이나 가격을 자동 보정하지 않고 `PRICE_DEVIATION_EXCEEDED`로 무효화한다. |
 
 ### 3.6 Guard 평가 계약
 
@@ -190,7 +192,7 @@ MOCK_AUTOMATIC: 명세된 4개 행동의 키움 모의투자 자동 실행 허�
 
 - 판단 유효시간과 승인 유효시간 중 더 이른 시각을 최종 만료로 사용한다.
 - 승인 화면을 여러 탭에서 열어도 조건부 상태 전이로 한 요청만 성공한다.
-- 승인 직전 체결·설정·시세가 바뀌면 기존 승인을 자동 보정하지 않고 무효화한다.
+- 승인 직전 새 시세가 도착하면 최신 정상 snapshot으로 Guard를 다시 평가한다. 단순 snapshot ID 변경은 허용하되 가격범위 이탈·지연·품질 저하·세션 또는 설정·position 변경은 기존 승인을 자동 보정하지 않고 무효화한다.
 - DB commit 결과가 불명확하면 Broker에 보내지 않고 execution key와 주문 원장을 먼저 조회한다.
 - Guard 서비스 예외·timeout·알 수 없는 reason code는 통과로 간주하지 않고 `FAILED_SAFE`와 `DATABASE_UNAVAILABLE` 또는 내부 안전 오류로 기록한다.
 - 거래 종료 행동이 차단돼도 포지션을 `CLOSED`로 표시하지 않고 위험·운영 경보를 유지한다.
@@ -200,9 +202,10 @@ MOCK_AUTOMATIC: 명세된 4개 행동의 키움 모의투자 자동 실행 허�
 - 같은 판단을 동시에 여러 번 라우팅해도 승인 또는 주문이 최대 하나다.
 - 진단 판단과 미지원 행동은 실행 권한과 무관하게 주문·승인 0건이다.
 - `DISABLED`, `MANUAL_APPROVAL`, `AUTOMATIC`이 각각 기록만, 승인, Guard 통과 주문으로 분기된다.
-- 승인 만료·가격 이탈·position version 변경·Guard 차단 시 주문이 생성되지 않는다.
+- 승인 대기 중 최신 정상 snapshot으로 바뀌어도 가격편차 안이면 reference 수량으로 주문이 하나 생성된다.
+- 승인 만료·가격 이탈·최신 snapshot stale/degraded·position version 변경·Guard 차단 시 주문이 생성되지 않는다.
 - 승인 성공 transaction에서 proof·승인·Guard·주문·감사가 함께 commit되거나 모두 rollback된다.
-- Guard 차단 reason과 사용한 snapshot·설정·포지션 version으로 결과를 재현할 수 있다.
+- Guard 차단 reason과 판단 reference snapshot·승인 시점 최신 snapshot·설정·포지션 version으로 결과를 재현할 수 있다.
 - 자동 주문도 사용자 승인 주문과 동일한 주문 상태 머신·Broker worker·UNKNOWN 재동기화를 사용한다.
 - `SHADOW → APPROVAL_ONLY → MOCK_AUTOMATIC` 단계가 시험 근거 없이 확대되지 않는다.
 

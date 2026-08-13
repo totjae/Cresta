@@ -75,6 +75,7 @@ freshness:
 | MKT-023 | 데이터가 복구돼도 설정된 안정 구간 동안 정상 이벤트가 유지되고 재동기화가 완료되기 전 게이트를 열지 않는다. |
 | MKT-024 | NXT 시세는 첫 버전에서 표시·분석용이며 KRX 모의주문 가격이나 Guard 주문 가능성 검사의 대체 데이터로 사용하지 않는다. |
 | MKT-025 | KRX와 NXT snapshot은 [거래시장 자동 선택 명세](VENUE_SELECTION_SPEC.md)의 SHADOW 입력으로 함께 사용할 수 있다. 이는 MOCK Broker에 NXT 주문 권한을 부여하지 않는다. |
+| MKT-026 | 사용자 승인 대기 중 새 정상 시세가 들어오는 것은 정상 동작이다. 판단에 사용한 snapshot은 reference 증거로 불변 보존하고, 승인 처리는 `market + symbol` stream 행을 transaction에서 잠근 뒤 그 행의 `current_snapshot_id`가 가리키는 최신 snapshot으로 freshness·품질·spread·가격편차를 재검사한다. 두 snapshot의 ID가 다르다는 사실만으로 stale로 판정하지 않는다. |
 
 ### 3.4 분봉과 지표
 

@@ -1,5 +1,22 @@
 # Cresta 테스트 계획
 
+### T-EVIDENCE-RECONCILE — 장중 근거 정리와 시간 결정론 회귀 (2026-08-13)
+
+- `T-EVIDENCE-001`: 장중 시험 결과에서 관측한 상태 전이와 미검증 구간을 구분하고, 키움 거절 원인을 증거 없이 호가단위 문제로 확정하지 않는지 확인한다.
+- `T-TIME-001`: Risk Guard fixture의 snapshot·worker heartbeat·decision 유효시간과 실행 함수의 기준 시각이 동일한 `NOW`를 사용해 실행 날짜와 무관하게 같은 결과를 내는지 확인한다.
+- `T-TIME-002`: 위험 차단 시험이 목표 rule code만 확인하는 데 그치지 않고 clean 상태와 SHADOW 상태도 불필요한 `DECISION_EXPIRED`·`MARKET_DATA_STALE` 없이 통과하는지 확인한다.
+
+Evidence: 승인·주문 생성·전체 Risk Guard·고정손절 집중시험 37개, backend 전체 325개 시험과 Ruff가 2026-08-13 현재 통과했다. `git diff --check`도 통과했다.
+
+### T-APR-SNAPSHOT — 승인 시점 최신 snapshot 재검사
+
+- `T-APR-SNAPSHOT-001`: 승인 생성 뒤 stream이 더 최신 정상 snapshot으로 전진해도 가격편차가 허용 범위 안이면 승인이 성공하고 최신 매도 1호가·최초 승인 수량으로 주문이 생성되는지 확인한다.
+- `T-APR-SNAPSHOT-002`: 승인 직전 최신 snapshot이 stale 또는 비정상 품질이면 `MARKET_DATA_STALE` 또는 품질 reason으로 무효화되고 주문이 0건인지 확인한다.
+- `T-APR-SNAPSHOT-003`: 최신 정상 가격이 reference 가격의 허용편차를 넘으면 `PRICE_DEVIATION_EXCEEDED`로 무효화되고 주문이 0건인지 확인한다.
+- `T-APR-SNAPSHOT-004`: 승인 직전 Guard evaluation의 `snapshot_id`와 주문 감사 입력이 실제 승인 시점 최신 snapshot을 가리키고 판단의 reference snapshot은 승인 scope에 그대로 남는지 확인한다.
+
+Evidence: `test_approvals_api.py`의 최신 정상 snapshot 성공·stale 차단·가격편차 차단 시험을 포함한 승인·주문 생성·Risk Guard·고정손절 집중시험 40개, backend 전체 328개 시험과 Ruff가 2026-08-14 현재 통과했다. Ubuntu 장중 재검증은 대기 중이다.
+
 ### T-RISK-GUARD — 전체 Risk Guard 보강 (2026-08-13)
 
 - `T-RISKCALC-001`: `unrealized_loss`가 OPEN position의 (최신가 - 평균단가) * 수량을 합산하는지 확인한다.
@@ -20,7 +37,7 @@
 - `T-GRD-FULL-008`: SHADOW 단계에서는 전체 Risk Guard 통과해도 주문 0건, `SHADOW_RECORDED`인지 확인한다.
 - `T-RISK-CONFIG-006`: `daily_loss_limit_pct`/`max_consecutive_losses` 범위 초과·잘못된 basis 거부, 유효값 활성화·조회되는지 확인한다.
 
-Evidence: backend 전체 회귀 325개 통과(신규 20), Ruff lint 통과, migration `20260813_0035` 왕복 통과, Frontend TypeScript·14개 component 시험·production build 통과. Ubuntu PostgreSQL 적용·실제 장중 각 위험 주입·회복 인수시험은 대기 중이다.
+Evidence: 구현 시점 backend 전체 회귀 325개 통과(신규 20), Ruff lint 통과, migration `20260813_0035` 왕복 통과, Frontend TypeScript·14개 component 시험·production build 통과. Ubuntu PostgreSQL에도 `20260813_0035`를 적용했다. 2026-08-13 장중 모의투자에서 clean 통과, `SPREAD_LIMIT`, `TOTAL_EXPOSURE_LIMIT`, `SYMBOL_EXPOSURE_LIMIT`, `DAILY_ENTRIES_LIMIT`, `DAILY_LOSS_LIMIT`, `BROKER_CONNECTION_OK` 차단과 설정·연결 회복을 확인했다. 일일 손실은 `REALIZED_PLUS_UNREALIZED`에서 차단되고 `REALIZED_ONLY`에서 통과했다. 테스트 입력은 정리 후 risk event 0건·OPEN position 0건·worker READY로 복구했다.
 
 ### T-APR-ORDER — 승인형 BUY 주문 + FIXED_STOP SELL 주문 연결 (2026-08-13)
 
@@ -37,7 +54,7 @@ Evidence: backend 전체 회귀 325개 통과(신규 20), Ruff lint 통과, migr
 - `T-STOP-SELL-003`: `EXTERNAL` position은 자동 매도되지 않고 `EXIT_PENDING`(`POSITION_ORIGIN_CRESTA_MANAGED`)으로 차단되는지 확인한다.
 - `T-PROV-001`: Position이 기본 `CRESTA_MANAGED`이고 `EXTERNAL` 태깅이 가능한지 확인한다.
 
-Evidence: backend 전체 회귀 305개 통과(신규 16), Ruff lint 통과, migration `20260813_0034` upgrade→downgrade→upgrade 왕복 통과, Frontend TypeScript·14개 component 시험·production build 통과. Ubuntu PostgreSQL 적용·실제 장중 승인·손절 주문 송신·키움 체결·CSRF/401 API 인수시험은 대기 중이다.
+Evidence: 구현 시점 backend 전체 회귀 305개 통과(신규 16), Ruff lint 통과, migration `20260813_0034` upgrade→downgrade→upgrade 왕복 통과, Frontend TypeScript·14개 component 시험·production build 통과. 2026-08-13 장중 모의투자에서 승인 BUY가 `PENDING→APPROVED`, 주문이 `CREATED→VALIDATING→SUBMITTING→REJECTED`로 전이해 사용자 승인부터 Broker 송신까지 연결됨을 확인했다. 현재 주문 이벤트는 키움의 안전한 업무 거절 코드·사유를 보존하지 않으므로 거절 원인은 미확인이다. 최초 시험에서 확인된 stream 최신 snapshot과 판단 snapshot 간 승인 경쟁 조건은 `T-APR-SNAPSHOT` 구현으로 수정했으며 Ubuntu 장중 재검증은 대기 중이다. FIXED_STOP은 현재 매수호가가 손절가보다 높아 미발화가 정상임을 확인했지만, 실제 가격 도달 후 SELL 주문 송신·체결은 미검증이다. SHADOW 회귀는 `SHADOW_RECORDED`와 Approval·CREATED 주문 0건을 확인했다.
 
 ### T-STOP-001 — 고정 손절 trigger SHADOW (2026-08-12)
 
@@ -455,11 +472,11 @@ Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript
 | T-EXE-001 | EXE-001~014, AI-075~079 | 진단/거래 판단과 Core·Guard 행동 전체 조합 | 진단·비행동 주문/승인 0건, BUY 안전 차단 | 부분 통과 (2026-08-05, 자동; 매도·미지원 전체 조합 대기) |
 | T-EXE-002 | EXE-020~025, DB-100~107 | 동일 판단을 반복 라우팅 | execution·Guard 최대 1개, 기존 결과 재조회 | 부분 통과 (2026-08-05, 자동; 동시성·commit 응답 유실 대기) |
 | T-EXE-003 | EXE-030~035, CFG-080~084 | `DISABLED`, `MANUAL_APPROVAL`, `AUTOMATIC`과 3개 실행 단계 조합 | 기록만/승인/주문 분기, 상위 단계 gate 우선, 미준비 BUY 차단 | 부분 통과 (2026-08-05, SHADOW·미설정 주문금액 차단; 상위 단계 대기) |
-| T-GRD-010 | GRD-080~088, EXE-050~056 | BUY Guard 각 규칙 단독·복합 실패와 경계 금액 | 결정론적 복수 reason, 하나라도 blocking이면 주문 0건 | 계획 |
+| T-GRD-010 | GRD-080~088, EXE-050~056 | BUY Guard 각 규칙 단독·복합 실패와 경계 금액 | 결정론적 복수 reason, 하나라도 blocking이면 주문 0건 | 부분 통과 (2026-08-13 자동·장중 모의투자; 경계값 전체 조합은 후속) |
 | T-GRD-011 | GRD-016~017, EXE-013, ORD-042 | 진입금액 없음·최소 미만·한도 초과·1주 미만·정상금액 | 임의 수량 생성 금지, Decimal 기반 정상 수량만 통과 | 계획 |
 | T-GRD-012 | GRD-083~085, EXE-011~012·052~053 | 부분/전량매도·고정손절에서 예약수량·position version·데이터 단절 | 초과매도 0건, stale 승인 무효화, trigger와 EXIT_PENDING 유지 | 계획 |
-| T-APR-001 | EXE-040~045, STM-006~009, API-112~121 | 승인·거절·만료·가격/상태 변경·동시 탭·TOTP 재사용 | 한 번만 terminal 전이, 유효 승인만 CREATED 주문과 원자 commit | 계획 |
-| T-ORD-010 | EXE-060~064, ORD-039~043 | Guard 통과 후 주문 생성과 Broker polling 경쟁 | intent·CREATED·감사 원자 생성, worker만 송신, 활성/UNKNOWN 중복 차단 | 계획 |
+| T-APR-001 | EXE-040~047, STM-006~009, API-112~121 | 승인·거절·만료·가격/상태 변경·동시 탭·TOTP 재사용 | 한 번만 terminal 전이, 유효 승인만 CREATED 주문과 원자 commit | 부분 통과 (2026-08-14 자동시험과 최신 snapshot 경쟁 개선 완료; Ubuntu 장중 재검증 대기) |
+| T-ORD-010 | EXE-060~064, ORD-039~043 | Guard 통과 후 주문 생성과 Broker polling 경쟁 | intent·CREATED·감사 원자 생성, worker만 송신, 활성/UNKNOWN 중복 차단 | 부분 통과 (2026-08-13 자동·장중 Broker 송신 및 명시적 REJECTED; 실제 ACK/체결 대기) |
 | T-EXE-004 | EXE-070~073, API-122~124 | SHADOW→APPROVAL_ONLY→MOCK_AUTOMATIC 확대와 축소 | 시험·TOTP 없는 확대 거부, 축소 즉시 적용, 실거래 권한 변화 없음 | 계획 |
 | T-AI-010 | AI-080~085, SES-050~053, DB-108~110 | 평일 집중·일반·장외 슬롯, 재시작·중복 tick, snapshot 없음·정상 | 현재 슬롯만 멱등 평가, 정상 TRADING 판단은 SHADOW로 전달, snapshot 없음은 건너뜀, 승인·주문 0건 | 부분 통과 (2026-08-05, 자동; 실제 장중 연속 운전·종목별 예외 주입 대기) |
 | T-OPS-014 | OPS-017~018, API-125, UI-106 | scheduler Compose 계약, lease·heartbeat·IDLE·STALE 상태와 대시보드 조회 | scheduler 장애가 API·Broker를 중단하지 않고 상태에 비밀·owner/token을 노출하지 않음 | 통과 (2026-08-05, 자동 계약·API·component fixture) |

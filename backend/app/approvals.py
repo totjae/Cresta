@@ -31,6 +31,7 @@ from app.models import (
     Decision,
     DecisionExecution,
     MarketSnapshot,
+    MarketStreamState,
     User,
 )
 from app.order_creation import OrderCreationError, OrderRequest, create_order
@@ -58,6 +59,7 @@ def _scope_snapshot(
     return {
         "schema_version": "approval-scope-v1",
         "decision_id": decision.id,
+        "reference_snapshot_id": decision.input_snapshot_id,
         "symbol": decision.symbol,
         "market": decision.market,
         "action": decision.action,
@@ -154,8 +156,25 @@ def _load_decision(db: Session, approval: Approval) -> Decision:
     return decision
 
 
-def _current_snapshot(db: Session, decision: Decision) -> MarketSnapshot | None:
-    return db.get(MarketSnapshot, decision.input_snapshot_id)
+def _latest_snapshot_for_approval(db: Session, decision: Decision) -> MarketSnapshot | None:
+    """Lock the stream head and return its latest immutable snapshot.
+
+    A decision's input snapshot remains the immutable approval reference. The
+    stream is expected to advance while a user reviews an approval, so the
+    pre-order Guard must use the latest stream head instead of requiring the
+    reference snapshot to still be current.
+    """
+    stream = db.scalar(
+        select(MarketStreamState)
+        .where(
+            MarketStreamState.market == decision.market,
+            MarketStreamState.symbol == decision.symbol,
+        )
+        .with_for_update()
+    )
+    if stream is None or stream.current_snapshot_id is None:
+        return None
+    return db.get(MarketSnapshot, stream.current_snapshot_id)
 
 
 def _price_deviation_ok(
@@ -177,34 +196,49 @@ def _evaluate_approval(
     user: User,
     settings: Settings,
     now: datetime,
-) -> tuple[list[dict[str, object]], str | None, Decimal | None, int]:
+) -> tuple[list[dict[str, object]], str | None, Decimal | None, int, MarketSnapshot | None]:
     """Re-run the hard Guard and price-deviation check at approval time.
 
-    Returns (rules, blocking_code_or_None, current_price, quantity). When
-    ``blocking_code`` is None the approval may proceed to order creation.
+    Returns (rules, blocking_code_or_None, current_price, quantity,
+    approval_snapshot). When ``blocking_code`` is None the approval may
+    proceed to order creation.
     """
     from app.decision_execution import _buy_guard_rules
     from app.risk_policy import active_risk_policy, risk_policy_payload
 
     risk_config = active_risk_policy(db, user.id)
     risk_policy = risk_policy_payload(risk_config)
-    snapshot = _current_snapshot(db, decision)
-    rules = _buy_guard_rules(db, decision, user, settings, risk_policy, now)
+    snapshot = _latest_snapshot_for_approval(db, decision)
+    rules = _buy_guard_rules(
+        db,
+        decision,
+        user,
+        settings,
+        risk_policy,
+        now,
+        snapshot=snapshot,
+    )
     current_price = _marketable_buy_price(snapshot)
-    quantity = _buy_quantity(risk_policy.entry_order_amount, current_price)
     # Price-deviation gate (ORD-010/ORD-011): reject if the ask moved beyond
     # the configured tolerance since the approval was captured.
     scope = json.loads(approval.scope_snapshot_json)
     reference_price = (
         Decimal(str(scope["reference_price"])) if scope.get("reference_price") else None
     )
+    quantity = int(scope.get("quantity") or 0)
     if not _price_deviation_ok(
         reference_price, current_price, risk_policy.max_price_deviation_pct
     ):
         rules.append(rule("PRICE_DEVIATION_EXCEEDED", False))
     if quantity <= 0:
         rules.append(rule("ORDER_SIZE_NOT_CONFIGURED", False))
-    return rules, (blocking_code(rules) if any(r["result"] == "BLOCKED" for r in rules) else None), current_price, quantity
+    return (
+        rules,
+        blocking_code(rules) if any(r["result"] == "BLOCKED" for r in rules) else None,
+        current_price,
+        quantity,
+        snapshot,
+    )
 
 
 def approve(
@@ -243,7 +277,7 @@ def approve(
     if execution is None:
         raise ApprovalError("EXECUTION_NOT_FOUND", 404)
 
-    rules, blocked, current_price, quantity = _evaluate_approval(
+    rules, blocked, current_price, quantity, approval_snapshot = _evaluate_approval(
         db, approval=approval, decision=decision, user=user, settings=settings, now=current
     )
     guard = persist_guard_evaluation(
@@ -252,7 +286,7 @@ def approve(
         subject_type="APPROVAL",
         subject_id=approval.id,
         rules=rules,
-        snapshot_id=decision.input_snapshot_id,
+        snapshot_id=approval_snapshot.id if approval_snapshot else None,
         position_version=None,
         execution_policy_version_id=execution.execution_policy_version_id,
         risk_policy_version_id=execution.risk_policy_version_id,
@@ -276,7 +310,15 @@ def approve(
                 result=blocked,
                 correlation_id=correlation_id,
                 metadata_json=json.dumps(
-                    {"execution_id": execution.id}, sort_keys=True, separators=(",", ":")
+                    {
+                        "execution_id": execution.id,
+                        "reference_snapshot_id": decision.input_snapshot_id,
+                        "approval_snapshot_id": (
+                            approval_snapshot.id if approval_snapshot else None
+                        ),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
                 ),
             )
         )
@@ -303,6 +345,8 @@ def approve(
             "quantity": quantity,
             "approval_id": approval.id,
             "decision_id": decision.id,
+            "reference_snapshot_id": decision.input_snapshot_id,
+            "approval_snapshot_id": approval_snapshot.id if approval_snapshot else None,
             "idempotency_key": idempotency_key,
         },
         correlation_id=correlation_id,
@@ -341,7 +385,12 @@ def approve(
             result="ORDER_CREATED",
             correlation_id=correlation_id,
             metadata_json=json.dumps(
-                {"order_id": order.id, "execution_id": execution.id},
+                {
+                    "order_id": order.id,
+                    "execution_id": execution.id,
+                    "reference_snapshot_id": decision.input_snapshot_id,
+                    "approval_snapshot_id": approval_snapshot.id if approval_snapshot else None,
+                },
                 sort_keys=True,
                 separators=(",", ":"),
             ),
