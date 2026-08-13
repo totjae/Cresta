@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import AuthContext, get_auth_context
 from app.db import get_db
 from app.errors import ResourceNotFoundError
 from app.models import Position
+from app.read_model_scope import CONSOLE_MOCK_ACCOUNT_ALIASES
 from app.schemas import PositionDetailResponse, PositionListResponse, PositionSummary
 
 router = APIRouter(prefix="/positions", tags=["positions"])
@@ -21,6 +22,7 @@ def _summary(position: Position) -> PositionSummary:
         quantity=position.quantity,
         average_price=position.average_price,
         state=position.state,
+        origin=position.origin,
         version=position.version,
         created_at=position.created_at,
         updated_at=position.updated_at,
@@ -36,7 +38,7 @@ def list_positions(
 ) -> PositionListResponse:
     positions = db.scalars(
         select(Position)
-        .where(Position.account_alias == "PAPER")
+        .where(Position.account_alias.in_(CONSOLE_MOCK_ACCOUNT_ALIASES))
         .order_by(Position.updated_at.desc(), Position.id.desc())
         .limit(limit)
     ).all()
@@ -54,7 +56,15 @@ def get_position(
     db: Session = Depends(get_db),
 ) -> PositionDetailResponse:
     position = db.scalar(
-        select(Position).where(Position.account_alias == "PAPER", Position.symbol == symbol)
+        select(Position)
+        .where(
+            Position.account_alias.in_(CONSOLE_MOCK_ACCOUNT_ALIASES),
+            Position.symbol == symbol,
+        )
+        .order_by(
+            case((Position.account_alias == "KIWOOM_MOCK_PRIMARY", 0), else_=1),
+            Position.updated_at.desc(),
+        )
     )
     if position is None:
         raise ResourceNotFoundError("POSITION_NOT_FOUND", "포지션을 찾을 수 없습니다.")

@@ -143,7 +143,7 @@ PATCH는 활성 설정을 직접 수정하지 않고 초안 version을 생성한
 
 ### 3.5 Paper Broker 조회 모델
 
-첫 Console 연동은 Paper Broker의 상태와 결과를 읽기 전용으로 제공한다. `/system/health`는 DB 연결, Paper Broker 사용 가능 여부, 거래 게이트와 키움·시장데이터 준비 상태를 반환한다. `/orders`와 `/orders/{id}`는 주문·체결·상태 이벤트를, `/positions`와 `/positions/{symbol}`은 실제 Paper 체결로 생성된 포지션만 반환한다.
+첫 Console 연동은 MOCK 거래 원장의 상태와 결과를 읽기 전용으로 제공한다. `/system/health`는 DB 연결, Paper Broker 사용 가능 여부, 거래 게이트와 키움·시장데이터 준비 상태를 반환한다. `/orders`와 `/orders/{id}`는 주문·체결·상태 이벤트를 반환한다. `/positions`와 `/positions/{symbol}`은 legacy `PAPER` 원장과 Broker 기준 `KIWOOM_MOCK_PRIMARY` projection을 함께 조회하며, 같은 종목이 두 원장에 모두 존재하면 상세 조회는 키움 projection을 우선한다. 포지션 `origin`은 `CRESTA_MANAGED` 또는 `EXTERNAL`이다.
 
 | ID | 요구사항 |
 | --- | --- |

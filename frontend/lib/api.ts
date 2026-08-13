@@ -367,6 +367,7 @@ export type PositionSummary = {
   quantity: number;
   average_price: string;
   state: string;
+  origin: "CRESTA_MANAGED" | "EXTERNAL";
   version: number;
   created_at: string;
   updated_at: string;

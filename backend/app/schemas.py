@@ -322,6 +322,7 @@ class PositionSummary(StrictModel):
     quantity: int
     average_price: Decimal
     state: str
+    origin: Literal["CRESTA_MANAGED", "EXTERNAL"]
     version: int
     created_at: datetime
     updated_at: datetime

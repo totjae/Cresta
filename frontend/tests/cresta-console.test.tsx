@@ -210,7 +210,7 @@ describe("CrestaConsole authentication", () => {
       if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-4", login_id: "admin", expires_at: "2026-08-01T09:00:00Z", csrf_token: "csrf-paper" });
       if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
       if (path === "/api/v1/orders") return jsonResponse({ schema_version: "1.0", request_id: "orders-1", items: [] });
-      if (path === "/api/v1/positions") return jsonResponse({ schema_version: "1.0", request_id: "positions-1", items: [] });
+      if (path === "/api/v1/positions") return jsonResponse({ schema_version: "1.0", request_id: "positions-1", items: [{ id: "position-1", account_alias: "KIWOOM_MOCK_PRIMARY", environment: "MOCK", market: "KRX", symbol: "005930", quantity: 1, average_price: "269000.0000", state: "OPEN", origin: "EXTERNAL", version: 1, created_at: "2026-08-14T00:00:00Z", updated_at: "2026-08-14T00:01:00Z" }] });
       return jsonResponse({}, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -224,7 +224,8 @@ describe("CrestaConsole authentication", () => {
     expect(screen.queryByRole("button", { name: /주문 생성/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /보유 포지션/ }));
-    expect(await screen.findByText("Paper 포지션이 없습니다")).toBeInTheDocument();
+    expect(await screen.findByText("005930")).toBeInTheDocument();
+    expect(screen.getByText("키움 외부 보유")).toBeInTheDocument();
   });
 });
 

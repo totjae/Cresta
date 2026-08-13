@@ -21,6 +21,7 @@ from app.models import (
     TradingGate,
     TradingOrder,
 )
+from app.read_model_scope import CONSOLE_MOCK_ACCOUNT_ALIASES
 from app.schemas import (
     AnalysisSchedulerStatusResponse,
     BrokerStatusResponse,
@@ -80,7 +81,7 @@ def system_health(
         orders=int(
             db.scalar(
                 select(func.count(TradingOrder.id)).where(
-                    TradingOrder.account_alias == "PAPER"
+                    TradingOrder.account_alias.in_(CONSOLE_MOCK_ACCOUNT_ALIASES)
                 )
             )
             or 0
@@ -88,7 +89,7 @@ def system_health(
         active_orders=int(
             db.scalar(
                 select(func.count(TradingOrder.id)).where(
-                    TradingOrder.account_alias == "PAPER",
+                    TradingOrder.account_alias.in_(CONSOLE_MOCK_ACCOUNT_ALIASES),
                     TradingOrder.status.in_(ACTIVE_ORDER_STATES),
                 )
             )
@@ -97,7 +98,7 @@ def system_health(
         open_positions=int(
             db.scalar(
                 select(func.count(Position.id)).where(
-                    Position.account_alias == "PAPER",
+                    Position.account_alias.in_(CONSOLE_MOCK_ACCOUNT_ALIASES),
                     Position.state == "OPEN",
                     Position.quantity > 0,
                 )

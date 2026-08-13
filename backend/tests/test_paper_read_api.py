@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.analysis_scheduler_state import acquire_scheduler_lease, update_scheduler_state
 from app.config import Settings
+from app.models import Position
 from app.trading.paper import (
     PaperOrderRequest,
     apply_paper_fill,
@@ -166,6 +167,37 @@ def test_paper_health_and_position_use_persisted_fill_data(
     assert detail.json()["quantity"] == 2
     assert client.post("/api/v1/positions", json={}).status_code == 405
     assert client.post("/api/v1/system/health", json={}).status_code == 405
+
+
+def test_kiwoom_projection_is_visible_in_console_position_reads(
+    client: TestClient,
+    db: Session,
+) -> None:
+    db.add(
+        Position(
+            account_alias="KIWOOM_MOCK_PRIMARY",
+            symbol="005930",
+            quantity=1,
+            average_price=Decimal(269000),
+            state="OPEN",
+            origin="EXTERNAL",
+        )
+    )
+    db.commit()
+    login(client)
+
+    health = client.get("/api/v1/system/health").json()
+    assert health["counts"]["open_positions"] == 1
+
+    listed = client.get("/api/v1/positions")
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["account_alias"] == "KIWOOM_MOCK_PRIMARY"
+    assert listed.json()["items"][0]["origin"] == "EXTERNAL"
+
+    detail = client.get("/api/v1/positions/005930")
+    assert detail.status_code == 200
+    assert detail.json()["account_alias"] == "KIWOOM_MOCK_PRIMARY"
+    assert detail.json()["quantity"] == 1
 
 
 def test_missing_position_uses_standard_error(client: TestClient) -> None:

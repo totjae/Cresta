@@ -1,5 +1,9 @@
 # Cresta 테스트 계획
 
+### 2026-08-14 키움 projection Console 조회
+
+- `T-READ-001`: `KIWOOM_MOCK_PRIMARY`의 `EXTERNAL` OPEN 포지션이 인증된 `/positions` 목록·상세와 시스템 `open_positions` 집계에 포함되고, legacy `PAPER` 포지션 조회가 유지되는지 확인한다.
+
 ### T-EVIDENCE-RECONCILE — 장중 근거 정리와 시간 결정론 회귀 (2026-08-13)
 
 - `T-EVIDENCE-001`: 장중 시험 결과에서 관측한 상태 전이와 미검증 구간을 구분하고, 키움 거절 원인을 증거 없이 호가단위 문제로 확정하지 않는지 확인한다.

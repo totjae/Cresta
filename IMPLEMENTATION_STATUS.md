@@ -1,5 +1,9 @@
 # Cresta 구현 상태
 
+### 2026-08-14 키움 projection Console 조회 보정
+
+- `/positions`와 대시보드 집계가 legacy `PAPER`에만 고정되어 키움 기준 `KIWOOM_MOCK_PRIMARY` 포지션을 숨기던 조회 경계를 수정했다. MOCK Console은 두 원장을 명시적으로 포함하며 포지션 관리 출처(`CRESTA_MANAGED`/`EXTERNAL`)를 화면에 표시한다.
+
 ### 2026-08-14 키움 Broker 기준 계좌 projection
 
 - 키움 모의·실거래 계좌에서는 키움 account snapshot을 주문·체결·포지션의 최종 사실로 삼고, Cresta DB를 운영용 projection으로 갱신하는 계층을 추가했다. Broker-only open order는 `BROKER_IMPORTED` intent와 함께 가져오고, position은 신규 `EXTERNAL` 생성·기존 origin 보존·Broker에 없어진 row의 `CLOSED` 전환을 수행한다.

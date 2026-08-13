@@ -1491,11 +1491,11 @@ function PositionsPage({ onSessionExpired }: { onSessionExpired: () => void }) {
   useEffect(() => { const controller = new AbortController(); void loadPositions(controller.signal); return () => controller.abort(); }, []);
 
   return <>
-    <PageHeading kicker="PAPER POSITIONS" title="보유 포지션" description="Paper 체결로 생성된 실제 수량과 평균단가를 조회합니다." />
+    <PageHeading kicker="BROKER POSITIONS" title="보유 포지션" description="키움 모의계좌와 Paper 원장에 반영된 실제 수량과 평균단가를 조회합니다." />
     {message && <div className="console-alert" role="alert"><CircleAlert size={17} /> {message}</div>}
     <section className="ledger-panel">
       <div className="ledger-toolbar"><div><span className="status-pill neutral">NO MARKET PRICE</span><small>시세 연동 전이므로 평가손익은 계산하지 않습니다.</small></div><button className="secondary-button" onClick={() => void loadPositions()} disabled={loading}><RefreshCw size={15} /> 새로고침</button></div>
-      {loading ? <LoadingState label="포지션 원장 불러오는 중" /> : positions.length === 0 ? <EmptyLedger icon={WalletCards} title="Paper 포지션이 없습니다" description="Paper 매수 체결이 원장에 반영되면 실제 보유 수량이 표시됩니다." /> : <div className="position-grid">{positions.map((position) => <article className="position-card" key={position.id}><div><span>{position.market} · {position.account_alias}</span><h2>{position.symbol}</h2></div><OrderStatus status={position.state} /><dl><div><dt>보유 수량</dt><dd>{position.quantity.toLocaleString("ko-KR")}주</dd></div><div><dt>평균단가</dt><dd>{formatWon(position.average_price)}</dd></div><div><dt>원장 version</dt><dd>v{position.version}</dd></div><div><dt>갱신 시각</dt><dd>{formatDateTime(position.updated_at)}</dd></div></dl></article>)}</div>}
+      {loading ? <LoadingState label="포지션 원장 불러오는 중" /> : positions.length === 0 ? <EmptyLedger icon={WalletCards} title="보유 포지션이 없습니다" description="키움 모의계좌 또는 Paper 체결이 원장에 반영되면 실제 보유 수량이 표시됩니다." /> : <div className="position-grid">{positions.map((position) => <article className="position-card" key={position.id}><div><span>{position.market} · {position.account_alias}</span><h2>{position.symbol}</h2></div><OrderStatus status={position.state} /><dl><div><dt>보유 수량</dt><dd>{position.quantity.toLocaleString("ko-KR")}주</dd></div><div><dt>평균단가</dt><dd>{formatWon(position.average_price)}</dd></div><div><dt>관리 출처</dt><dd>{position.origin === "EXTERNAL" ? "키움 외부 보유" : "Cresta 관리"}</dd></div><div><dt>원장 version</dt><dd>v{position.version}</dd></div><div><dt>갱신 시각</dt><dd>{formatDateTime(position.updated_at)}</dd></div></dl></article>)}</div>}
     </section>
   </>;
 }
