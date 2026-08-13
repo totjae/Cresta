@@ -692,3 +692,17 @@ Local evidence: 서버 입력·Market Context 집중시험, backend 전체 회�
 Local evidence (2026-08-12): 평일·주말·공휴일·근로자의 날·연말 휴장과 캘린더 장애 fail-closed 집중 시험, Backend 전체 시험·Ruff, migration `20260812_0030` upgrade→downgrade→upgrade, Frontend TypeScript·12개 component 시험·Next.js production build가 통과했다. Ubuntu PostgreSQL 적용과 실제 카드의 캘린더 근거 표시는 대기 중이다.
 
 Local evidence (2026-08-12, 운영 override): 날짜·메타데이터 경계, 중복 활성 방지, 생성·해제 이력, SHADOW 평가의 override ID·hash 고정과 주문 0건 집중시험이 통과했다. Backend 전체 회귀·Ruff, migration `20260812_0031` upgrade→downgrade→upgrade, Frontend 13개 component 시험·TypeScript·Next.js production build가 통과했다. Ubuntu PostgreSQL 적용과 Console 수동 확인은 대기 중이다.
+
+## 키움 Broker 기준 계좌 projection (2026-08-14)
+
+| ID | 요구사항 | 시험 | 결과 |
+| --- | --- | --- | --- |
+| T-REC-PROJ-001 | REC-083, DB-153, DB-155 | 내부에 없는 Broker open order를 두 번 처리 | `BROKER_IMPORTED` intent와 주문·event가 한 번만 생성됨 |
+| T-REC-PROJ-002 | REC-084, DB-153 | 확정 전량체결 snapshot 반복 처리 | Fill 한 건과 `FILLED` 수량 불변식 유지 |
+| T-REC-PROJ-003 | REC-085 | 부분체결 후 open order 부재 | 확인 체결만 저장하고 `RECONCILING/HALTED` 유지 |
+| T-REC-PROJ-004 | REC-085 | 주문수량 초과 Broker 체결 | Fill·주문수량을 변경하지 않고 critical mismatch 유지 |
+| T-REC-PROJ-005 | REC-086, REC-087, DB-154 | 신규·변경·Broker 부재 position 처리 | `EXTERNAL` 신규 생성, 기존 origin 보존, 부재 row `CLOSED`와 event 기록 |
+| T-REC-PROJ-006 | REC-089 | mismatch가 다음 snapshot에서 해소됨 | 이전 OPEN mismatch가 `RESOLVED`와 해결시각으로 전환됨 |
+| T-REC-PROJ-007 | REC-090, DB-152 | 유효하지 않은 Broker 수량으로 projection 실패 | transaction rollback, run `FAILED`, gate `DEGRADED` |
+
+Local evidence (2026-08-14): `backend/tests/test_reconciliation.py` 14개와 backend 전체 334개 시험, Ruff, `git diff --check`가 통과했다. 서버 배포 및 기존 키움 mismatch 자동 projection 확인은 사용자 승인 후 수행할 운영 검증으로 남아 있다.

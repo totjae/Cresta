@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.account_projection import apply_broker_account_projection
 from app.broker.kiwoom import BrokerAccountSnapshot, KiwoomAdapterError, KiwoomMockClient
 from app.ids import uuid7
 from app.models import (
@@ -63,6 +64,15 @@ class ReconciliationResult:
     critical_mismatch_count: int
 
 
+class ReconciliationProjectionError(KiwoomAdapterError):
+    def __init__(self) -> None:
+        super().__init__(
+            "RECONCILIATION_PROJECTION_FAILED",
+            "Broker account projection failed",
+            retryable=True,
+        )
+
+
 def run_kiwoom_reconciliation(
     db: Session,
     client: KiwoomMockClient,
@@ -92,50 +102,60 @@ def run_kiwoom_reconciliation(
     db.commit()
     db.refresh(run)
 
+    snapshot: BrokerAccountSnapshot | None = None
     try:
         client.verify_account()
         snapshot = client.get_account_snapshot()
-        mismatches = compare_snapshot(db, snapshot)
-    except KiwoomAdapterError:
-        run.state = "FAILED"
-        run.completed_at = datetime.now(UTC)
-        run.result_summary_json = _json({"result": "FAILED"})
-        _set_gate(db, "DEGRADED", "RECONCILIATION_FAILED")
-        db.commit()
-        raise
-
-    for mismatch in mismatches:
-        db.add(
-            ReconciliationMismatch(
-                run_id=run.id,
-                code=mismatch.code,
-                symbol=mismatch.symbol,
-                severity=mismatch.severity,
-                state="OPEN",
-                broker_value_json=_json(mismatch.broker_value),
-                internal_value_json=_json(mismatch.internal_value),
-            )
+        projection = apply_broker_account_projection(
+            db,
+            snapshot,
+            run_id=run.id,
+            correlation_id=run.correlation_id,
         )
+        mismatches = compare_snapshot(db, snapshot)
+        _resolve_previous_mismatches(db, run, mismatches, now=datetime.now(UTC))
 
-    critical_count = sum(item.severity == "CRITICAL" for item in mismatches)
-    run.state = "MISMATCH" if mismatches else "SUCCEEDED"
-    run.completed_at = datetime.now(UTC)
-    run.snapshot_at = snapshot.observed_at
-    run.mismatch_count = len(mismatches)
-    run.critical_mismatch_count = critical_count
-    run.result_summary_json = _json(
-        {
-            "open_order_count": len(snapshot.open_orders),
-            "fill_count": len(snapshot.fills),
-            "position_count": len(snapshot.positions),
-        }
-    )
-    if critical_count:
-        gate_status, gate_reason = "HALTED", "RECONCILIATION_MISMATCH"
-    else:
-        gate_status, gate_reason = "RECONCILING", clean_gate_reason
-    _set_gate(db, gate_status, gate_reason)
-    db.commit()
+        for mismatch in mismatches:
+            db.add(
+                ReconciliationMismatch(
+                    run_id=run.id,
+                    code=mismatch.code,
+                    symbol=mismatch.symbol,
+                    severity=mismatch.severity,
+                    state="OPEN",
+                    broker_value_json=_json(mismatch.broker_value),
+                    internal_value_json=_json(mismatch.internal_value),
+                )
+            )
+
+        critical_count = sum(item.severity == "CRITICAL" for item in mismatches)
+        run.state = "MISMATCH" if mismatches else "SUCCEEDED"
+        run.completed_at = datetime.now(UTC)
+        run.snapshot_at = snapshot.observed_at
+        run.mismatch_count = len(mismatches)
+        run.critical_mismatch_count = critical_count
+        run.result_summary_json = _json(
+            {
+                "open_order_count": len(snapshot.open_orders),
+                "fill_count": len(snapshot.fills),
+                "position_count": len(snapshot.positions),
+                "projection": asdict(projection),
+            }
+        )
+        if critical_count:
+            gate_status, gate_reason = "HALTED", "RECONCILIATION_MISMATCH"
+        else:
+            gate_status, gate_reason = "RECONCILING", clean_gate_reason
+        _set_gate(db, gate_status, gate_reason)
+        db.commit()
+    except KiwoomAdapterError:
+        db.rollback()
+        _mark_failed(db, run.id)
+        raise
+    except Exception as exc:
+        db.rollback()
+        _mark_failed(db, run.id)
+        raise ReconciliationProjectionError() from exc
 
     return ReconciliationResult(
         run_id=run.id,
@@ -158,13 +178,22 @@ def compare_snapshot(db: Session, snapshot: BrokerAccountSnapshot) -> list[Misma
             TradingOrder.status.in_(BROKER_VISIBLE_ORDER_STATES),
         )
     ).all()
-    internal_by_broker = {
+    visible_internal_by_broker = {
         order.broker_order_id: order for order in internal_orders if order.broker_order_id
+    }
+    all_orders = db.scalars(
+        select(TradingOrder).where(
+            TradingOrder.account_alias == ACCOUNT_ALIAS,
+            TradingOrder.broker_order_id.is_not(None),
+        )
+    ).all()
+    all_internal_by_broker = {
+        order.broker_order_id: order for order in all_orders if order.broker_order_id
     }
     broker_by_id = {order.broker_order_id: order for order in snapshot.open_orders}
 
     for broker_id, broker in broker_by_id.items():
-        internal = internal_by_broker.get(broker_id)
+        internal = visible_internal_by_broker.get(broker_id)
         if internal is None:
             mismatches.append(
                 Mismatch(
@@ -202,7 +231,7 @@ def compare_snapshot(db: Session, snapshot: BrokerAccountSnapshot) -> list[Misma
     for fill in snapshot.fills:
         broker_fill_totals[fill.broker_order_id] += fill.quantity
     for broker_id, quantity in broker_fill_totals.items():
-        internal = internal_by_broker.get(broker_id)
+        internal = all_internal_by_broker.get(broker_id)
         if internal is not None and quantity != internal.filled_quantity:
             mismatches.append(
                 Mismatch(
@@ -264,6 +293,39 @@ def compare_snapshot(db: Session, snapshot: BrokerAccountSnapshot) -> list[Misma
                 )
             )
     return mismatches
+
+
+def _resolve_previous_mismatches(
+    db: Session,
+    run: ReconciliationRun,
+    current: list[Mismatch],
+    *,
+    now: datetime,
+) -> None:
+    current_keys = {(item.code, item.symbol) for item in current}
+    previous = db.execute(
+        select(ReconciliationMismatch, ReconciliationRun)
+        .join(ReconciliationRun, ReconciliationRun.id == ReconciliationMismatch.run_id)
+        .where(
+            ReconciliationRun.account_alias == run.account_alias,
+            ReconciliationRun.id != run.id,
+            ReconciliationMismatch.state == "OPEN",
+        )
+    ).all()
+    for mismatch, _previous_run in previous:
+        if (mismatch.code, mismatch.symbol) not in current_keys:
+            mismatch.state = "RESOLVED"
+            mismatch.resolved_at = now
+
+
+def _mark_failed(db: Session, run_id: str) -> None:
+    run = db.get(ReconciliationRun, run_id)
+    if run is not None:
+        run.state = "FAILED"
+        run.completed_at = datetime.now(UTC)
+        run.result_summary_json = _json({"result": "FAILED"})
+    _set_gate(db, "DEGRADED", "RECONCILIATION_FAILED")
+    db.commit()
 
 
 def _set_gate(db: Session, status: str, reason: str) -> TradingGate:

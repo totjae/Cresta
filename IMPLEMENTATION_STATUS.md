@@ -1,5 +1,12 @@
 # Cresta 구현 상태
 
+### 2026-08-14 키움 Broker 기준 계좌 projection
+
+- 키움 모의·실거래 계좌에서는 키움 account snapshot을 주문·체결·포지션의 최종 사실로 삼고, Cresta DB를 운영용 projection으로 갱신하는 계층을 추가했다. Broker-only open order는 `BROKER_IMPORTED` intent와 함께 가져오고, position은 신규 `EXTERNAL` 생성·기존 origin 보존·Broker에 없어진 row의 `CLOSED` 전환을 수행한다.
+- 확정 체결은 결정론적 key로 멱등 저장한다. 전량체결은 주문을 `FILLED`로 종료하지만, 부분체결 후 open order에서 사라진 경우는 취소·거절을 추측하지 않고 `RECONCILING/HALTED`를 유지한다. 주문수량 초과 체결도 로컬 수량 불변식을 훼손하지 않고 mismatch로 차단한다.
+- projection과 같은 snapshot의 재비교, position/order 감사 event, 과거 mismatch의 `RESOLVED` 전환을 같은 transaction 경계에서 처리한다. projection 실패 시 부분 변경을 rollback하고 gate를 `DEGRADED/RECONCILIATION_FAILED`로 닫는다.
+- reconciliation 집중시험 14개, backend 전체 334개 시험, Ruff와 `git diff --check`가 로컬에서 통과했다. Ubuntu 서버의 기존 실제 mismatch에 대한 적용·재동기화 검증은 아직 수행하지 않았다.
+
 ### 2026-08-14 승인 시점 최신 snapshot 재검사 경쟁 해소
 
 - 판단 snapshot은 승인 기준가격·수량을 고정하는 불변 reference로 유지하고, 승인 transaction은 `market_stream_states` 행을 잠근 뒤 승인 시점 최신 snapshot으로 freshness·품질·spread·가격편차를 다시 검사한다. 정상적인 stream 전진과 snapshot ID 변경만으로 승인을 무효화하지 않는다.

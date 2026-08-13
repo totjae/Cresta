@@ -95,6 +95,10 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | DB-027 | `broker_leases` 획득·갱신·해제는 account_alias 행 잠금과 owner/fencing token 비교로 원자 처리한다. 만료 전 다른 owner는 획득할 수 없다. |
 | DB-028 | `broker_worker_states`는 worker 상태와 연결·구독·heartbeat·최근 재동기화만 저장하며 계좌번호·접근 token·App Key·원본 WebSocket payload를 저장하지 않는다. |
 | DB-029 | `READY` 전환과 worker 상태 갱신은 현재 lease owner와 fencing token 검증을 같은 transaction에서 통과해야 한다. |
+| DB-152 | 키움 연동 환경의 `orders`, `fills`, `positions`는 Broker account snapshot의 로컬 projection이다. projection 반영과 해당 run의 mismatch 계산은 하나의 DB transaction에서 수행한다. |
+| DB-153 | Broker에서 가져온 주문은 `environment + account_alias + broker_order_id`, 체결은 결정론적 `broker_fill_key`, position은 `account_alias + symbol` 제약으로 반복 snapshot에서도 멱등해야 한다. |
+| DB-154 | position projection 변경은 기존 `origin`을 유지하고 `position_events`에 reconciliation run ID와 변경 전후 값을 기록한다. Broker에 없어진 OPEN position도 row를 삭제하지 않고 `CLOSED`, 수량 0으로 보존한다. |
+| DB-155 | projection은 판단·승인·설정·order intent를 삭제하거나 의미 변경하지 않는다. Broker-only 주문에 필요한 intent는 `BROKER_IMPORTED`로 별도 생성하고 원래 Cresta intent와 구분한다. |
 
 권장 트랜잭션 격리 수준은 일반 명령 `READ COMMITTED`와 명시적 행 잠금이며, 계좌 소유권·설정 활성화처럼 경합이 적고 중요도가 높은 작업은 `SERIALIZABLE` 또는 동등한 낙관적 재시도를 사용한다.
 

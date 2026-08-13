@@ -271,6 +271,29 @@ reconciliation_run:
 | REC-081 | 주기·이벤트 대조 중 mismatch는 즉시 `HALTED`, 조회 실패는 `DEGRADED`로 전환하며 이전 READY 상태를 보존하지 않는다. |
 | REC-082 | `00`·`04` 이벤트를 수신하면 debounce 대기를 시작하는 즉시 gate를 `RECONCILING/BROKER_EVENT_PENDING`으로 전환하고 신규 주문 polling을 중지한다. 병합 대기 중 연속 이벤트는 대기 시각을 무한히 늘리지 않으며, REST 대조가 mismatch 없이 완료된 후에만 polling을 재개한다. |
 
+### 3.12 Broker-authoritative account projection
+
+키움 모의·실거래 환경에서는 키움의 주문·체결·잔고 조회 결과가 계좌 사실의 최종 원본이다. Cresta의 주문·체결·포지션 테이블은 이 사실을 운영에 사용하기 위한 로컬 projection이며, AI 판단·사용자 승인·Guard·주문 의도와 감사 이력은 Cresta 고유 기록으로 유지한다. 자체 Paper 환경에서는 기존과 같이 Cresta 원장이 최종 원본이다.
+
+```text
+키움 account snapshot 조회
+→ snapshot 구조·계좌 일치 검증
+→ 확정 가능한 주문·체결·포지션 projection을 한 transaction으로 반영
+→ 반영된 projection과 같은 snapshot을 다시 비교
+→ 잔여 불일치가 없을 때만 worker READY 후보
+```
+
+| ID | 요구사항 |
+| --- | --- |
+| REC-083 | 키움 open order는 broker order ID를 자연키로 사용해 기존 주문 projection을 갱신하고, 내부에 없으면 `BROKER_IMPORTED` intent와 주문 projection을 생성한다. 같은 snapshot 재처리는 새 주문을 만들지 않는다. |
+| REC-084 | 키움 체결은 broker order ID, 종목·방향, 체결시각, 가격, 수량과 동일 항목의 occurrence를 포함한 결정론적 key로 멱등 저장한다. 체결 합계가 주문수량과 정확히 같고 broker open order에 없으면 주문을 `FILLED`로 종료한다. |
+| REC-085 | 체결 합계가 주문수량보다 작고 broker open order에도 없는 주문은 취소·거절·부분체결 종료를 추측하지 않는다. 확인된 체결만 반영하고 주문을 `RECONCILING`으로 유지해 거래를 차단한다. 체결 합계가 주문수량을 넘으면 projection을 적용하지 않고 critical mismatch로 처리한다. |
+| REC-086 | 키움 보유 snapshot에 있는 종목은 수량·평균단가를 자동 upsert한다. 내부에 없던 포지션은 `EXTERNAL` origin으로 생성하되 계좌 평가·중복매수 방지에는 즉시 포함한다. 기존 position origin은 자동 변경하지 않는다. |
+| REC-087 | 키움 보유 snapshot에 없지만 내부에서 `OPEN`인 position은 수량 0, 평균단가 0, `CLOSED`로 갱신한다. 변경 전후 값과 reconciliation run ID를 position event로 남긴다. |
+| REC-088 | projection 반영은 원본 AI 판단·승인·실행정책·주문 의도를 삭제하거나 다시 작성하지 않는다. 주문·체결·포지션의 Broker 사실과 별도 감사 event만 추가·갱신한다. |
+| REC-089 | projection 적용 후 동일 snapshot으로 재비교하고 잔여 critical mismatch가 있을 때는 `HALTED`를 유지한다. 모두 해소된 이전 OPEN mismatch는 `RESOLVED`와 해결 시각으로 갱신한다. |
+| REC-090 | snapshot 조회 또는 projection transaction이 실패하면 부분 반영을 성공으로 간주하지 않고 rollback하며 gate를 `DEGRADED/RECONCILIATION_FAILED`로 유지한다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 키움 조회 API 일부만 성공하면 성공한 스냅샷으로 전체 계좌를 확정하지 않는다.

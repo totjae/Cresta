@@ -10,19 +10,27 @@ from sqlalchemy.orm import Session
 from app.broker.kiwoom import (
     AccountVerification,
     BrokerAccountSnapshot,
+    BrokerFillSummary,
     BrokerOpenOrder,
     BrokerPosition,
     KiwoomAdapterError,
 )
 from app.models import (
+    Fill,
+    OrderEvent,
     OrderIntent,
     Position,
+    PositionEvent,
     ReconciliationMismatch,
     ReconciliationRun,
     TradingGate,
     TradingOrder,
 )
-from app.reconciliation import ACCOUNT_ALIAS, run_kiwoom_reconciliation
+from app.reconciliation import (
+    ACCOUNT_ALIAS,
+    ReconciliationProjectionError,
+    run_kiwoom_reconciliation,
+)
 
 NOW = datetime(2026, 8, 3, 5, 0, tzinfo=UTC)
 
@@ -63,7 +71,7 @@ def test_clean_snapshot_stays_reconciling_until_permanent_worker(db: Session) ->
     assert gate.status == "RECONCILING"
 
 
-def test_external_order_and_position_halt_without_automatic_adoption(db: Session) -> None:
+def test_external_order_and_position_are_projected_from_broker(db: Session) -> None:
     snapshot = BrokerAccountSnapshot(
         open_orders=(
             BrokerOpenOrder(
@@ -91,21 +99,23 @@ def test_external_order_and_position_halt_without_automatic_adoption(db: Session
 
     result = run_kiwoom_reconciliation(db, SnapshotClient(snapshot))
 
-    assert result.state == "MISMATCH"
-    assert result.gate_status == "HALTED"
-    assert result.critical_mismatch_count == 2
-    codes = set(
-        db.scalars(
-            select(ReconciliationMismatch.code).where(
-                ReconciliationMismatch.run_id == result.run_id
-            )
-        ).all()
-    )
-    assert codes == {"BROKER_ORDER_MISSING_INTERNAL", "UNKNOWN_EXTERNAL_POSITION"}
-    assert db.scalar(select(Position).where(Position.account_alias == ACCOUNT_ALIAS)) is None
+    assert result.state == "SUCCEEDED"
+    assert result.gate_status == "RECONCILING"
+    assert result.critical_mismatch_count == 0
+    order = db.scalar(select(TradingOrder).where(TradingOrder.broker_order_id == "1234567"))
+    assert order is not None
+    assert order.status == "OPEN"
+    assert order.remaining_quantity == 10
+    intent = db.get(OrderIntent, order.intent_id)
+    assert intent is not None
+    assert intent.action == "BROKER_IMPORTED"
+    position = db.scalar(select(Position).where(Position.account_alias == ACCOUNT_ALIAS))
+    assert position is not None
+    assert position.quantity == 10
+    assert position.origin == "EXTERNAL"
 
 
-def test_position_quantity_and_average_price_are_compared_without_mutation(db: Session) -> None:
+def test_position_quantity_and_average_price_follow_broker_projection(db: Session) -> None:
     internal = Position(
         account_alias=ACCOUNT_ALIAS,
         symbol="005930",
@@ -124,17 +134,15 @@ def test_position_quantity_and_average_price_are_compared_without_mutation(db: S
 
     result = run_kiwoom_reconciliation(db, SnapshotClient(snapshot))
 
-    assert result.gate_status == "HALTED"
-    mismatch = db.scalar(
-        select(ReconciliationMismatch).where(
-            ReconciliationMismatch.run_id == result.run_id,
-            ReconciliationMismatch.code == "POSITION_QUANTITY_MISMATCH",
-        )
-    )
-    assert mismatch is not None
+    assert result.gate_status == "RECONCILING"
+    assert result.mismatch_count == 0
     db.refresh(internal)
-    assert internal.quantity == 5
-    assert internal.average_price == Decimal(69000)
+    assert internal.quantity == 7
+    assert internal.average_price == Decimal(70000)
+    assert internal.origin == "CRESTA_MANAGED"
+    event = db.scalar(select(PositionEvent).where(PositionEvent.position_id == internal.id))
+    assert event is not None
+    assert event.cause_id == result.run_id
 
 
 def test_adapter_failure_persists_failed_run_and_degraded_gate(db: Session) -> None:
@@ -151,7 +159,45 @@ def test_adapter_failure_persists_failed_run_and_degraded_gate(db: Session) -> N
     assert gate.reason == "RECONCILIATION_FAILED"
 
 
-def _internal_order(db: Session, status: str, key: str) -> TradingOrder:
+def test_projection_failure_rolls_back_and_degrades_gate(db: Session) -> None:
+    invalid_snapshot = BrokerAccountSnapshot(
+        open_orders=(
+            BrokerOpenOrder(
+                "invalid-order",
+                "005930",
+                "BUY",
+                1,
+                1,
+                1,
+                Decimal(70000),
+                "101500",
+            ),
+        ),
+        fills=(),
+        positions=(),
+        observed_at=NOW,
+    )
+
+    with pytest.raises(ReconciliationProjectionError):
+        run_kiwoom_reconciliation(db, SnapshotClient(invalid_snapshot))
+
+    run = db.scalar(select(ReconciliationRun).order_by(ReconciliationRun.started_at.desc()))
+    assert run is not None
+    assert run.state == "FAILED"
+    gate = db.get(TradingGate, ACCOUNT_ALIAS)
+    assert gate is not None
+    assert gate.status == "DEGRADED"
+    assert db.scalar(select(TradingOrder).where(TradingOrder.broker_order_id == "invalid-order")) is None
+
+
+def _internal_order(
+    db: Session,
+    status: str,
+    key: str,
+    *,
+    quantity: int = 1,
+    broker_order_id: str | None = None,
+) -> TradingOrder:
     intent = OrderIntent(
         account_alias=ACCOUNT_ALIAS,
         environment="MOCK",
@@ -159,7 +205,7 @@ def _internal_order(db: Session, status: str, key: str) -> TradingOrder:
         market="KRX",
         side="BUY",
         action="USER_APPROVED",
-        requested_quantity=1,
+        requested_quantity=quantity,
         correlation_id=f"corr-{key}",
     )
     db.add(intent)
@@ -174,11 +220,12 @@ def _internal_order(db: Session, status: str, key: str) -> TradingOrder:
         side="BUY",
         order_type="LIMIT",
         limit_price=Decimal(70000),
-        requested_quantity=1,
-        remaining_quantity=1,
+        requested_quantity=quantity,
+        remaining_quantity=quantity,
         status=status,
         idempotency_key=key,
         request_hash="b" * 64,
+        broker_order_id=broker_order_id,
         trading_date=date(2026, 8, 4),
         correlation_id=f"corr-{key}",
     )
@@ -225,3 +272,195 @@ def test_uncertain_sent_order_halts_without_automatic_resend(
     )
     assert mismatch is not None
     assert mismatch.code == "INTERNAL_ORDER_MISSING_BROKER"
+
+
+def test_exact_broker_fill_closes_order_and_is_idempotent(db: Session) -> None:
+    order = _internal_order(
+        db,
+        "ACKNOWLEDGED",
+        "exact-fill",
+        quantity=2,
+        broker_order_id="broker-exact",
+    )
+    snapshot = BrokerAccountSnapshot(
+        open_orders=(),
+        fills=(
+            BrokerFillSummary(
+                broker_order_id="broker-exact",
+                symbol="005930",
+                side="BUY",
+                quantity=2,
+                price=Decimal(70100),
+                fee=Decimal(10),
+                tax=Decimal(0),
+                order_time="101530",
+            ),
+        ),
+        positions=(BrokerPosition("005930", 2, 2, Decimal(70100)),),
+        observed_at=NOW,
+    )
+
+    first = run_kiwoom_reconciliation(db, SnapshotClient(snapshot))
+    second = run_kiwoom_reconciliation(db, SnapshotClient(snapshot))
+
+    assert first.state == second.state == "SUCCEEDED"
+    db.refresh(order)
+    assert order.status == "FILLED"
+    assert order.filled_quantity == 2
+    assert order.remaining_quantity == 0
+    assert len(db.scalars(select(Fill).where(Fill.order_id == order.id)).all()) == 1
+    assert len(db.scalars(select(OrderEvent).where(OrderEvent.order_id == order.id)).all()) == 1
+    position = db.scalar(select(Position).where(Position.symbol == "005930"))
+    assert position is not None
+    assert len(
+        db.scalars(select(PositionEvent).where(PositionEvent.position_id == position.id)).all()
+    ) == 1
+
+
+def test_partial_fill_without_open_order_remains_halted(db: Session) -> None:
+    order = _internal_order(
+        db,
+        "ACKNOWLEDGED",
+        "partial-fill",
+        quantity=3,
+        broker_order_id="broker-partial",
+    )
+    snapshot = BrokerAccountSnapshot(
+        open_orders=(),
+        fills=(
+            BrokerFillSummary(
+                "broker-partial",
+                "005930",
+                "BUY",
+                1,
+                Decimal(70000),
+                Decimal(0),
+                Decimal(0),
+                "101500",
+            ),
+        ),
+        positions=(BrokerPosition("005930", 1, 1, Decimal(70000)),),
+        observed_at=NOW,
+    )
+
+    result = run_kiwoom_reconciliation(db, SnapshotClient(snapshot))
+
+    assert result.gate_status == "HALTED"
+    assert result.critical_mismatch_count == 1
+    db.refresh(order)
+    assert order.status == "RECONCILING"
+    assert order.filled_quantity == 1
+    assert order.remaining_quantity == 2
+    mismatch = db.scalar(
+        select(ReconciliationMismatch).where(ReconciliationMismatch.run_id == result.run_id)
+    )
+    assert mismatch is not None
+    assert mismatch.code == "INTERNAL_ORDER_MISSING_BROKER"
+
+
+def test_broker_missing_position_is_closed_without_changing_origin(db: Session) -> None:
+    position = Position(
+        account_alias=ACCOUNT_ALIAS,
+        symbol="005930",
+        quantity=4,
+        average_price=Decimal(69000),
+        state="OPEN",
+        origin="CRESTA_MANAGED",
+    )
+    db.add(position)
+    db.commit()
+
+    result = run_kiwoom_reconciliation(db, SnapshotClient(empty_snapshot()))
+
+    assert result.state == "SUCCEEDED"
+    db.refresh(position)
+    assert position.state == "CLOSED"
+    assert position.quantity == 0
+    assert position.average_price == Decimal(0)
+    assert position.origin == "CRESTA_MANAGED"
+    event = db.scalar(select(PositionEvent).where(PositionEvent.position_id == position.id))
+    assert event is not None
+    assert event.cause_id == result.run_id
+
+
+def test_overfill_halts_without_writing_invalid_projection(db: Session) -> None:
+    order = _internal_order(
+        db,
+        "ACKNOWLEDGED",
+        "overfill",
+        broker_order_id="broker-overfill",
+    )
+    snapshot = BrokerAccountSnapshot(
+        open_orders=(),
+        fills=(
+            BrokerFillSummary(
+                "broker-overfill",
+                "005930",
+                "BUY",
+                2,
+                Decimal(70000),
+                Decimal(0),
+                Decimal(0),
+                "101500",
+            ),
+        ),
+        positions=(),
+        observed_at=NOW,
+    )
+
+    result = run_kiwoom_reconciliation(db, SnapshotClient(snapshot))
+
+    assert result.gate_status == "HALTED"
+    assert result.critical_mismatch_count == 2
+    db.refresh(order)
+    assert order.filled_quantity == 0
+    assert order.remaining_quantity == 1
+    assert db.scalar(select(Fill).where(Fill.order_id == order.id)) is None
+    codes = set(
+        db.scalars(
+            select(ReconciliationMismatch.code).where(
+                ReconciliationMismatch.run_id == result.run_id
+            )
+        ).all()
+    )
+    assert codes == {"INTERNAL_ORDER_MISSING_BROKER", "FILL_QUANTITY_MISMATCH"}
+
+
+def test_resolved_mismatch_is_marked_after_broker_fact_becomes_clear(db: Session) -> None:
+    order = _internal_order(
+        db,
+        "UNKNOWN",
+        "later-resolved",
+        broker_order_id="broker-later",
+    )
+    first = run_kiwoom_reconciliation(db, SnapshotClient(empty_snapshot()))
+    first_mismatch = db.scalar(
+        select(ReconciliationMismatch).where(ReconciliationMismatch.run_id == first.run_id)
+    )
+    assert first_mismatch is not None
+    snapshot = BrokerAccountSnapshot(
+        open_orders=(
+            BrokerOpenOrder(
+                "broker-later",
+                "005930",
+                "BUY",
+                1,
+                0,
+                1,
+                Decimal(70000),
+                "101500",
+            ),
+        ),
+        fills=(),
+        positions=(),
+        observed_at=NOW,
+    )
+
+    second = run_kiwoom_reconciliation(db, SnapshotClient(snapshot))
+
+    assert second.state == "SUCCEEDED"
+    db.refresh(order)
+    db.refresh(first_mismatch)
+    assert order.status == "OPEN"
+    assert first_mismatch.state == "RESOLVED"
+    assert first_mismatch.resolved_at is not None
