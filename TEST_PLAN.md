@@ -705,4 +705,4 @@ Local evidence (2026-08-12, 운영 override): 날짜·메타데이터 경계, �
 | T-REC-PROJ-006 | REC-089 | mismatch가 다음 snapshot에서 해소됨 | 이전 OPEN mismatch가 `RESOLVED`와 해결시각으로 전환됨 |
 | T-REC-PROJ-007 | REC-090, DB-152 | 유효하지 않은 Broker 수량으로 projection 실패 | transaction rollback, run `FAILED`, gate `DEGRADED` |
 
-Local evidence (2026-08-14): `backend/tests/test_reconciliation.py` 14개와 backend 전체 334개 시험, Ruff, `git diff --check`가 통과했다. 서버 배포 및 기존 키움 mismatch 자동 projection 확인은 사용자 승인 후 수행할 운영 검증으로 남아 있다.
+Local evidence (2026-08-14): `backend/tests/test_reconciliation.py` 14개와 backend 전체 334개 시험, Ruff, `git diff --check`가 통과했다. Ubuntu 모의투자 서버에서 배포 전 2.0GB PostgreSQL dump를 확보한 뒤 `9244edc`를 적용했다. 키움 snapshot의 체결 1건·position 1건을 반영해 주문 `0087482`가 `FILLED`, position `005930`이 `OPEN/EXTERNAL`이 됐고 관련 과거 mismatch는 모두 `RESOLVED`, OPEN mismatch는 0건이었다. 같은 snapshot의 다음 periodic run은 모든 projection count 0과 mismatch 0으로 멱등 통과했으며 worker와 gate는 `READY/WORKER_HEALTHY`였다. 최초 세 재연결 run은 `FAILED` 후 자동 회복했으나 현재 기록만으로 상세 원인을 식별할 수 없어 실패 원인 영속·로그 보강을 후속 항목으로 남긴다.
