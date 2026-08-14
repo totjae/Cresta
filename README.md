@@ -30,7 +30,7 @@
 - 인증된 `GET /api/v1/system/broker`와 `kiwoom-worker-status` 안전 상태 조회
 - N100·16GiB 서버용 Docker Compose 자원 제한 초안
 
-Console의 승인 화면, 승인형 BUY 주문 생성, FIXED_STOP 자동 매도 주문 연결과 BUY 전체 Guard는 `APPROVAL_ONLY` 단계에서 구현됐습니다(기본값은 `SHADOW`로 주문 0건 유지). Active worker는 공통 Order Creation Service가 만든 `CREATED` 주문을 키움 모의투자로 송신하며 polling 중복 방지와 `UNKNOWN` 즉시 재동기화를 수행합니다. 호가단위 보정·키움 업무 거절 사유 표시·미체결 재호가·PARTIAL_SELL/FULL_SELL/당일 고점 매도·실시간 체결의 position/손익 반영은 후속 milestone입니다. 외부 주문·포지션은 자동 편입하거나 수정하지 않고 `EXTERNAL` provenance로 태깅만 합니다.
+Console의 승인 화면, 승인형 BUY 주문 생성, FIXED_STOP 자동 매도 주문 연결과 BUY 전체 Guard는 `APPROVAL_ONLY` 단계에서 구현됐습니다(기본값은 `SHADOW`로 주문 0건 유지). Active worker는 공통 Order Creation Service가 만든 `CREATED` 주문을 키움 모의투자로 송신하며 polling 중복 방지와 `UNKNOWN` 즉시 재동기화를 수행합니다. 키움 포지션 총량은 Broker snapshot을 따르고 Cresta 체결 귀속량을 별도 계산해 `CRESTA_MANAGED`·`EXTERNAL`·`MIXED`로 표시하며, 자동 손절은 Cresta 관리수량만 주문합니다. 신규매수 미체결 잔량은 Broker 접수 10초 뒤 한 번 취소하고 snapshot으로 취소·늦은 체결을 확정합니다. 종목 board 기반 호가단위 보정·매도 재호가·PARTIAL_SELL/FULL_SELL/당일 고점 매도·실시간 손익 반영은 후속 milestone입니다.
 
 ## Backend 개발 실행
 

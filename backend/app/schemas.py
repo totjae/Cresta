@@ -117,8 +117,12 @@ class RiskPolicyPayload(StrictModel):
     quote_stale_seconds: int = Field(ge=1, le=30)
     max_spread_pct: Decimal = Field(ge=Decimal("0.01"), le=Decimal("5.00"))
     max_price_deviation_pct: Decimal = Field(ge=Decimal("0.01"), le=Decimal("5.00"))
-    daily_loss_limit_pct: Decimal = Field(default=Decimal("5.0"), ge=Decimal("0.1"), le=Decimal("20.0"))
-    daily_loss_basis: Literal["REALIZED_ONLY", "REALIZED_PLUS_UNREALIZED"] = "REALIZED_PLUS_UNREALIZED"
+    daily_loss_limit_pct: Decimal = Field(
+        default=Decimal("5.0"), ge=Decimal("0.1"), le=Decimal("20.0")
+    )
+    daily_loss_basis: Literal["REALIZED_ONLY", "REALIZED_PLUS_UNREALIZED"] = (
+        "REALIZED_PLUS_UNREALIZED"
+    )
     max_consecutive_losses: int = Field(default=3, ge=1, le=10)
 
     @model_validator(mode="after")
@@ -278,6 +282,11 @@ class OrderSummary(StrictModel):
     client_order_id: str
     broker_order_id: str | None
     replacement_sequence: int
+    unfilled_policy: str
+    fill_timeout_seconds: int
+    max_reprice_attempts: int
+    reprice_attempts: int
+    next_action_at: datetime | None
     trading_date: date
     version: int
     created_at: datetime
@@ -320,9 +329,13 @@ class PositionSummary(StrictModel):
     market: str = "KRX"
     symbol: str
     quantity: int
+    available_quantity: int
     average_price: Decimal
+    managed_quantity: int
+    managed_average_price: Decimal
+    external_quantity: int
     state: str
-    origin: Literal["CRESTA_MANAGED", "EXTERNAL"]
+    origin: Literal["CRESTA_MANAGED", "EXTERNAL", "MIXED"]
     version: int
     created_at: datetime
     updated_at: datetime
@@ -980,16 +993,19 @@ class AgentRunResponse(StrictModel):
     route_versions: dict[str, object]
     state: str
     core_action: Literal["WAIT"] | None
-    shadow_assessment: Literal[
-        "ENTRY_STRONG",
-        "ENTRY_SUPPORTIVE",
-        "NEUTRAL",
-        "ENTRY_ADVERSE",
-        "HOLD_SUPPORTIVE",
-        "EXIT_RISK_ELEVATED",
-        "EXIT_RISK_HIGH",
-        "UNKNOWN",
-    ] | None
+    shadow_assessment: (
+        Literal[
+            "ENTRY_STRONG",
+            "ENTRY_SUPPORTIVE",
+            "NEUTRAL",
+            "ENTRY_ADVERSE",
+            "HOLD_SUPPORTIVE",
+            "EXIT_RISK_ELEVATED",
+            "EXIT_RISK_HIGH",
+            "UNKNOWN",
+        ]
+        | None
+    )
     valid_until: datetime
     stages: list[AgentStageRunResponse]
     evidence_bundle: AgentEvidenceBundleResponse | None

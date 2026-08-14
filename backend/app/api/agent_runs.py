@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, Query, Request, status
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from app.agents.runtime import (
@@ -24,6 +24,7 @@ from app.models import (
     EvidenceBundle,
     LlmInvocation,
     LlmModelProfile,
+    LlmRoleRoute,
 )
 from app.schemas import (
     AgentDiagnosticRunRequest,
@@ -50,11 +51,28 @@ def _response(
     )
     stage_responses: list[AgentStageRunResponse] = []
     for stage in stages:
+        route = db.get(LlmRoleRoute, stage.route_id) if stage.route_id else None
+        primary_first = (
+            case(
+                (
+                    LlmInvocation.requested_model_profile_id
+                    == route.primary_model_profile_id,
+                    0,
+                ),
+                else_=1,
+            )
+            if route is not None
+            else LlmInvocation.retry_count
+        )
         invocations = list(
             db.scalars(
                 select(LlmInvocation)
                 .where(LlmInvocation.stage_run_id == stage.id)
-                .order_by(LlmInvocation.created_at, LlmInvocation.id)
+                .order_by(
+                    primary_first,
+                    LlmInvocation.created_at,
+                    LlmInvocation.id,
+                )
             )
         )
         requested_models = {

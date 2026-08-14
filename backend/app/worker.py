@@ -13,7 +13,12 @@ from app.agents.worker import AgentWorker
 from app.analysis_scheduler import AnalysisSchedulerWorker
 from app.broker.kiwoom import KiwoomAdapterError, KiwoomMockClient
 from app.broker.kiwoom_ws import KiwoomAccountWebSocket, KiwoomWebSocketError
-from app.broker.order_sender import KiwoomSendResult, send_next_created_order
+from app.broker.order_sender import (
+    KiwoomCancelResult,
+    KiwoomSendResult,
+    cancel_next_expired_buy_once,
+    send_next_created_order,
+)
 from app.broker.worker_state import (
     LeaseIdentity,
     acquire_lease,
@@ -206,6 +211,18 @@ class KiwoomBrokerWorker:
                     seconds=self.settings.kiwoom_watchlist_sync_seconds
                 )
             if order_dispatch_enabled:
+                cancel_result = await self._cancel_expired_buy()
+                if cancel_result is not None and cancel_result.status in {
+                    "UNKNOWN",
+                    "RECONCILING",
+                }:
+                    result = await self._reconcile("UNFILLED_ORDER_CANCEL_UNCERTAIN")
+                    self._apply_reconciliation_result(result)
+                    order_dispatch_enabled = result.critical_mismatch_count == 0
+                    next_periodic = datetime.now(UTC) + timedelta(
+                        seconds=self.settings.kiwoom_reconcile_interval_seconds
+                    )
+                    continue
                 dispatch_result = await self._dispatch_next_order()
                 if dispatch_result is not None and dispatch_result.status == "UNKNOWN":
                     result = await self._reconcile("ORDER_OUTCOME_UNKNOWN")
@@ -271,6 +288,18 @@ class KiwoomBrokerWorker:
         def execute() -> KiwoomSendResult | None:
             with SessionLocal() as db:
                 return send_next_created_order(db, self.client, self.identity)
+
+        return await asyncio.to_thread(execute)
+
+    async def _cancel_expired_buy(self) -> KiwoomCancelResult | None:
+        if self.identity is None:
+            raise RuntimeError("WORKER_LEASE_LOST")
+
+        def execute() -> KiwoomCancelResult | None:
+            with SessionLocal() as db:
+                return cancel_next_expired_buy_once(
+                    db, self.client, self.identity, now=datetime.now(UTC)
+                )
 
         return await asyncio.to_thread(execute)
 

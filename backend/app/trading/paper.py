@@ -88,7 +88,9 @@ def _request_hash(request: PaperOrderRequest, trading_date: date) -> str:
         {
             "account_alias": request.account_alias,
             "action": request.action,
-            "limit_price": _price_text(request.limit_price) if request.limit_price is not None else None,
+            "limit_price": _price_text(request.limit_price)
+            if request.limit_price is not None
+            else None,
             "market": request.market,
             "order_type": request.order_type,
             "quantity": request.quantity,
@@ -149,11 +151,15 @@ def set_paper_gate(db: Session, status: str, reason: str) -> TradingGate:
 
 def _validate_request(db: Session, request: PaperOrderRequest, settings: Settings) -> None:
     if settings.environment.upper() != "MOCK" or settings.live_trading_enabled:
-        raise PaperBrokerError("PAPER_ENVIRONMENT_REQUIRED", "Paper Broker는 MOCK 환경에서만 동작합니다.")
+        raise PaperBrokerError(
+            "PAPER_ENVIRONMENT_REQUIRED", "Paper Broker는 MOCK 환경에서만 동작합니다."
+        )
     if request.account_alias != "PAPER":
         raise PaperBrokerError("PAPER_ACCOUNT_REQUIRED", "Paper Broker 계좌가 아닙니다.")
     if request.market != "KRX":
-        raise PaperBrokerError("UNSUPPORTED_IN_MOCK", "해당 시장은 Paper Broker에서 지원하지 않습니다.")
+        raise PaperBrokerError(
+            "UNSUPPORTED_IN_MOCK", "해당 시장은 Paper Broker에서 지원하지 않습니다."
+        )
     if request.side not in {"BUY", "SELL"}:
         raise PaperBrokerError("INVALID_ORDER_SIDE", "지원하지 않는 주문 방향입니다.")
     if request.order_type not in {"LIMIT", "MARKET"}:
@@ -167,10 +173,14 @@ def _validate_request(db: Session, request: PaperOrderRequest, settings: Setting
     if request.order_type == "LIMIT" and (request.limit_price is None or request.limit_price <= 0):
         raise PaperBrokerError("INVALID_LIMIT_PRICE", "지정가 주문에는 유효한 가격이 필요합니다.")
     if request.order_type == "MARKET" and request.limit_price is not None:
-        raise PaperBrokerError("MARKET_PRICE_NOT_ALLOWED", "시장가 주문에는 지정 가격을 사용할 수 없습니다.")
+        raise PaperBrokerError(
+            "MARKET_PRICE_NOT_ALLOWED", "시장가 주문에는 지정 가격을 사용할 수 없습니다."
+        )
     gate = db.get(TradingGate, request.account_alias)
     if gate is None or gate.status != "READY":
-        raise PaperBrokerError("TRADING_GATE_CLOSED", "재동기화 완료 전에는 주문할 수 없습니다.", retryable=True)
+        raise PaperBrokerError(
+            "TRADING_GATE_CLOSED", "재동기화 완료 전에는 주문할 수 없습니다.", retryable=True
+        )
     locked_order = db.scalar(
         select(TradingOrder.id).where(
             TradingOrder.account_alias == request.account_alias,
@@ -179,7 +189,9 @@ def _validate_request(db: Session, request: PaperOrderRequest, settings: Setting
         )
     )
     if locked_order:
-        raise PaperBrokerError("SYMBOL_RECONCILIATION_REQUIRED", "해당 종목 주문을 먼저 재동기화해야 합니다.")
+        raise PaperBrokerError(
+            "SYMBOL_RECONCILIATION_REQUIRED", "해당 종목 주문을 먼저 재동기화해야 합니다."
+        )
     if request.side == "SELL":
         position = db.scalar(
             select(Position).where(
@@ -219,10 +231,14 @@ def create_paper_order(
 ) -> TradingOrder:
     trading_date = request.trading_date or current_trading_date()
     fingerprint = _request_hash(request, trading_date)
-    existing = db.scalar(select(TradingOrder).where(TradingOrder.idempotency_key == request.idempotency_key))
+    existing = db.scalar(
+        select(TradingOrder).where(TradingOrder.idempotency_key == request.idempotency_key)
+    )
     if existing:
         if existing.request_hash != fingerprint:
-            raise PaperBrokerConflict("IDEMPOTENCY_CONFLICT", "같은 멱등성 키의 요청 내용이 다릅니다.")
+            raise PaperBrokerConflict(
+                "IDEMPOTENCY_CONFLICT", "같은 멱등성 키의 요청 내용이 다릅니다."
+            )
         return existing
     _validate_request(db, request, settings)
     intent = OrderIntent(
@@ -259,10 +275,14 @@ def create_paper_order(
         db.flush()
     except IntegrityError:
         db.rollback()
-        raced = db.scalar(select(TradingOrder).where(TradingOrder.idempotency_key == request.idempotency_key))
+        raced = db.scalar(
+            select(TradingOrder).where(TradingOrder.idempotency_key == request.idempotency_key)
+        )
         if raced and raced.request_hash == fingerprint:
             return raced
-        raise PaperBrokerConflict("IDEMPOTENCY_CONFLICT", "멱등성 키 충돌이 발생했습니다.") from None
+        raise PaperBrokerConflict(
+            "IDEMPOTENCY_CONFLICT", "멱등성 키 충돌이 발생했습니다."
+        ) from None
     _event(db, order, "ORDER_CREATED", payload={"status": "CREATED"})
     _submit(db, order, response_lost=response_lost)
     db.commit()
@@ -273,8 +293,12 @@ def create_paper_order(
 def _position_snapshot(position: Position) -> dict[str, object]:
     return {
         "average_price": str(position.average_price),
+        "managed_average_price": str(position.managed_average_price),
         "quantity": position.quantity,
+        "available_quantity": position.available_quantity,
+        "managed_quantity": position.managed_quantity,
         "state": position.state,
+        "origin": position.origin,
         "version": position.version,
     }
 
@@ -295,7 +319,9 @@ def _apply_position(db: Session, order: TradingOrder, fill: Fill) -> None:
     if order.side == "BUY":
         new_quantity = position.quantity + fill.quantity
         total_cost = position.average_price * position.quantity + fill.price * fill.quantity
-        position.average_price = (total_cost / new_quantity).quantize(PRICE_QUANTUM, rounding=ROUND_HALF_UP)
+        position.average_price = (total_cost / new_quantity).quantize(
+            PRICE_QUANTUM, rounding=ROUND_HALF_UP
+        )
         position.quantity = new_quantity
     else:
         if position.quantity < fill.quantity:
@@ -303,6 +329,10 @@ def _apply_position(db: Session, order: TradingOrder, fill: Fill) -> None:
         position.quantity -= fill.quantity
         if position.quantity == 0:
             position.average_price = Decimal(0)
+    position.available_quantity = position.quantity
+    position.managed_quantity = position.quantity
+    position.managed_average_price = position.average_price
+    position.origin = "CRESTA_MANAGED"
     position.state = "OPEN" if position.quantity else "CLOSED"
     position.version += 1
     after = _position_snapshot(position)
@@ -446,7 +476,9 @@ def request_paper_cancel(db: Session, order_id: str) -> TradingOrder:
     if order is None:
         raise PaperBrokerError("ORDER_NOT_FOUND", "주문을 찾을 수 없습니다.")
     if order.status not in {"OPEN", "PARTIALLY_FILLED"}:
-        raise PaperBrokerConflict("INVALID_ORDER_TRANSITION", "현재 상태에서는 취소를 요청할 수 없습니다.")
+        raise PaperBrokerConflict(
+            "INVALID_ORDER_TRANSITION", "현재 상태에서는 취소를 요청할 수 없습니다."
+        )
     _set_status(db, order, "CANCEL_PENDING")
     db.commit()
     db.refresh(order)
@@ -474,7 +506,9 @@ def request_paper_replace(db: Session, order_id: str) -> TradingOrder:
     if order is None:
         raise PaperBrokerError("ORDER_NOT_FOUND", "주문을 찾을 수 없습니다.")
     if order.status not in {"OPEN", "PARTIALLY_FILLED"}:
-        raise PaperBrokerConflict("INVALID_ORDER_TRANSITION", "현재 상태에서는 정정을 요청할 수 없습니다.")
+        raise PaperBrokerConflict(
+            "INVALID_ORDER_TRANSITION", "현재 상태에서는 정정을 요청할 수 없습니다."
+        )
     _set_status(db, order, "REPLACE_PENDING")
     db.commit()
     db.refresh(order)
@@ -488,7 +522,9 @@ def replace_paper_order(
     new_limit_price: Decimal,
     idempotency_key: str,
 ) -> TradingOrder:
-    existing = db.scalar(select(TradingOrder).where(TradingOrder.idempotency_key == idempotency_key))
+    existing = db.scalar(
+        select(TradingOrder).where(TradingOrder.idempotency_key == idempotency_key)
+    )
     if existing:
         repeated_fingerprint = _canonical_hash(
             {
@@ -498,7 +534,9 @@ def replace_paper_order(
             }
         )
         if existing.request_hash != repeated_fingerprint:
-            raise PaperBrokerConflict("IDEMPOTENCY_CONFLICT", "같은 멱등성 키의 정정 내용이 다릅니다.")
+            raise PaperBrokerConflict(
+                "IDEMPOTENCY_CONFLICT", "같은 멱등성 키의 정정 내용이 다릅니다."
+            )
         return existing
     original = db.scalar(select(TradingOrder).where(TradingOrder.id == order_id).with_for_update())
     if original is None:
@@ -511,7 +549,9 @@ def replace_paper_order(
         }
     )
     if original.status == "FILLED":
-        raise PaperBrokerConflict("ORDER_ALREADY_FILLED", "정정 대기 중 주문이 전량 체결되었습니다.")
+        raise PaperBrokerConflict(
+            "ORDER_ALREADY_FILLED", "정정 대기 중 주문이 전량 체결되었습니다."
+        )
     if original.status != "REPLACE_PENDING" or original.remaining_quantity <= 0:
         raise PaperBrokerConflict("INVALID_ORDER_TRANSITION", "정정 대기 주문이 아닙니다.")
     if new_limit_price <= 0:

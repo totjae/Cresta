@@ -159,7 +159,12 @@ def test_paper_health_and_position_use_persisted_fill_data(
         "market": "KRX",
         "symbol": "005930",
         "quantity": 2,
+        "available_quantity": 2,
         "average_price": "70100.0000",
+        "managed_quantity": 2,
+        "managed_average_price": "70100.0000",
+        "external_quantity": 0,
+        "origin": "CRESTA_MANAGED",
         "state": "OPEN",
     }
     detail = client.get("/api/v1/positions/005930")
@@ -178,7 +183,10 @@ def test_kiwoom_projection_is_visible_in_console_position_reads(
             account_alias="KIWOOM_MOCK_PRIMARY",
             symbol="005930",
             quantity=1,
+            available_quantity=1,
             average_price=Decimal(269000),
+            managed_quantity=0,
+            managed_average_price=Decimal(0),
             state="OPEN",
             origin="EXTERNAL",
         )

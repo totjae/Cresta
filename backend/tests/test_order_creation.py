@@ -47,6 +47,9 @@ def test_create_order_persists_created_intent_and_order(db: Session, admin: User
     assert order.environment == "MOCK"
     assert order.requested_quantity == 1
     assert order.remaining_quantity == 1
+    assert order.unfilled_policy == "CANCEL"
+    assert order.fill_timeout_seconds == 10
+    assert order.next_action_at is None
     intent = db.get(OrderIntent, order.intent_id)
     assert intent is not None and intent.side == "BUY"
     events = db.query(OrderEvent).filter(OrderEvent.order_id == order.id).all()

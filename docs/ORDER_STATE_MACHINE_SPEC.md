@@ -102,6 +102,9 @@ SUBMITTING 또는 CANCEL_PENDING 또는 REPLACE_PENDING
 | STM-024 | 재동기화가 끝나지 않으면 `RECONCILING`을 유지하고 사용자에게 경보한다. |
 | STM-025 | worker 시작 시 `CREATED`는 미송신 대기 주문으로 유지할 수 있지만 `SUBMITTING`·`UNKNOWN`은 재전송하지 않고 Broker 대조 대상으로 처리한다. |
 | STM-026 | polling은 한 cycle에 한 주문만 `CREATED`에서 가져오며 DB row lock과 Active worker fencing을 모두 통과해야 한다. |
+| STM-027 | 신규매수 미체결 timeout은 Broker 접수 시 계산한 `next_action_at`으로 영속화한다. 재시작 후에도 같은 시각을 사용하고 취소 요청을 다시 보내지 않는다. |
+| STM-028 | 취소 API의 정상 접수는 원주문 체결 완료가 아니다. 원주문은 `CANCEL_PENDING`을 유지하고 WebSocket 또는 계좌 조회가 실제 취소 잔량을 확인한 뒤에만 `CANCELLED`가 된다. |
+| STM-029 | 취소 API의 명시적 업무 거절 또는 응답 불명확 결과는 자동 재요청하지 않는다. 각각 `RECONCILING` 또는 `UNKNOWN`으로 보존하고 Broker 조회를 통해서만 다음 상태를 확정한다. |
 
 ### 3.5 키움 API 매핑
 

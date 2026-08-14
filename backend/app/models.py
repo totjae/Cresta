@@ -41,7 +41,9 @@ class User(Base):
     lockout_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
     totp: Mapped[TotpCredential] = relationship(back_populates="user", uselist=False)
 
@@ -140,7 +142,9 @@ class AuthRateLimit(Base):
     failure_count: Mapped[int] = mapped_column(Integer, default=0)
     lockout_level: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 class AuditLog(Base):
@@ -156,7 +160,9 @@ class AuditLog(Base):
     user_agent: Mapped[str | None] = mapped_column(String(256))
     correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
     metadata_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
 
 
 class ConfigurationVersion(Base):
@@ -230,9 +236,7 @@ class DecisionInputSnapshot(Base):
     market_snapshot_id: Mapped[str] = mapped_column(
         ForeignKey("market_snapshots.id"), nullable=False
     )
-    indicator_snapshot_id: Mapped[str | None] = mapped_column(
-        ForeignKey("indicator_snapshots.id")
-    )
+    indicator_snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("indicator_snapshots.id"))
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     data_quality: Mapped[str] = mapped_column(String(24), nullable=False)
     session_state: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -406,9 +410,7 @@ class EmergencyStop(Base):
     __table_args__ = (
         UniqueConstraint("account_alias", name="uq_emergency_stops_account"),
         CheckConstraint("level = 'PAUSE_ENTRY'", name="ck_emergency_stops_level"),
-        CheckConstraint(
-            "state IN ('ACTIVE','RELEASED')", name="ck_emergency_stops_state"
-        ),
+        CheckConstraint("state IN ('ACTIVE','RELEASED')", name="ck_emergency_stops_state"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
@@ -447,7 +449,9 @@ class TradingGate(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="STARTING")
     reason: Mapped[str | None] = mapped_column(String(256))
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
     __mapper_args__: ClassVar[dict[str, object]] = {
         "version_id_col": version,
@@ -467,7 +471,9 @@ class BrokerLease(Base):
     fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 class BrokerWorkerState(Base):
@@ -478,9 +484,7 @@ class BrokerWorkerState(Base):
             "'RECONCILING','READY','DEGRADED','STOPPED')",
             name="ck_broker_worker_states_state",
         ),
-        CheckConstraint(
-            "fencing_token > 0", name="ck_broker_worker_states_fencing_positive"
-        ),
+        CheckConstraint("fencing_token > 0", name="ck_broker_worker_states_fencing_positive"),
     )
 
     account_alias: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -494,7 +498,9 @@ class BrokerWorkerState(Base):
     last_reconciliation_run_id: Mapped[str | None] = mapped_column(String(36))
     last_error_code: Mapped[str | None] = mapped_column(String(64))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 class AnalysisSchedulerLease(Base):
@@ -608,7 +614,9 @@ class OrderIntent(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
-    order_group_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, default=uuid7)
+    order_group_id: Mapped[str] = mapped_column(
+        String(36), unique=True, nullable=False, default=uuid7
+    )
     account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
     environment: Mapped[str] = mapped_column(String(16), nullable=False, default="MOCK")
     symbol: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -620,7 +628,9 @@ class OrderIntent(Base):
     correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 class TradingOrder(Base):
@@ -643,6 +653,17 @@ class TradingOrder(Base):
         CheckConstraint("side IN ('BUY','SELL')", name="ck_orders_side"),
         CheckConstraint("order_type IN ('LIMIT','MARKET')", name="ck_orders_type"),
         CheckConstraint(
+            "unfilled_policy IN ('NONE','CANCEL')", name="ck_orders_unfilled_policy"
+        ),
+        CheckConstraint(
+            "fill_timeout_seconds >= 0", name="ck_orders_fill_timeout_nonnegative"
+        ),
+        CheckConstraint(
+            "reprice_attempts >= 0 AND max_reprice_attempts >= 0 "
+            "AND reprice_attempts <= max_reprice_attempts",
+            name="ck_orders_reprice_attempts_range",
+        ),
+        CheckConstraint(
             "status IN ('CREATED','VALIDATING','SUBMITTING','ACKNOWLEDGED','OPEN',"
             "'PARTIALLY_FILLED','FILLED','CANCEL_PENDING','CANCELLED','REPLACE_PENDING',"
             "'REPLACED','REJECTED','UNKNOWN','RECONCILING')",
@@ -654,7 +675,9 @@ class TradingOrder(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
-    intent_id: Mapped[str] = mapped_column(ForeignKey("order_intents.id"), nullable=False, index=True)
+    intent_id: Mapped[str] = mapped_column(
+        ForeignKey("order_intents.id"), nullable=False, index=True
+    )
     order_group_id: Mapped[str] = mapped_column(String(36), nullable=False)
     parent_order_id: Mapped[str | None] = mapped_column(ForeignKey("orders.id"))
     account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -669,16 +692,25 @@ class TradingOrder(Base):
     cancelled_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     remaining_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="CREATED")
-    client_order_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, default=uuid7)
+    client_order_id: Mapped[str] = mapped_column(
+        String(36), nullable=False, unique=True, default=uuid7
+    )
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     broker_order_id: Mapped[str | None] = mapped_column(String(64))
     replacement_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unfilled_policy: Mapped[str] = mapped_column(String(16), nullable=False, default="NONE")
+    fill_timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_reprice_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reprice_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_action_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     trading_date: Mapped[date] = mapped_column(Date, nullable=False)
     correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
     __mapper_args__: ClassVar[dict[str, object]] = {
         "version_id_col": version,
@@ -731,9 +763,27 @@ class Position(Base):
     __table_args__ = (
         UniqueConstraint("account_alias", "symbol", name="uq_positions_account_symbol"),
         CheckConstraint("quantity >= 0", name="ck_positions_quantity_nonnegative"),
+        CheckConstraint(
+            "available_quantity >= 0 AND available_quantity <= quantity",
+            name="ck_positions_available_quantity_range",
+        ),
+        CheckConstraint(
+            "managed_quantity >= 0 AND managed_quantity <= quantity",
+            name="ck_positions_managed_quantity_range",
+        ),
+        CheckConstraint(
+            "managed_average_price >= 0", name="ck_positions_managed_average_nonnegative"
+        ),
         CheckConstraint("state IN ('OPEN','CLOSED')", name="ck_positions_state"),
         CheckConstraint(
-            "origin IN ('CRESTA_MANAGED','EXTERNAL')", name="ck_positions_origin"
+            "origin IN ('CRESTA_MANAGED','EXTERNAL','MIXED')", name="ck_positions_origin"
+        ),
+        CheckConstraint(
+            "state != 'OPEN' OR "
+            "(origin = 'EXTERNAL' AND managed_quantity = 0) OR "
+            "(origin = 'CRESTA_MANAGED' AND managed_quantity = quantity AND quantity > 0) OR "
+            "(origin = 'MIXED' AND managed_quantity > 0 AND managed_quantity < quantity)",
+            name="ck_positions_open_origin_matches_managed_quantity",
         ),
         Index("ix_positions_account_symbol", "account_alias", "symbol"),
     )
@@ -742,14 +792,21 @@ class Position(Base):
     account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
     symbol: Mapped[str] = mapped_column(String(16), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    average_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal(0))
-    state: Mapped[str] = mapped_column(String(24), nullable=False, default="CLOSED")
-    origin: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="CRESTA_MANAGED"
+    available_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    managed_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    average_price: Mapped[Decimal] = mapped_column(
+        Numeric(18, 4), nullable=False, default=Decimal(0)
     )
+    managed_average_price: Mapped[Decimal] = mapped_column(
+        Numeric(18, 4), nullable=False, default=Decimal(0)
+    )
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="CLOSED")
+    origin: Mapped[str] = mapped_column(String(24), nullable=False, default="CRESTA_MANAGED")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
     __mapper_args__: ClassVar[dict[str, object]] = {
         "version_id_col": version,
@@ -781,9 +838,7 @@ class RiskEvent(Base):
 
     __tablename__ = "risk_events"
     __table_args__ = (
-        CheckConstraint(
-            "state IN ('ACTIVE','RESOLVED')", name="ck_risk_events_state"
-        ),
+        CheckConstraint("state IN ('ACTIVE','RESOLVED')", name="ck_risk_events_state"),
         CheckConstraint(
             "severity IN ('INFO','WARNING','HIGH','CRITICAL')",
             name="ck_risk_events_severity",
@@ -799,9 +854,7 @@ class RiskEvent(Base):
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="ACTIVE")
     account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
     symbol: Mapped[str | None] = mapped_column(String(16))
-    input_snapshot_id: Mapped[str | None] = mapped_column(
-        ForeignKey("market_snapshots.id")
-    )
+    input_snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("market_snapshots.id"))
     input_json: Mapped[str] = mapped_column(Text, nullable=False)
     resolution: Mapped[str | None] = mapped_column(String(64))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -838,24 +891,18 @@ class StopTrigger(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
     account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
-    position_id: Mapped[str] = mapped_column(
-        ForeignKey("positions.id"), nullable=False
-    )
+    position_id: Mapped[str] = mapped_column(ForeignKey("positions.id"), nullable=False)
     position_version: Mapped[int] = mapped_column(Integer, nullable=False)
     symbol: Mapped[str] = mapped_column(String(16), nullable=False)
     market: Mapped[str] = mapped_column(String(16), nullable=False)
     risk_policy_version_id: Mapped[str | None] = mapped_column(String(36))
     stop_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     trigger_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
-    snapshot_id: Mapped[str | None] = mapped_column(
-        ForeignKey("market_snapshots.id")
-    )
+    snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("market_snapshots.id"))
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="PENDING")
     result_code: Mapped[str | None] = mapped_column(String(64))
     guard_evaluation_id: Mapped[str | None] = mapped_column(String(36))
-    risk_event_id: Mapped[str | None] = mapped_column(
-        ForeignKey("risk_events.id"), index=True
-    )
+    risk_event_id: Mapped[str | None] = mapped_column(ForeignKey("risk_events.id"), index=True)
     halt_scope: Mapped[str | None] = mapped_column(String(24))
     correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -932,7 +979,9 @@ class MarketStreamState(Base):
     cumulative_volume: Mapped[int | None] = mapped_column(BigInteger)
     quality: Mapped[str] = mapped_column(String(24), nullable=False, default="NORMAL")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
     __mapper_args__: ClassVar[dict[str, object]] = {
         "version_id_col": version,
@@ -996,9 +1045,7 @@ class MarketCalendarOverride(Base):
     created_by: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
-    revoked_by: Mapped[str | None] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT")
-    )
+    revoked_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -1007,25 +1054,15 @@ class VenueSelectionEvaluation(Base):
     __tablename__ = "venue_selection_evaluations"
     __table_args__ = (
         CheckConstraint("side IN ('BUY','SELL')", name="ck_venue_selection_side"),
-        CheckConstraint(
-            "order_type IN ('LIMIT','MARKET')", name="ck_venue_selection_order_type"
-        ),
-        CheckConstraint(
-            "urgency IN ('NORMAL','EMERGENCY')", name="ck_venue_selection_urgency"
-        ),
+        CheckConstraint("order_type IN ('LIMIT','MARKET')", name="ck_venue_selection_order_type"),
+        CheckConstraint("urgency IN ('NORMAL','EMERGENCY')", name="ck_venue_selection_urgency"),
         CheckConstraint(
             "selected_venue IN ('KRX','NXT','SOR','WAIT')",
             name="ck_venue_selection_selected_venue",
         ),
-        CheckConstraint(
-            "state IN ('SELECTED','WAIT')", name="ck_venue_selection_state"
-        ),
-        CheckConstraint(
-            "execution_stage = 'SHADOW'", name="ck_venue_selection_shadow_only"
-        ),
-        CheckConstraint(
-            "NOT order_creation_allowed", name="ck_venue_selection_no_order_creation"
-        ),
+        CheckConstraint("state IN ('SELECTED','WAIT')", name="ck_venue_selection_state"),
+        CheckConstraint("execution_stage = 'SHADOW'", name="ck_venue_selection_shadow_only"),
+        CheckConstraint("NOT order_creation_allowed", name="ck_venue_selection_no_order_creation"),
         CheckConstraint(
             "nxt_eligibility_status IN ('VERIFIED','INELIGIBLE','UNKNOWN')",
             name="ck_venue_selection_nxt_eligibility",
@@ -1081,9 +1118,7 @@ class VenueSelectionEvaluation(Base):
 class MinuteBar(Base):
     __tablename__ = "minute_bars"
     __table_args__ = (
-        UniqueConstraint(
-            "market", "symbol", "bucket_start", name="uq_minute_bars_stream_bucket"
-        ),
+        UniqueConstraint("market", "symbol", "bucket_start", name="uq_minute_bars_stream_bucket"),
         CheckConstraint("market IN ('KRX','NXT')", name="ck_minute_bars_market"),
         Index("ix_minute_bars_stream_bucket", "market", "symbol", "bucket_start"),
     )
@@ -1099,11 +1134,15 @@ class MinuteBar(Base):
     volume: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     turnover: Mapped[Decimal] = mapped_column(Numeric(28, 4), nullable=False, default=0)
     event_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    first_snapshot_id: Mapped[str] = mapped_column(ForeignKey("market_snapshots.id"), nullable=False)
+    first_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("market_snapshots.id"), nullable=False
+    )
     last_snapshot_id: Mapped[str] = mapped_column(ForeignKey("market_snapshots.id"), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
     __mapper_args__: ClassVar[dict[str, object]] = {
         "version_id_col": version,
@@ -1155,9 +1194,7 @@ class MarketContextSnapshot(Base):
             "source_tier IN ('PRIMARY','CONTRACTED')",
             name="ck_market_context_source_tier",
         ),
-        CheckConstraint(
-            "quality IN ('NORMAL','INCOMPLETE')", name="ck_market_context_quality"
-        ),
+        CheckConstraint("quality IN ('NORMAL','INCOMPLETE')", name="ck_market_context_quality"),
         Index(
             "ix_market_context_selection",
             "market",
@@ -1288,12 +1325,8 @@ class LlmModelProfile(Base):
 class LlmPromptProfile(Base):
     __tablename__ = "llm_prompt_profiles"
     __table_args__ = (
-        UniqueConstraint(
-            "owner_id", "role", "version_number", name="uq_llm_prompt_role_number"
-        ),
-        UniqueConstraint(
-            "owner_id", "role", "version_label", name="uq_llm_prompt_role_label"
-        ),
+        UniqueConstraint("owner_id", "role", "version_number", name="uq_llm_prompt_role_number"),
+        UniqueConstraint("owner_id", "role", "version_label", name="uq_llm_prompt_role_label"),
         CheckConstraint(
             "role IN ('TECHNICAL_SCOUT','NEWS_DISCLOSURE_SCOUT','MARKET_SECTOR_SCOUT',"
             "'POSITION_RISK_SCOUT','CORE')",
@@ -1339,9 +1372,7 @@ class LlmRoleRoute(Base):
             "state IN ('DRAFT','VALIDATED','ACTIVE','SUPERSEDED')",
             name="ck_llm_role_routes_state",
         ),
-        CheckConstraint(
-            "execution_stage = 'SHADOW'", name="ck_llm_role_routes_foundation_stage"
-        ),
+        CheckConstraint("execution_stage = 'SHADOW'", name="ck_llm_role_routes_foundation_stage"),
         CheckConstraint(
             "fallback_policy IN ('FAIL_STOP','FAILOVER')",
             name="ck_llm_role_routes_foundation_fallback",
@@ -1386,21 +1417,15 @@ class LlmRoleRoute(Base):
     primary_model_profile_id: Mapped[str] = mapped_column(
         ForeignKey("llm_model_profiles.id"), nullable=False, index=True
     )
-    fallback_model_profile_ids_json: Mapped[str] = mapped_column(
-        Text, nullable=False, default="[]"
-    )
-    fallback_policy: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="FAIL_STOP"
-    )
+    fallback_model_profile_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    fallback_policy: Mapped[str] = mapped_column(String(32), nullable=False, default="FAIL_STOP")
     execution_stage: Mapped[str] = mapped_column(String(24), nullable=False, default="SHADOW")
     timeout_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=120000)
     service_tier: Mapped[str] = mapped_column(String(16), nullable=False, default="DEFAULT")
     web_search_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     daily_call_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
-    daily_cost_limit_krw: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=0
-    )
+    daily_cost_limit_krw: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
     prompt_profile_id: Mapped[str | None] = mapped_column(
         ForeignKey("llm_prompt_profiles.id"), index=True
@@ -1464,9 +1489,7 @@ class LlmInvocation(Base):
     estimated_cost_krw: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     fallback_path_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    validation_status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="NOT_RUN"
-    )
+    validation_status: Mapped[str] = mapped_column(String(16), nullable=False, default="NOT_RUN")
     error_code: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1563,9 +1586,7 @@ class AgentStageRun(Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     dependency_roles_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     route_id: Mapped[str | None] = mapped_column(ForeignKey("llm_role_routes.id"))
-    invocation_id: Mapped[str | None] = mapped_column(
-        ForeignKey("llm_invocations.id"), unique=True
-    )
+    invocation_id: Mapped[str | None] = mapped_column(ForeignKey("llm_invocations.id"), unique=True)
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     output_json: Mapped[str | None] = mapped_column(Text)

@@ -124,7 +124,7 @@ SELECTED -> PRECHECK -> ENTRY_WATCH -> ENTRY_READY -> BUY_PENDING
 | users | id, email, password_hash, mfa_enabled |
 | instruments | symbol, name, market, tradable |
 | strategies | symbol, entry_mode, limits, stops, intervals, execution_policy, overnight_policy, version |
-| positions | symbol, quantity, average_price, high_watermark, stop_price, state, version |
+| positions | symbol, Broker total/available/average, Cresta managed quantity/average, origin, state, version |
 | decisions | purpose, model/version, input_snapshot_id, action, confidence, reasons, valid_until |
 | decision_executions | decision/rule source, action, execution mode/policy version, state, version |
 | guard_evaluations | phase, subject, result, rule results, input versions, valid_until |

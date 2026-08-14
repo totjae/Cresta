@@ -106,6 +106,17 @@ def _validate(request: OrderRequest) -> None:
         raise OrderCreationError("MARKET_PRICE_NOT_ALLOWED", 400)
 
 
+def _unfilled_policy(request: OrderRequest) -> tuple[str, int, int]:
+    """Return the first safe persisted policy for a newly created order.
+
+    Only entry BUY cancellation is enabled in this milestone. Exit repricing
+    stays disabled until cancel/fill races have broker evidence.
+    """
+    if request.side == "BUY" and request.action == "BUY":
+        return "CANCEL", 10, 0
+    return "NONE", 0, 0
+
+
 def create_order(
     db: Session,
     *,
@@ -146,6 +157,9 @@ def create_order(
     )
     db.add(intent)
     db.flush()
+    unfilled_policy, fill_timeout_seconds, max_reprice_attempts = _unfilled_policy(
+        request
+    )
     order = TradingOrder(
         intent_id=intent.id,
         order_group_id=intent.order_group_id,
@@ -161,6 +175,9 @@ def create_order(
         status="CREATED",
         idempotency_key=request.idempotency_key,
         request_hash=fingerprint,
+        unfilled_policy=unfilled_policy,
+        fill_timeout_seconds=fill_timeout_seconds,
+        max_reprice_attempts=max_reprice_attempts,
         trading_date=_trading_date(now),
         correlation_id=request.correlation_id,
     )

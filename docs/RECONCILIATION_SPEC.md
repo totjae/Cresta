@@ -288,11 +288,13 @@ reconciliation_run:
 | REC-083 | 키움 open order는 broker order ID를 자연키로 사용해 기존 주문 projection을 갱신하고, 내부에 없으면 `BROKER_IMPORTED` intent와 주문 projection을 생성한다. 같은 snapshot 재처리는 새 주문을 만들지 않는다. |
 | REC-084 | 키움 체결은 broker order ID, 종목·방향, 체결시각, 가격, 수량과 동일 항목의 occurrence를 포함한 결정론적 key로 멱등 저장한다. 체결 합계가 주문수량과 정확히 같고 broker open order에 없으면 주문을 `FILLED`로 종료한다. |
 | REC-085 | 체결 합계가 주문수량보다 작고 broker open order에도 없는 주문은 취소·거절·부분체결 종료를 추측하지 않는다. 확인된 체결만 반영하고 주문을 `RECONCILING`으로 유지해 거래를 차단한다. 체결 합계가 주문수량을 넘으면 projection을 적용하지 않고 critical mismatch로 처리한다. |
-| REC-086 | 키움 보유 snapshot에 있는 종목은 수량·평균단가를 자동 upsert한다. 내부에 없던 포지션은 `EXTERNAL` origin으로 생성하되 계좌 평가·중복매수 방지에는 즉시 포함한다. 기존 position origin은 자동 변경하지 않는다. |
+| REC-086 | 키움 보유 snapshot의 총수량·매도가능수량·평균단가는 Broker 기준으로 upsert한다. Cresta는 `BROKER_IMPORTED`가 아닌 자신의 확정 체결을 시간순으로 재생해 `managed_quantity`와 `managed_average_price`를 계산하고, 총수량과의 차이를 외부 수량으로 취급한다. |
 | REC-087 | 키움 보유 snapshot에 없지만 내부에서 `OPEN`인 position은 수량 0, 평균단가 0, `CLOSED`로 갱신한다. 변경 전후 값과 reconciliation run ID를 position event로 남긴다. |
 | REC-088 | projection 반영은 원본 AI 판단·승인·실행정책·주문 의도를 삭제하거나 다시 작성하지 않는다. 주문·체결·포지션의 Broker 사실과 별도 감사 event만 추가·갱신한다. |
 | REC-089 | projection 적용 후 동일 snapshot으로 재비교하고 잔여 critical mismatch가 있을 때는 `HALTED`를 유지한다. 모두 해소된 이전 OPEN mismatch는 `RESOLVED`와 해결 시각으로 갱신한다. |
 | REC-090 | snapshot 조회 또는 projection transaction이 실패하면 부분 반영을 성공으로 간주하지 않고 rollback하며 gate를 `DEGRADED/RECONCILIATION_FAILED`로 유지한다. |
+| REC-091 | OPEN position의 `origin`은 관리수량 0이면 `EXTERNAL`, 관리수량이 총수량과 같으면 `CRESTA_MANAGED`, 그 사이면 `MIXED`다. Broker 총수량이 계산된 관리수량보다 작으면 관리수량을 총수량으로 보수적으로 제한하고 자동 매도는 Broker 매도가능수량을 넘지 않는다. |
+| REC-092 | 외부 체결은 Cresta 관리수량을 늘리지 않는다. Cresta SELL 체결은 관리수량만 감소시키며 0이 되면 관리평균단가를 0으로 초기화한다. 같은 snapshot 재처리는 같은 체결 key와 같은 관리수량을 산출해야 한다. |
 
 ## 4. 오류·예외 또는 경계 조건
 

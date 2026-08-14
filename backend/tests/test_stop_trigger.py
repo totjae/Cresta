@@ -61,8 +61,12 @@ def _position(
         account_alias=ACCOUNT_ALIAS,
         symbol=symbol,
         quantity=quantity,
+        available_quantity=quantity,
         average_price=average_price,
+        managed_quantity=quantity,
+        managed_average_price=average_price,
         state=state,
+        origin="CRESTA_MANAGED",
     )
     db.add(position)
     db.flush()
@@ -173,9 +177,7 @@ def test_does_not_fire_when_bid_above_stop(db: Session, settings: Settings) -> N
     assert db.scalar(select(func.count()).select_from(StopTrigger)) == 0
 
 
-def test_fires_shadow_recorded_when_guard_passes(
-    db: Session, settings: Settings
-) -> None:
+def test_fires_shadow_recorded_when_guard_passes(db: Session, settings: Settings) -> None:
     _set_gate(db)
     _position(db, average_price=Decimal(50000))
     _snapshot(db, bid_price=Decimal(49000))
@@ -194,9 +196,7 @@ def test_fires_shadow_recorded_when_guard_passes(
     _assert_no_orders(db)
 
 
-def test_exit_pending_when_broker_not_ready(
-    db: Session, settings: Settings
-) -> None:
+def test_exit_pending_when_broker_not_ready(db: Session, settings: Settings) -> None:
     _set_gate(db, status="READY")
     _position(db, average_price=Decimal(50000))
     _snapshot(db, bid_price=Decimal(48000))
@@ -214,9 +214,7 @@ def test_exit_pending_when_broker_not_ready(
     _assert_no_orders(db)
 
 
-def test_exit_pending_recovers_to_shadow_recorded(
-    db: Session, settings: Settings
-) -> None:
+def test_exit_pending_recovers_to_shadow_recorded(db: Session, settings: Settings) -> None:
     _set_gate(db, status="RECONCILING")
     _position(db, average_price=Decimal(50000))
     _snapshot(db, bid_price=Decimal(48000))
@@ -363,9 +361,7 @@ def test_blocking_order_causes_exit_pending(db: Session, settings: Settings) -> 
     _assert_no_orders_not_injected(db)
 
 
-def test_risk_policy_default_used_when_unconfigured(
-    db: Session, settings: Settings
-) -> None:
+def test_risk_policy_default_used_when_unconfigured(db: Session, settings: Settings) -> None:
     _set_gate(db)
     _position(db, average_price=Decimal(50000))
     _snapshot(db, bid_price=Decimal(49000))
@@ -390,9 +386,7 @@ def test_risk_event_helper_create_and_resolve(db: Session, settings: Settings) -
     db.commit()
     assert event.state == "ACTIVE"
     assert active_risk_events(db, scope=RISK_EVENT_SCOPE_FIXED_STOP) == [event]
-    resolved = resolve_risk_event(
-        db, event.id, resolution="BROKER_RECOVERED", now=NOW
-    )
+    resolved = resolve_risk_event(db, event.id, resolution="BROKER_RECOVERED", now=NOW)
     db.commit()
     assert resolved is not None
     assert resolved.state == "RESOLVED"
@@ -456,9 +450,7 @@ def test_approval_only_auto_sell_creates_fulfilled_trigger_and_order(
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
 
 
-def test_shadow_stage_still_creates_no_sell_order(
-    db: Session, settings: Settings
-) -> None:
+def test_shadow_stage_still_creates_no_sell_order(db: Session, settings: Settings) -> None:
     """SHADOW stage keeps the trigger at SHADOW_RECORDED with zero orders."""
     # Default settings.execution_stage is SHADOW.
     _set_gate(db, "READY")
@@ -472,19 +464,43 @@ def test_shadow_stage_still_creates_no_sell_order(
     assert db.scalar(select(func.count()).select_from(StopTrigger)) == 1
 
 
-def test_external_position_not_auto_sold(
-    db: Session, settings: Settings
-) -> None:
+def test_external_position_not_auto_sold(db: Session, settings: Settings) -> None:
     """External positions are never auto-sold by the fixed-stop trigger."""
     settings.execution_stage = "APPROVAL_ONLY"
     _set_gate(db, "READY")
     position = _position(db, average_price=Decimal(50000), quantity=10)
     position.origin = "EXTERNAL"
+    position.managed_quantity = 0
+    position.managed_average_price = Decimal(0)
     db.flush()
     _snapshot(db, bid_price=Decimal(49000))
     run_fixed_stop_triggers(db, settings=settings, now=NOW)
     trigger = db.scalar(select(StopTrigger).where(StopTrigger.position_id == position.id))
     assert trigger is not None
     assert trigger.state == "EXIT_PENDING"
-    assert trigger.result_code == "POSITION_ORIGIN_CRESTA_MANAGED"
+    assert trigger.result_code == "POSITION_MANAGED_QUANTITY_POSITIVE"
     _assert_no_orders(db)
+
+
+def test_mixed_position_auto_sell_uses_only_managed_quantity(
+    db: Session, settings: Settings
+) -> None:
+    settings.execution_stage = "APPROVAL_ONLY"
+    _set_gate(db, "READY")
+    position = _position(db, average_price=Decimal(48000), quantity=10)
+    position.available_quantity = 8
+    position.managed_quantity = 3
+    position.managed_average_price = Decimal(50000)
+    position.origin = "MIXED"
+    db.flush()
+    _snapshot(db, bid_price=Decimal(49000))
+
+    run_fixed_stop_triggers(db, settings=settings, now=NOW)
+
+    trigger = db.scalar(select(StopTrigger).where(StopTrigger.position_id == position.id))
+    assert trigger is not None
+    assert trigger.stop_price == Decimal("49000.0000")
+    assert trigger.state == "FULFILLED"
+    order = db.scalar(select(TradingOrder).where(TradingOrder.side == "SELL"))
+    assert order is not None
+    assert order.requested_quantity == 3

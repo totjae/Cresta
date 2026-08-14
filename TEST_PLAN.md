@@ -1,5 +1,26 @@
 # Cresta 테스트 계획
 
+## 2026-08-14 신규매수 미체결 취소 1차
+
+- `T-ORD-LIFE-001`: BUY 주문 접수 시 10초 뒤 `next_action_at`이 영속되고 그 전에는 취소하지 않는다.
+- `T-ORD-LIFE-002`: timeout 뒤 잔량 전부를 대상으로 취소 요청을 정확히 한 번 보내고 정상 접수 후 `CANCEL_PENDING`을 유지한다.
+- `T-ORD-LIFE-003`: 부분체결 BUY는 실제 잔량만 취소하며 수량 불변조건을 유지한다.
+- `T-ORD-LIFE-004`: 취소 응답 유실은 `UNKNOWN`과 `ORDER_CANCEL_OUTCOME_UNKNOWN` gate를 만들고 자동 재요청하지 않는다.
+- `T-ORD-LIFE-005`: 명시적 취소 업무 거절은 `RECONCILING`으로 전환하고 원주문의 수량을 변경하지 않는다.
+- `T-ORD-LIFE-006`: SELL·종료 주문·미도래 주문은 첫 자동취소 대상에서 제외한다.
+
+Local evidence: migration `20260814_0037` upgrade→downgrade→upgrade, 관련 집중시험 43개, backend 전체 344개, Ruff, Frontend TypeScript·production build와 주문 원장 집중 component 시험이 통과했다. Frontend 전체 14개 중 기존 운영 휴장 비동기 시험 1개는 실패하고 13개가 통과했다. Ubuntu PostgreSQL migration과 실제 장중 `kt10003` 취소·부분체결 경쟁은 아직 미검증이다.
+
+### T-POS-MANAGED — Broker 총수량과 Cresta 관리수량 분리 (2026-08-14)
+
+- `T-POS-MANAGED-001`: Broker-only position은 총수량·매도가능수량·평균단가를 반영하고 관리수량 0, origin `EXTERNAL`인지 확인한다.
+- `T-POS-MANAGED-002`: Cresta BUY 체결 3주와 외부 보유 5주가 함께 있는 Broker 총수량 8주는 관리 3주·외부 5주·origin `MIXED`이며 같은 snapshot 재처리 결과와 event 수가 멱등인지 확인한다.
+- `T-POS-MANAGED-003`: 기존 Cresta 관리 attribution에 체결 이력이 없는 업그레이드 row는 보수적으로 보존·총수량 이내 제한되고, Broker 부재 시 모든 수량 필드가 0으로 닫히는지 확인한다.
+- `T-POS-MANAGED-004`: `MIXED` fixed stop은 관리평균단가로 발화하고 외부수량을 제외한 관리수량만 SELL 주문에 넣으며, 순수 `EXTERNAL`은 fail-closed인지 확인한다.
+- `T-POS-MANAGED-005`: 인증된 포지션 API와 Console이 총수량·매도가능수량·Broker 평균단가·관리수량·관리평균단가·외부수량·origin을 표시하는지 확인한다.
+
+Evidence: migration `20260814_0036` upgrade→downgrade→upgrade, backend 전체 337개 회귀, Ruff, Frontend TypeScript·포지션 집중 component 시험·production build 통과. Frontend 전체 14개 중 기존 운영 휴장 시험 1개는 비동기 timeout으로 실패했다. Ubuntu 적용과 실제 계좌 재분류는 대기 중이다.
+
 ### 2026-08-14 키움 projection Console 조회
 
 - `T-READ-001`: `KIWOOM_MOCK_PRIMARY`의 `EXTERNAL` OPEN 포지션이 인증된 `/positions` 목록·상세와 시스템 `open_positions` 집계에 포함되고, legacy `PAPER` 포지션 조회가 유지되는지 확인한다.
@@ -56,7 +77,7 @@ Evidence: 구현 시점 backend 전체 회귀 325개 통과(신규 20), Ruff lin
 - `T-APR-007`: `APPROVAL_ONLY` + `AUTOMATIC` BUY는 승인 없이 직접 `CREATED` 주문을 생성하고 Approval 0건인지 확인한다.
 - `T-STOP-SELL-001`: `APPROVAL_ONLY`에서 발화한 FIXED_STOP trigger가 `FULFILLED`로 전환되며 SELL `CREATED` 주문을 생성하는지 확인한다.
 - `T-STOP-SELL-002`: `SHADOW` 단계에서는 trigger가 `SHADOW_RECORDED`로 유지되고 주문 0건인지 확인한다.
-- `T-STOP-SELL-003`: `EXTERNAL` position은 자동 매도되지 않고 `EXIT_PENDING`(`POSITION_ORIGIN_CRESTA_MANAGED`)으로 차단되는지 확인한다.
+- `T-STOP-SELL-003`: `EXTERNAL` position은 자동 매도되지 않고 `EXIT_PENDING`(`POSITION_MANAGED_QUANTITY_POSITIVE`)으로 차단되며, `MIXED` position은 관리수량만 주문하는지 확인한다.
 - `T-PROV-001`: Position이 기본 `CRESTA_MANAGED`이고 `EXTERNAL` 태깅이 가능한지 확인한다.
 
 Evidence: 구현 시점 backend 전체 회귀 305개 통과(신규 16), Ruff lint 통과, migration `20260813_0034` upgrade→downgrade→upgrade 왕복 통과, Frontend TypeScript·14개 component 시험·production build 통과. 2026-08-13 장중 모의투자에서 승인 BUY가 `PENDING→APPROVED`, 주문이 `CREATED→VALIDATING→SUBMITTING→REJECTED`로 전이해 사용자 승인부터 Broker 송신까지 연결됨을 확인했다. 현재 주문 이벤트는 키움의 안전한 업무 거절 코드·사유를 보존하지 않으므로 거절 원인은 미확인이다. 최초 시험에서 확인된 stream 최신 snapshot과 판단 snapshot 간 승인 경쟁 조건은 `T-APR-SNAPSHOT` 구현으로 수정했으며 Ubuntu 장중 재검증은 대기 중이다. FIXED_STOP은 현재 매수호가가 손절가보다 높아 미발화가 정상임을 확인했지만, 실제 가격 도달 후 SELL 주문 송신·체결은 미검증이다. SHADOW 회귀는 `SHADOW_RECORDED`와 Approval·CREATED 주문 0건을 확인했다.
@@ -706,7 +727,7 @@ Local evidence (2026-08-12, 운영 override): 날짜·메타데이터 경계, �
 | T-REC-PROJ-002 | REC-084, DB-153 | 확정 전량체결 snapshot 반복 처리 | Fill 한 건과 `FILLED` 수량 불변식 유지 |
 | T-REC-PROJ-003 | REC-085 | 부분체결 후 open order 부재 | 확인 체결만 저장하고 `RECONCILING/HALTED` 유지 |
 | T-REC-PROJ-004 | REC-085 | 주문수량 초과 Broker 체결 | Fill·주문수량을 변경하지 않고 critical mismatch 유지 |
-| T-REC-PROJ-005 | REC-086, REC-087, DB-154 | 신규·변경·Broker 부재 position 처리 | `EXTERNAL` 신규 생성, 기존 origin 보존, 부재 row `CLOSED`와 event 기록 |
+| T-REC-PROJ-005 | REC-086, REC-087, REC-091~092, DB-154 | 신규·변경·Broker 부재 position 처리 | Broker 총량 반영, Cresta 체결 재생에 따른 `EXTERNAL/MIXED/CRESTA_MANAGED` 분류, 부재 row `CLOSED`와 event 기록 |
 | T-REC-PROJ-006 | REC-089 | mismatch가 다음 snapshot에서 해소됨 | 이전 OPEN mismatch가 `RESOLVED`와 해결시각으로 전환됨 |
 | T-REC-PROJ-007 | REC-090, DB-152 | 유효하지 않은 Broker 수량으로 projection 실패 | transaction rollback, run `FAILED`, gate `DEGRADED` |
 

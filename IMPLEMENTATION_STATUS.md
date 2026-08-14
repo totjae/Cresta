@@ -1,13 +1,27 @@
 # Cresta 구현 상태
 
+### 2026-08-14 신규매수 미체결 잔량 자동취소 1차
+
+- 승인형·자동 `BUY` 주문은 `CANCEL / 10초 / 시장가 전환 없음` 정책을 주문 row에 영속하고, Broker 접수 시 `next_action_at`을 계산한다. worker는 만료된 주문을 한 건씩 잠근 뒤 `CANCEL_PENDING`을 commit하고 실제 남은 수량만 `kt10003`으로 한 번 요청한다.
+- 정상 취소 응답도 완료로 오인하지 않고 `CANCEL_PENDING`을 유지한다. 다음 키움 계좌 snapshot에서 원주문이 미체결 목록에서 사라진 경우에만 늦은 체결을 먼저 반영하고 나머지를 `CANCELLED`로 확정한다. 응답 유실은 `UNKNOWN`, 명시적 거절은 `RECONCILING`으로 보존하고 거래 gate를 닫는다.
+- 주문 조회 API와 Console에 미체결 정책·timeout·재호가 횟수·다음 자동처리 시각을 추가했다. 손절·일반매도 재호가와 시장가 fallback, 종목 board·상품구분 기반 호가단위 보정은 아직 열지 않았다.
+- migration `20260814_0037` upgrade→downgrade→upgrade, 주문 송신·취소·부분체결·reconciliation 집중시험 43개, backend 전체 344개, Ruff, Frontend TypeScript·production build·집중 component 시험이 통과했다. 전체 회귀에서 발견한 기존 LLM fallback 호출 표시 순서도 primary→fallback으로 결정론화했다. Frontend 전체 14개 중 이번 변경과 무관한 기존 운영 휴장 비동기 시험 1개는 계속 실패하고 13개가 통과했다. 실제 Ubuntu PostgreSQL 적용과 장중 키움 취소 인수시험은 미수행 상태다.
+
+### 2026-08-14 Broker 권위 수량과 Cresta 관리수량 분리
+
+- 키움 snapshot의 `quantity`, `available_quantity`, `average_price`를 계좌의 최종 사실로 유지하면서, `BROKER_IMPORTED`가 아닌 Cresta 주문의 확정 체결만 재생해 `managed_quantity`와 `managed_average_price`를 별도로 계산한다. 총수량 중 관리수량이 0이면 `EXTERNAL`, 전부면 `CRESTA_MANAGED`, 일부면 `MIXED`로 분류하고 반복 reconciliation에서도 같은 결과를 낸다.
+- FIXED_STOP은 Broker 전체 평균단가가 아니라 Cresta 관리평균단가로 발화 가격을 계산하며, 자동 SELL 수량은 `min(managed_quantity, available_quantity)`를 넘지 않는다. 따라서 `MIXED`의 외부 보유분과 순수 `EXTERNAL` 포지션은 자동 매도하지 않는다.
+- `/positions`와 Console은 총수량·매도가능수량·Broker 평균단가·Cresta 관리수량·관리평균단가·외부수량을 함께 표시한다. Paper 체결은 전량 `CRESTA_MANAGED`로 유지한다.
+- migration `20260814_0036` upgrade→downgrade→upgrade, backend 전체 337개 회귀, Ruff, Frontend TypeScript·집중 component 시험·production build가 통과했다. Frontend 전체 14개 중 기존 운영 휴장 비동기 시험 1개는 이번 변경과 무관한 timeout으로 남아 있다. Ubuntu PostgreSQL 적용과 실제 키움 snapshot 재분류는 아직 수행하지 않았다.
+
 ### 2026-08-14 키움 projection Console 조회 보정
 
-- `/positions`와 대시보드 집계가 legacy `PAPER`에만 고정되어 키움 기준 `KIWOOM_MOCK_PRIMARY` 포지션을 숨기던 조회 경계를 수정했다. MOCK Console은 두 원장을 명시적으로 포함하며 포지션 관리 출처(`CRESTA_MANAGED`/`EXTERNAL`)를 화면에 표시한다.
+- `/positions`와 대시보드 집계가 legacy `PAPER`에만 고정되어 키움 기준 `KIWOOM_MOCK_PRIMARY` 포지션을 숨기던 조회 경계를 수정했다. MOCK Console은 두 원장을 명시적으로 포함하며 포지션 관리 출처를 화면에 표시한다.
 - backend 포지션·reconciliation 집중시험 20개, Ruff, 포지션 UI 집중시험과 TypeScript 검사가 통과했다. 전체 Frontend 14개 중 기존 운영 휴장 비동기 시험 1개는 이번 변경과 무관하게 timeout됐다. Ubuntu 서버에 `5e1e04e`를 배포해 API·Frontend·Nginx health와 worker `READY`, DB의 `KIWOOM_MOCK_PRIMARY / 005930 / 1주 / 269000원 / OPEN / EXTERNAL` projection을 확인했다.
 
 ### 2026-08-14 키움 Broker 기준 계좌 projection
 
-- 키움 모의·실거래 계좌에서는 키움 account snapshot을 주문·체결·포지션의 최종 사실로 삼고, Cresta DB를 운영용 projection으로 갱신하는 계층을 추가했다. Broker-only open order는 `BROKER_IMPORTED` intent와 함께 가져오고, position은 신규 `EXTERNAL` 생성·기존 origin 보존·Broker에 없어진 row의 `CLOSED` 전환을 수행한다.
+- 키움 모의·실거래 계좌에서는 키움 account snapshot을 주문·체결·포지션의 최종 사실로 삼고, Cresta DB를 운영용 projection으로 갱신하는 계층을 추가했다. Broker-only open order는 `BROKER_IMPORTED` intent와 함께 가져오고, Broker에 없어진 position row는 `CLOSED`로 전환한다. 관리수량과 origin의 현행 계산은 위 2026-08-14 후속 항목을 따른다.
 - 확정 체결은 결정론적 key로 멱등 저장한다. 전량체결은 주문을 `FILLED`로 종료하지만, 부분체결 후 open order에서 사라진 경우는 취소·거절을 추측하지 않고 `RECONCILING/HALTED`를 유지한다. 주문수량 초과 체결도 로컬 수량 불변식을 훼손하지 않고 mismatch로 차단한다.
 - projection과 같은 snapshot의 재비교, position/order 감사 event, 과거 mismatch의 `RESOLVED` 전환을 같은 transaction 경계에서 처리한다. projection 실패 시 부분 변경을 rollback하고 gate를 `DEGRADED/RECONCILIATION_FAILED`로 닫는다.
 - reconciliation 집중시험 14개, backend 전체 334개 시험, Ruff와 `git diff --check`가 로컬에서 통과했다. 2026-08-14 Ubuntu 모의투자 서버에 `9244edc`를 적용해 기존 주문 `0087482`를 `FILLED(1/1)`로 확정하고 키움 보유 1주를 `EXTERNAL` position으로 생성했으며, 기존 세 mismatch 유형을 모두 `RESOLVED`로 전환해 OPEN mismatch 0건과 worker `READY`를 확인했다. 첫 재기동 중 세 run은 원인 세부정보 없이 `FAILED` 후 자동 재연결됐지만 이후 startup·periodic 대조는 projection 변경 0건과 mismatch 0건으로 연속 성공했다. 실패 상세 원인 영속·관측 보강은 후속 운영 과제다.
@@ -38,7 +52,7 @@
 
 - 진입(BUY)과 손절 청산(FIXED_STOP SELL)을 한 쌍으로 열어 포지션이 무방비 상태로 남지 않게 했다. 두 경로는 공통 **Order Creation Service**(`app/order_creation.py`)를 공유하며, 생성된 `CREATED` 주문은 기존 Broker worker FIFO 송신기가 자동으로 키움 모의투자로 보낸다.
 - 승인형 BUY: `MANUAL_APPROVAL` 모드에서 Guard 통과 시 `Approval(PENDING)`을 만들고 주문은 생성하지 않는다. 유저가 승인하면 Guard·가격편차(`max_price_deviation_pct`)·position version을 재검사 후 `OrderIntent`+`TradingOrder(CREATED)`를 원자 생성한다. `AUTOMATIC` 모드는 승인 없이 직접 생성한다. 단, `execution_stage=SHADOW`에서는 여전 주문·승인 0건이고, `APPROVAL_ONLY`에서만 생성된다(기본값 `SHADOW`).
-- FIXED_STOP SELL 자동: 손절 trigger가 `SHADOW_RECORDED`에서 `FULFILLED`로 전환되며 매도 `TradingOrder(CREATED)`를 만든다. `execution_policy.fixed_stop_loss` 기본값이 `AUTOMATIC`이므로 `APPROVAL_ONLY`에서도 승인 없이 자동 발화한다. **Cresta-managed position만** 대상(`Position.origin == CRESTA_MANAGED`, 신규 컬럼)이며 외부 포지션은 `EXIT_PENDING`으로 차단된다.
+- FIXED_STOP SELL 자동: 손절 trigger가 `SHADOW_RECORDED`에서 `FULFILLED`로 전환되며 매도 `TradingOrder(CREATED)`를 만든다. `execution_policy.fixed_stop_loss` 기본값이 `AUTOMATIC`이므로 `APPROVAL_ONLY`에서도 승인 없이 자동 발화한다. 현행 대상과 수량은 origin 문자열이 아니라 `managed_quantity`로 제한하며 외부 보유분은 자동 주문하지 않는다.
 - 가격 산정은 이 milestone에서 간소화했다: BUY는 MARKETABLE_LIMIT(매도 1호가), 수량은 `entry_order_amount / 가격` 정수다. 호가단위 보정은 후속이며, 전체 Risk Guard(일일손실·spread·연결위험·전체 노출)는 후속 milestone #2에서 구현됐다.
 - 승인 API: `GET/POST /api/v1/approvals` (목록·상세·승인·거절, `require_csrf` + `Idempotency-Key`, TOTP 재인증 없음). Console DecisionsPage에 승인 카드·confirm-modal 추가.
 - 구현 시점 backend 전체 회귀 305개 통과(신규 16: order creation 4, approvals 7, stop trigger SELL 3, position provenance 2), Ruff lint 통과, migration `20260813_0034` upgrade→downgrade→upgrade 왕복 통과. Frontend TypeScript·14개 component 시험·production build 통과. 2026-08-13 Ubuntu 모의투자에서 `Approval(PENDING→APPROVED)`·BUY `CREATED→VALIDATING→SUBMITTING→REJECTED`까지 확인했다. 키움의 정확한 업무 거절 코드·사유는 현재 영속되지 않으므로 호가단위 문제로 확정하지 않는다. 실제 FIXED_STOP 가격 도달 후 SELL 송신·체결은 미검증이다. 당시 확인한 stream 최신 snapshot과 판단 snapshot 간 경쟁 조건은 2026-08-14 최신 snapshot 재검사 분리로 수정했다.

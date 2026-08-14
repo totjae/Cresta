@@ -209,8 +209,8 @@ describe("CrestaConsole authentication", () => {
       const path = String(input);
       if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-4", login_id: "admin", expires_at: "2026-08-01T09:00:00Z", csrf_token: "csrf-paper" });
       if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
-      if (path === "/api/v1/orders") return jsonResponse({ schema_version: "1.0", request_id: "orders-1", items: [] });
-      if (path === "/api/v1/positions") return jsonResponse({ schema_version: "1.0", request_id: "positions-1", items: [{ id: "position-1", account_alias: "KIWOOM_MOCK_PRIMARY", environment: "MOCK", market: "KRX", symbol: "005930", quantity: 1, average_price: "269000.0000", state: "OPEN", origin: "EXTERNAL", version: 1, created_at: "2026-08-14T00:00:00Z", updated_at: "2026-08-14T00:01:00Z" }] });
+      if (path === "/api/v1/orders") return jsonResponse({ schema_version: "1.0", request_id: "orders-1", items: [{ id: "order-1", order_group_id: "group-1", parent_order_id: null, symbol: "005930", market: "KRX", side: "BUY", order_type: "LIMIT", limit_price: "269000.0000", requested_quantity: 2, filled_quantity: 1, cancelled_quantity: 0, remaining_quantity: 1, status: "PARTIALLY_FILLED", environment: "MOCK", client_order_id: "client-1", broker_order_id: "1234567", replacement_sequence: 0, unfilled_policy: "CANCEL", fill_timeout_seconds: 10, max_reprice_attempts: 0, reprice_attempts: 0, next_action_at: "2026-08-14T00:01:10Z", trading_date: "2026-08-14", version: 2, created_at: "2026-08-14T00:01:00Z", updated_at: "2026-08-14T00:01:01Z" }] });
+      if (path === "/api/v1/positions") return jsonResponse({ schema_version: "1.0", request_id: "positions-1", items: [{ id: "position-1", account_alias: "KIWOOM_MOCK_PRIMARY", environment: "MOCK", market: "KRX", symbol: "005930", quantity: 1, available_quantity: 1, average_price: "269000.0000", managed_quantity: 0, managed_average_price: "0.0000", external_quantity: 1, state: "OPEN", origin: "EXTERNAL", version: 1, created_at: "2026-08-14T00:00:00Z", updated_at: "2026-08-14T00:01:00Z" }] });
       return jsonResponse({}, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -219,12 +219,17 @@ describe("CrestaConsole authentication", () => {
 
     expect(await screen.findByText("Paper Broker 조회 연결")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /승인·주문/ }));
-    expect(await screen.findByText("Paper 주문이 없습니다")).toBeInTheDocument();
+    expect(await screen.findByText("잔량 취소")).toBeInTheDocument();
+    expect(screen.getByText("2 / 1 / 0 / 1")).toBeInTheDocument();
     expect(screen.getByText("운영 화면에서 주문·체결을 생성하지 않습니다.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /주문 생성/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /보유 포지션/ }));
     expect(await screen.findByText("005930")).toBeInTheDocument();
+    expect(screen.getByText("총 보유 수량")).toBeInTheDocument();
+    expect(screen.getByText("매도 가능")).toBeInTheDocument();
+    expect(screen.getByText("Cresta 관리")).toBeInTheDocument();
+    expect(screen.getByText("외부 보유")).toBeInTheDocument();
     expect(screen.getByText("키움 외부 보유")).toBeInTheDocument();
   });
 });

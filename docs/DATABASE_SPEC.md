@@ -48,10 +48,10 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | `approvals` | id, execution_id, decision_id, status, scope_snapshot, expires_at, actor_id, reauth_id, version | execution당 최대 1개 |
 | `trading_gates` | account_alias, environment, status, reason, version, updated_at | 계좌별 1개, READY 전 주문 생성 금지 |
 | `order_intents` | id, execution_id, guard_evaluation_id, order_group_id, symbol, side, requested_quantity, action, config_version | execution당 최대 1개 |
-| `orders` | id, intent_id, parent_order_id, client_order_id, idempotency_key, broker_order_id, status, quantities | client/idempotency unique |
+| `orders` | id, intent_id, parent_order_id, client_order_id, idempotency_key, broker_order_id, status, quantities, unfilled_policy, fill_timeout_seconds, reprice_attempts, next_action_at | client/idempotency unique. 미체결 자동처리 시각과 횟수는 재시작 후에도 보존 |
 | `order_events` | id, order_id, event_type, source, source_key, payload_hash, occurred_at | source 중복 방지 |
 | `fills` | id, order_id, broker_fill_key, quantity, price, fee, tax, filled_at | broker fill 중복 방지 |
-| `positions` | id, account_alias, symbol, quantity, average_price, state, version | 활성 account+symbol unique. 발화 시점 stop_price는 `stop_triggers`에 고정하므로 Position 컬럼은 두지 않음 |
+| `positions` | id, account_alias, symbol, quantity, available_quantity, average_price, managed_quantity, managed_average_price, origin, state, version | account+symbol unique. Broker 총량과 Cresta 관리량을 분리하며 발화 시점 stop_price는 `stop_triggers`에 고정 |
 | `position_events` | id, position_id, cause_type, cause_id, before, after | 불변 원장 |
 | `risk_events` | id, scope, rule_code, severity, state, account_alias, symbol, input_snapshot_id, input_json, resolution, resolved_at, correlation_id | 범용 위험 원장. scope로 FIXED_STOP/DAILY_LOSS/SPREAD/CONNECTION 구분, ACTIVE→RESOLVED |
 | `stop_triggers` | id, account_alias, position_id, position_version, symbol, market, risk_policy_version_id, stop_price, trigger_price, snapshot_id, state, result_code, guard_evaluation_id, risk_event_id, halt_scope, version | 고정 손절 trigger 상태머신. (position_id, position_version, risk_policy_version_id) unique로 idempotency, EXIT_PENDING 영속 |
@@ -97,7 +97,7 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 | DB-029 | `READY` 전환과 worker 상태 갱신은 현재 lease owner와 fencing token 검증을 같은 transaction에서 통과해야 한다. |
 | DB-152 | 키움 연동 환경의 `orders`, `fills`, `positions`는 Broker account snapshot의 로컬 projection이다. projection 반영과 해당 run의 mismatch 계산은 하나의 DB transaction에서 수행한다. |
 | DB-153 | Broker에서 가져온 주문은 `environment + account_alias + broker_order_id`, 체결은 결정론적 `broker_fill_key`, position은 `account_alias + symbol` 제약으로 반복 snapshot에서도 멱등해야 한다. |
-| DB-154 | position projection 변경은 기존 `origin`을 유지하고 `position_events`에 reconciliation run ID와 변경 전후 값을 기록한다. Broker에 없어진 OPEN position도 row를 삭제하지 않고 `CLOSED`, 수량 0으로 보존한다. |
+| DB-154 | position은 Broker 기준 `quantity`, `available_quantity`, `average_price`와 Cresta 귀속 `managed_quantity`, `managed_average_price`를 함께 저장한다. `0 <= managed_quantity <= quantity`, `0 <= available_quantity <= quantity`를 강제하고 OPEN origin은 `CRESTA_MANAGED`, `EXTERNAL`, `MIXED` 중 수량 구성과 일치시킨다. 변경은 `position_events`에 reconciliation run ID와 전후 값을 기록한다. |
 | DB-155 | projection은 판단·승인·설정·order intent를 삭제하거나 의미 변경하지 않는다. Broker-only 주문에 필요한 intent는 `BROKER_IMPORTED`로 별도 생성하고 원래 Cresta intent와 구분한다. |
 
 권장 트랜잭션 격리 수준은 일반 명령 `READ COMMITTED`와 명시적 행 잠금이며, 계좌 소유권·설정 활성화처럼 경합이 적고 중요도가 높은 작업은 `SERIALIZABLE` 또는 동등한 낙관적 재시도를 사용한다.

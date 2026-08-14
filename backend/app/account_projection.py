@@ -96,7 +96,12 @@ def apply_broker_account_projection(
     open_broker_ids = {item.broker_order_id for item in snapshot.open_orders}
     for broker_id, total in fill_totals.items():
         order = orders.get(broker_id)
-        if order is None or broker_id in open_broker_ids or total > order.requested_quantity:
+        if (
+            order is None
+            or broker_id in open_broker_ids
+            or total > order.requested_quantity
+            or order.status == "CANCEL_PENDING"
+        ):
             continue
         before = _order_state(order)
         if total == order.requested_quantity:
@@ -104,6 +109,7 @@ def apply_broker_account_projection(
             order.cancelled_quantity = 0
             order.remaining_quantity = 0
             order.status = "FILLED"
+            order.next_action_at = None
         elif total > 0:
             order.filled_quantity = total
             order.cancelled_quantity = 0
@@ -121,9 +127,42 @@ def apply_broker_account_projection(
             )
             counts["updated_orders"] += 1
 
+    # A successfully acknowledged cancel is final only after the account
+    # snapshot no longer reports the original order. Apply any late fills
+    # first, then mark only the confirmed remainder as cancelled.
+    for broker_id, order in orders.items():
+        if order.status != "CANCEL_PENDING" or broker_id in open_broker_ids:
+            continue
+        total = fill_totals.get(broker_id, order.filled_quantity)
+        if total < 0 or total > order.requested_quantity:
+            continue
+        before = _order_state(order)
+        order.filled_quantity = total
+        order.remaining_quantity = 0
+        order.cancelled_quantity = order.requested_quantity - total
+        order.status = "FILLED" if total == order.requested_quantity else "CANCELLED"
+        order.next_action_at = None
+        if _order_state(order) != before:
+            order.version += 1
+            _add_order_event(
+                db,
+                order,
+                "BROKER_CANCEL_PROJECTED",
+                {
+                    "broker_order_id": broker_id,
+                    "filled_quantity": total,
+                    "cancelled_quantity": order.cancelled_quantity,
+                },
+                snapshot.observed_at,
+                correlation_id,
+            )
+            counts["updated_orders"] += 1
+
     _project_positions(db, snapshot, run_id, correlation_id, counts)
     db.flush()
-    return ProjectionResult(**{field: counts[field] for field in ProjectionResult.__dataclass_fields__})
+    return ProjectionResult(
+        **{field: counts[field] for field in ProjectionResult.__dataclass_fields__}
+    )
 
 
 def _orders_by_broker_id(db: Session) -> dict[str, TradingOrder]:
@@ -144,7 +183,10 @@ def _import_open_order(
     correlation_id: str,
 ) -> TradingOrder:
     cancelled = broker.requested_quantity - broker.filled_quantity - broker.remaining_quantity
-    if broker.requested_quantity <= 0 or min(broker.filled_quantity, broker.remaining_quantity, cancelled) < 0:
+    if (
+        broker.requested_quantity <= 0
+        or min(broker.filled_quantity, broker.remaining_quantity, cancelled) < 0
+    ):
         raise AccountProjectionError("Invalid broker open-order quantities")
     intent = OrderIntent(
         account_alias=ACCOUNT_ALIAS,
@@ -195,7 +237,10 @@ def _import_open_order(
 
 def _apply_open_order(order: TradingOrder, broker: BrokerOpenOrder) -> bool:
     cancelled = broker.requested_quantity - broker.filled_quantity - broker.remaining_quantity
-    if broker.requested_quantity <= 0 or min(broker.filled_quantity, broker.remaining_quantity, cancelled) < 0:
+    if (
+        broker.requested_quantity <= 0
+        or min(broker.filled_quantity, broker.remaining_quantity, cancelled) < 0
+    ):
         raise AccountProjectionError("Invalid broker open-order quantities")
     before = _order_state(order)
     order.symbol = broker.symbol
@@ -229,14 +274,24 @@ def _project_positions(
     for broker in snapshot.positions:
         broker_symbols.add(broker.symbol)
         position = internal.get(broker.symbol)
+        replayed = _replay_managed_position(db, broker.symbol)
+        managed_quantity, managed_average_price = _managed_projection(
+            position=position,
+            broker_quantity=broker.quantity,
+            replayed=replayed,
+        )
+        origin = _position_origin(broker.quantity, managed_quantity)
         if position is None:
             position = Position(
                 account_alias=ACCOUNT_ALIAS,
                 symbol=broker.symbol,
                 quantity=broker.quantity,
+                available_quantity=broker.available_quantity,
                 average_price=broker.average_price,
+                managed_quantity=managed_quantity,
+                managed_average_price=managed_average_price,
                 state="OPEN" if broker.quantity else "CLOSED",
-                origin="EXTERNAL",
+                origin=origin,
             )
             db.add(position)
             db.flush()
@@ -246,8 +301,13 @@ def _project_positions(
         before = _position_state(position)
         before_comparison = _position_comparison_state(position)
         position.quantity = broker.quantity
+        position.available_quantity = broker.available_quantity
         position.average_price = broker.average_price
+        position.managed_quantity = managed_quantity
+        position.managed_average_price = managed_average_price
         position.state = "OPEN" if broker.quantity else "CLOSED"
+        if broker.quantity:
+            position.origin = origin
         if _position_comparison_state(position) != before_comparison:
             position.version += 1
             _add_position_event(db, position, run_id, before, correlation_id)
@@ -258,11 +318,80 @@ def _project_positions(
             continue
         before = _position_state(position)
         position.quantity = 0
+        position.available_quantity = 0
         position.average_price = Decimal(0)
+        position.managed_quantity = 0
+        position.managed_average_price = Decimal(0)
         position.state = "CLOSED"
         position.version += 1
         _add_position_event(db, position, run_id, before, correlation_id)
         counts["closed_positions"] += 1
+
+
+def _replay_managed_position(db: Session, symbol: str) -> tuple[int, Decimal] | None:
+    """Replay only Cresta-originated fills for one account and symbol.
+
+    ``None`` means there is no retained Cresta fill history. That distinction
+    lets upgraded installations preserve a legacy managed attribution until a
+    real Cresta fill ledger exists, while new/external positions stay external.
+    """
+    rows = db.execute(
+        select(Fill, TradingOrder.side)
+        .join(TradingOrder, TradingOrder.id == Fill.order_id)
+        .join(OrderIntent, OrderIntent.id == TradingOrder.intent_id)
+        .where(
+            TradingOrder.account_alias == ACCOUNT_ALIAS,
+            TradingOrder.environment == ENVIRONMENT,
+            TradingOrder.symbol == symbol,
+            OrderIntent.action != "BROKER_IMPORTED",
+        )
+        .order_by(Fill.filled_at.asc(), Fill.id.asc())
+    ).all()
+    if not rows:
+        return None
+
+    quantity = 0
+    average_price = Decimal(0)
+    for fill, side in rows:
+        if side == "BUY":
+            new_quantity = quantity + fill.quantity
+            total_cost = average_price * quantity + fill.price * fill.quantity
+            average_price = total_cost / new_quantity
+            quantity = new_quantity
+        elif side == "SELL":
+            quantity = max(0, quantity - fill.quantity)
+            if quantity == 0:
+                average_price = Decimal(0)
+    return quantity, average_price
+
+
+def _managed_projection(
+    *,
+    position: Position | None,
+    broker_quantity: int,
+    replayed: tuple[int, Decimal] | None,
+) -> tuple[int, Decimal]:
+    if broker_quantity <= 0:
+        return 0, Decimal(0)
+    if replayed is None:
+        legacy_quantity = 0 if position is None else position.managed_quantity
+        legacy_average = Decimal(0) if position is None else position.managed_average_price
+        managed_quantity = min(max(0, legacy_quantity), broker_quantity)
+        return (
+            managed_quantity,
+            legacy_average if managed_quantity > 0 else Decimal(0),
+        )
+    quantity, average_price = replayed
+    managed_quantity = min(max(0, quantity), broker_quantity)
+    return managed_quantity, average_price if managed_quantity > 0 else Decimal(0)
+
+
+def _position_origin(quantity: int, managed_quantity: int) -> str:
+    if managed_quantity <= 0:
+        return "EXTERNAL"
+    if managed_quantity >= quantity:
+        return "CRESTA_MANAGED"
+    return "MIXED"
 
 
 def _add_order_event(
@@ -275,12 +404,15 @@ def _add_order_event(
 ) -> None:
     payload_hash = _hash(payload)
     source_key = f"{order.broker_order_id}:{event_type}:{payload_hash[:32]}"
-    if db.scalar(
-        select(OrderEvent.id).where(
-            OrderEvent.source == EVENT_SOURCE,
-            OrderEvent.source_key == source_key,
+    if (
+        db.scalar(
+            select(OrderEvent.id).where(
+                OrderEvent.source == EVENT_SOURCE,
+                OrderEvent.source_key == source_key,
+            )
         )
-    ) is not None:
+        is not None
+    ):
         return
     db.add(
         OrderEvent(
@@ -375,7 +507,11 @@ def _position_state(position: Position) -> dict[str, object]:
     return {
         "symbol": position.symbol,
         "quantity": position.quantity,
+        "available_quantity": position.available_quantity,
         "average_price": format(position.average_price, "f"),
+        "managed_quantity": position.managed_quantity,
+        "managed_average_price": format(position.managed_average_price, "f"),
+        "external_quantity": position.quantity - position.managed_quantity,
         "state": position.state,
         "origin": position.origin,
     }
@@ -385,7 +521,10 @@ def _position_comparison_state(position: Position) -> tuple[object, ...]:
     return (
         position.symbol,
         position.quantity,
+        position.available_quantity,
         position.average_price,
+        position.managed_quantity,
+        position.managed_average_price,
         position.state,
         position.origin,
     )

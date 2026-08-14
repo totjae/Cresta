@@ -120,7 +120,11 @@ def _latest_krx_snapshot(db: Session, symbol: str) -> MarketSnapshot | None:
 
 
 def _sell_quantity_available(
-    db: Session, account_alias: str, symbol: str, position_quantity: int
+    db: Session,
+    account_alias: str,
+    symbol: str,
+    managed_quantity: int,
+    broker_available_quantity: int,
 ) -> int:
     reserved = db.scalar(
         select(func.coalesce(func.sum(TradingOrder.remaining_quantity), 0)).where(
@@ -130,7 +134,20 @@ def _sell_quantity_available(
             TradingOrder.status.in_(ACTIVE_SELL_STATES),
         )
     )
-    return position_quantity - int(reserved or 0)
+    broker_sellable_managed = min(managed_quantity, broker_available_quantity)
+    return max(0, broker_sellable_managed - int(reserved or 0))
+
+
+def _managed_quantity(position: Position) -> int:
+    return max(0, int(position.managed_quantity))
+
+
+def _managed_average_price(position: Position) -> Decimal:
+    if _managed_quantity(position) > 0:
+        return Decimal(position.managed_average_price)
+    # Purely external positions may still produce a blocked trigger for audit
+    # visibility. They can never pass POSITION_MANAGED_QUANTITY_POSITIVE.
+    return Decimal(position.average_price)
 
 
 def _has_blocking_order(db: Session, account_alias: str, symbol: str) -> bool:
@@ -176,8 +193,13 @@ def _sell_guard_rules(
     now: datetime,
 ) -> list[dict[str, object]]:
     gate = db.get(TradingGate, trigger.account_alias)
+    managed_quantity = _managed_quantity(position)
     sellable = _sell_quantity_available(
-        db, trigger.account_alias, trigger.symbol, position.quantity
+        db,
+        trigger.account_alias,
+        trigger.symbol,
+        managed_quantity,
+        position.available_quantity,
     )
     blocking_order = _has_blocking_order(db, trigger.account_alias, trigger.symbol)
     fresh = bool(
@@ -185,8 +207,7 @@ def _sell_guard_rules(
         and snapshot.quality == "NORMAL"
         and snapshot.trading_status == "TRADING"
         and (_utc(snapshot.received_at) - now).total_seconds() <= 0
-        and (now - _utc(snapshot.received_at)).total_seconds()
-        <= risk_policy.quote_stale_seconds
+        and (now - _utc(snapshot.received_at)).total_seconds() <= risk_policy.quote_stale_seconds
     )
     session = classify_session(now)
     return [
@@ -196,12 +217,12 @@ def _sell_guard_rules(
             position.version == trigger.position_version,
         ),
         _rule(
-            "POSITION_ORIGIN_CRESTA_MANAGED",
-            getattr(position, "origin", "CRESTA_MANAGED") == "CRESTA_MANAGED",
+            "POSITION_MANAGED_QUANTITY_POSITIVE",
+            managed_quantity > 0,
         ),
         _rule(
             "SELL_QUANTITY_AVAILABLE",
-            sellable >= position.quantity,
+            sellable >= managed_quantity,
         ),
         _rule(
             "BROKER_READY",
@@ -234,14 +255,18 @@ def _trigger_input_record(
     now: datetime,
 ) -> dict[str, object]:
     return {
-        "schema_version": "fixed-stop-input-v1",
+        "schema_version": "fixed-stop-input-v2",
         "policy_version": STOP_POLICY_VERSION,
         "account_alias": ACCOUNT_ALIAS,
         "position_id": position.id,
         "position_version": position.version,
         "symbol": position.symbol,
-        "average_price": str(position.average_price),
-        "quantity": position.quantity,
+        "broker_average_price": str(position.average_price),
+        "managed_average_price": str(position.managed_average_price),
+        "total_quantity": position.quantity,
+        "available_quantity": position.available_quantity,
+        "managed_quantity": position.managed_quantity,
+        "external_quantity": position.quantity - position.managed_quantity,
         "stop_loss_pct": str(risk_policy.fixed_stop_loss_pct),
         "risk_policy_version_id": risk_policy_version_id,
         "stop_price": str(stop_price),
@@ -267,9 +292,7 @@ def _persist_guard_evaluation(
         subject_type="STOP_TRIGGER",
         subject_id=trigger.id,
         result="BLOCKED" if blocked else "PASSED",
-        rule_results_json=json.dumps(
-            rules, separators=(",", ":"), sort_keys=True
-        ),
+        rule_results_json=json.dumps(rules, separators=(",", ":"), sort_keys=True),
         halt_scope="ENTRY_HALT" if blocked else None,
         snapshot_id=snapshot.id if snapshot else None,
         position_version=trigger.position_version,
@@ -295,9 +318,7 @@ def _existing_active_trigger(
             StopTrigger.position_id == position_id,
             StopTrigger.position_version == position_version,
             StopTrigger.risk_policy_version_id == risk_policy_version_id,
-            StopTrigger.state.in_(
-                ("PENDING", "SHADOW_RECORDED", "EXIT_PENDING")
-            ),
+            StopTrigger.state.in_(("PENDING", "SHADOW_RECORDED", "EXIT_PENDING")),
         )
     )
 
@@ -325,9 +346,7 @@ def _supersede_stale_triggers(
             select(StopTrigger).where(
                 StopTrigger.position_id == position_id,
                 StopTrigger.risk_policy_version_id == risk_policy_version_id,
-                StopTrigger.state.in_(
-                    ("PENDING", "SHADOW_RECORDED", "EXIT_PENDING")
-                ),
+                StopTrigger.state.in_(("PENDING", "SHADOW_RECORDED", "EXIT_PENDING")),
             )
         )
     )
@@ -335,9 +354,7 @@ def _supersede_stale_triggers(
     for trigger in stale:
         _supersede(trigger)
         if trigger.risk_event_id:
-            resolve_risk_event(
-                db, trigger.risk_event_id, resolution="SUPERSEDED", now=resolved_at
-            )
+            resolve_risk_event(db, trigger.risk_event_id, resolution="SUPERSEDED", now=resolved_at)
 
 
 def _evaluate_position(
@@ -369,7 +386,7 @@ def _evaluate_position(
         )
 
     stop_price = compute_stop_price(
-        position.average_price, risk_policy.fixed_stop_loss_pct
+        _managed_average_price(position), risk_policy.fixed_stop_loss_pct
     )
     input_record = _trigger_input_record(
         position=position,
@@ -450,10 +467,7 @@ def _evaluate_position(
     blocked = guard.result == "BLOCKED"
 
     if blocked:
-        rule_code = str(
-            next((r["code"] for r in rules if r["result"] == "BLOCKED"), "BLOCKED"
-            )
-        )
+        rule_code = str(next((r["code"] for r in rules if r["result"] == "BLOCKED"), "BLOCKED"))
         event = create_risk_event(
             db,
             scope=RISK_EVENT_SCOPE_FIXED_STOP,
@@ -509,7 +523,8 @@ def _emit_fixed_stop_order(
 ) -> None:
     """Create the CREATED SELL order for a firing fixed-stop trigger.
 
-    Uses the best bid (MARKETABLE_LIMIT sell) and the full position quantity.
+    Uses the best bid (MARKETABLE_LIMIT sell) and only the Cresta-managed
+    quantity. Broker-external shares in a MIXED position are never included.
     On success the trigger becomes FULFILLED and its risk event is resolved. If
     order creation fails the trigger stays EXIT_PENDING so the next tick retries.
     """
@@ -520,7 +535,7 @@ def _emit_fixed_stop_order(
         trigger.result_code = "NO_FRESH_EXECUTABLE_KRX_QUOTE"
         return
     price = snapshot.best_bid_price
-    quantity = position.quantity
+    quantity = _managed_quantity(position)
     request = OrderRequest(
         symbol=position.symbol,
         market="KRX",
@@ -567,9 +582,7 @@ def _emit_fixed_stop_order(
     trigger.state = "FULFILLED"
     trigger.result_code = "ORDER_CREATED"
     if trigger.risk_event_id:
-        resolve_risk_event(
-            db, trigger.risk_event_id, resolution="ORDER_CREATED", now=now
-        )
+        resolve_risk_event(db, trigger.risk_event_id, resolution="ORDER_CREATED", now=now)
 
 
 def _re_evaluate_trigger(
@@ -593,9 +606,7 @@ def _re_evaluate_trigger(
     if position.state != "OPEN" or position.quantity <= 0:
         _supersede(trigger)
         if trigger.risk_event_id:
-            resolve_risk_event(
-                db, trigger.risk_event_id, resolution="POSITION_CLOSED", now=now
-            )
+            resolve_risk_event(db, trigger.risk_event_id, resolution="POSITION_CLOSED", now=now)
         return
 
     rules = _sell_guard_rules(
@@ -619,11 +630,7 @@ def _re_evaluate_trigger(
     blocked = guard.result == "BLOCKED"
 
     if blocked:
-        rule_code = str(
-            next(
-                (r["code"] for r in rules if r["result"] == "BLOCKED"), "BLOCKED"
-            )
-        )
+        rule_code = str(next((r["code"] for r in rules if r["result"] == "BLOCKED"), "BLOCKED"))
         if trigger.risk_event_id is None:
             event = create_risk_event(
                 db,
@@ -648,9 +655,7 @@ def _re_evaluate_trigger(
         trigger.result_code = rule_code
     else:
         if trigger.risk_event_id:
-            resolve_risk_event(
-                db, trigger.risk_event_id, resolution="BROKER_RECOVERED", now=now
-            )
+            resolve_risk_event(db, trigger.risk_event_id, resolution="BROKER_RECOVERED", now=now)
         if _should_auto_sell(settings, snapshot):
             _emit_fixed_stop_order(
                 db,
@@ -756,7 +761,7 @@ def recover_exit_pending(
             continue
         snapshot = _latest_krx_snapshot(db, trigger.symbol)
         stop_price = compute_stop_price(
-            position.average_price, risk_policy.fixed_stop_loss_pct
+            _managed_average_price(position), risk_policy.fixed_stop_loss_pct
         )
         _re_evaluate_trigger(
             db,

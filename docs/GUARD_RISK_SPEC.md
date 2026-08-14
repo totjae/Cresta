@@ -249,6 +249,7 @@ PARTIAL_SELL | FULL_SELL | FIXED_STOP
 | GRD-092 | 초안 생성 시 모든 수치 범위와 금액 순서를 서버에서 검증하고 공백이 아닌 변경 사유를 요구한다. 잘못된 값을 보정해 저장하지 않는다. |
 | GRD-093 | 활성화는 초안 생성 당시의 active version과 현재 version이 같을 때만 원자적으로 수행하며 이전 ACTIVE는 `SUPERSEDED`로 보존한다. |
 | GRD-094 | 첫 UI는 사용자 기본 위험 설정만 편집한다. 종목별 override·현재 포지션 영향 미리보기·장중 위험 완화 재인증은 별도 후속 단계 전까지 제공하지 않으며 이를 활성화된 기능으로 표시하지 않는다. |
+| GRD-095 | 자동 SELL은 `managed_quantity > 0`인 수량만 대상으로 하며 `min(managed_quantity, available_quantity)`를 넘지 않는다. `MIXED` position의 외부 수량은 자동 매도하지 않고, 손절 기준가격은 Broker 전체 평균이 아니라 `managed_average_price`를 사용한다. |
 
 ## 4. 오류·예외 또는 경계 조건
 

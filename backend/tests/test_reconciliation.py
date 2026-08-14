@@ -112,6 +112,9 @@ def test_external_order_and_position_are_projected_from_broker(db: Session) -> N
     position = db.scalar(select(Position).where(Position.account_alias == ACCOUNT_ALIAS))
     assert position is not None
     assert position.quantity == 10
+    assert position.available_quantity == 10
+    assert position.managed_quantity == 0
+    assert position.managed_average_price == Decimal(0)
     assert position.origin == "EXTERNAL"
 
 
@@ -120,7 +123,10 @@ def test_position_quantity_and_average_price_follow_broker_projection(db: Sessio
         account_alias=ACCOUNT_ALIAS,
         symbol="005930",
         quantity=5,
+        available_quantity=5,
         average_price=Decimal(69000),
+        managed_quantity=5,
+        managed_average_price=Decimal(69000),
         state="OPEN",
     )
     db.add(internal)
@@ -138,8 +144,11 @@ def test_position_quantity_and_average_price_follow_broker_projection(db: Sessio
     assert result.mismatch_count == 0
     db.refresh(internal)
     assert internal.quantity == 7
+    assert internal.available_quantity == 6
     assert internal.average_price == Decimal(70000)
-    assert internal.origin == "CRESTA_MANAGED"
+    assert internal.managed_quantity == 5
+    assert internal.managed_average_price == Decimal(69000)
+    assert internal.origin == "MIXED"
     event = db.scalar(select(PositionEvent).where(PositionEvent.position_id == internal.id))
     assert event is not None
     assert event.cause_id == result.run_id
@@ -187,7 +196,10 @@ def test_projection_failure_rolls_back_and_degrades_gate(db: Session) -> None:
     gate = db.get(TradingGate, ACCOUNT_ALIAS)
     assert gate is not None
     assert gate.status == "DEGRADED"
-    assert db.scalar(select(TradingOrder).where(TradingOrder.broker_order_id == "invalid-order")) is None
+    assert (
+        db.scalar(select(TradingOrder).where(TradingOrder.broker_order_id == "invalid-order"))
+        is None
+    )
 
 
 def _internal_order(
@@ -235,9 +247,7 @@ def _internal_order(
 
 
 @pytest.mark.parametrize("status", ["CREATED", "VALIDATING"])
-def test_unsent_order_is_not_expected_in_broker_snapshot(
-    db: Session, status: str
-) -> None:
+def test_unsent_order_is_not_expected_in_broker_snapshot(db: Session, status: str) -> None:
     _internal_order(db, status, f"{status.lower()}-not-visible")
 
     result = run_kiwoom_reconciliation(
@@ -252,9 +262,7 @@ def test_unsent_order_is_not_expected_in_broker_snapshot(
 
 
 @pytest.mark.parametrize("status", ["SUBMITTING", "UNKNOWN"])
-def test_uncertain_sent_order_halts_without_automatic_resend(
-    db: Session, status: str
-) -> None:
+def test_uncertain_sent_order_halts_without_automatic_resend(db: Session, status: str) -> None:
     _internal_order(db, status, f"uncertain-{status.lower()}")
 
     result = run_kiwoom_reconciliation(
@@ -266,9 +274,7 @@ def test_uncertain_sent_order_halts_without_automatic_resend(
     assert result.gate_status == "HALTED"
     assert result.critical_mismatch_count == 1
     mismatch = db.scalar(
-        select(ReconciliationMismatch).where(
-            ReconciliationMismatch.run_id == result.run_id
-        )
+        select(ReconciliationMismatch).where(ReconciliationMismatch.run_id == result.run_id)
     )
     assert mismatch is not None
     assert mismatch.code == "INTERNAL_ORDER_MISSING_BROKER"
@@ -312,9 +318,106 @@ def test_exact_broker_fill_closes_order_and_is_idempotent(db: Session) -> None:
     assert len(db.scalars(select(OrderEvent).where(OrderEvent.order_id == order.id)).all()) == 1
     position = db.scalar(select(Position).where(Position.symbol == "005930"))
     assert position is not None
-    assert len(
-        db.scalars(select(PositionEvent).where(PositionEvent.position_id == position.id)).all()
-    ) == 1
+    assert position.managed_quantity == 2
+    assert position.managed_average_price == Decimal(70100)
+    assert position.origin == "CRESTA_MANAGED"
+    assert (
+        len(db.scalars(select(PositionEvent).where(PositionEvent.position_id == position.id)).all())
+        == 1
+    )
+
+
+def test_cancel_pending_absent_from_open_orders_confirms_only_unfilled_remainder(
+    db: Session,
+) -> None:
+    order = _internal_order(
+        db,
+        "CANCEL_PENDING",
+        "cancel-confirmed",
+        quantity=3,
+        broker_order_id="broker-cancelled",
+    )
+    snapshot = BrokerAccountSnapshot(
+        open_orders=(),
+        fills=(
+            BrokerFillSummary(
+                broker_order_id="broker-cancelled",
+                symbol="005930",
+                side="BUY",
+                quantity=1,
+                price=Decimal(70000),
+                fee=Decimal(0),
+                tax=Decimal(0),
+                order_time="101530",
+            ),
+        ),
+        positions=(BrokerPosition("005930", 1, 1, Decimal(70000)),),
+        observed_at=NOW,
+    )
+
+    result = run_kiwoom_reconciliation(db, SnapshotClient(snapshot))
+
+    mismatch_codes = db.scalars(
+        select(ReconciliationMismatch.code).where(
+            ReconciliationMismatch.run_id == result.run_id
+        )
+    ).all()
+    assert (result.state, mismatch_codes) == ("SUCCEEDED", [])
+    db.refresh(order)
+    assert order.status == "CANCELLED"
+    assert (order.filled_quantity, order.cancelled_quantity, order.remaining_quantity) == (
+        1,
+        2,
+        0,
+    )
+    assert order.next_action_at is None
+
+
+def test_cresta_fill_and_external_shares_project_as_mixed_idempotently(
+    db: Session,
+) -> None:
+    order = _internal_order(
+        db,
+        "ACKNOWLEDGED",
+        "mixed-fill",
+        quantity=3,
+        broker_order_id="broker-mixed",
+    )
+    snapshot = BrokerAccountSnapshot(
+        open_orders=(),
+        fills=(
+            BrokerFillSummary(
+                broker_order_id="broker-mixed",
+                symbol="005930",
+                side="BUY",
+                quantity=3,
+                price=Decimal(70000),
+                fee=Decimal(0),
+                tax=Decimal(0),
+                order_time="101530",
+            ),
+        ),
+        positions=(BrokerPosition("005930", 8, 7, Decimal(68000)),),
+        observed_at=NOW,
+    )
+
+    run_kiwoom_reconciliation(db, SnapshotClient(snapshot))
+    run_kiwoom_reconciliation(db, SnapshotClient(snapshot))
+
+    db.refresh(order)
+    position = db.scalar(select(Position).where(Position.symbol == "005930"))
+    assert position is not None
+    assert position.quantity == 8
+    assert position.available_quantity == 7
+    assert position.average_price == Decimal(68000)
+    assert position.managed_quantity == 3
+    assert position.managed_average_price == Decimal(70000)
+    assert position.quantity - position.managed_quantity == 5
+    assert position.origin == "MIXED"
+    assert (
+        len(db.scalars(select(PositionEvent).where(PositionEvent.position_id == position.id)).all())
+        == 1
+    )
 
 
 def test_partial_fill_without_open_order_remains_halted(db: Session) -> None:
@@ -363,7 +466,10 @@ def test_broker_missing_position_is_closed_without_changing_origin(db: Session) 
         account_alias=ACCOUNT_ALIAS,
         symbol="005930",
         quantity=4,
+        available_quantity=4,
         average_price=Decimal(69000),
+        managed_quantity=4,
+        managed_average_price=Decimal(69000),
         state="OPEN",
         origin="CRESTA_MANAGED",
     )
@@ -376,7 +482,10 @@ def test_broker_missing_position_is_closed_without_changing_origin(db: Session) 
     db.refresh(position)
     assert position.state == "CLOSED"
     assert position.quantity == 0
+    assert position.available_quantity == 0
     assert position.average_price == Decimal(0)
+    assert position.managed_quantity == 0
+    assert position.managed_average_price == Decimal(0)
     assert position.origin == "CRESTA_MANAGED"
     event = db.scalar(select(PositionEvent).where(PositionEvent.position_id == position.id))
     assert event is not None

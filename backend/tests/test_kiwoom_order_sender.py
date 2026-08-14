@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -9,6 +9,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from app.broker.kiwoom import (
+    KiwoomCancelRequest,
     KiwoomOrderAcknowledgement,
     KiwoomOrderOutcomeUnknownError,
     KiwoomOrderRejectedError,
@@ -17,6 +18,7 @@ from app.broker.kiwoom import (
 from app.broker.order_sender import (
     KiwoomOrderSenderError,
     _next_created_order_statement,
+    cancel_next_expired_buy_once,
     send_new_order_once,
     send_next_created_order,
 )
@@ -29,9 +31,17 @@ class FakeOrderClient:
     def __init__(self, outcome: object) -> None:
         self.outcome = outcome
         self.requests: list[KiwoomOrderRequest] = []
+        self.cancel_requests: list[KiwoomCancelRequest] = []
 
     def place_order(self, request: KiwoomOrderRequest) -> KiwoomOrderAcknowledgement:
         self.requests.append(request)
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        assert isinstance(self.outcome, KiwoomOrderAcknowledgement)
+        return self.outcome
+
+    def cancel_order(self, request: KiwoomCancelRequest) -> KiwoomOrderAcknowledgement:
+        self.cancel_requests.append(request)
         if isinstance(self.outcome, Exception):
             raise self.outcome
         assert isinstance(self.outcome, KiwoomOrderAcknowledgement)
@@ -60,14 +70,18 @@ def persisted_order(
     account_alias: str = ACCOUNT_ALIAS,
     status: str = "CREATED",
     created_at: datetime | None = None,
+    side: str = "BUY",
+    action: str = "USER_APPROVED",
+    unfilled_policy: str = "NONE",
+    fill_timeout_seconds: int = 0,
 ) -> TradingOrder:
     intent = OrderIntent(
         account_alias=account_alias,
         environment="MOCK",
         symbol="005930",
         market="KRX",
-        side="BUY",
-        action="USER_APPROVED",
+        side=side,
+        action=action,
         requested_quantity=2,
         correlation_id="corr-order-send",
     )
@@ -80,7 +94,7 @@ def persisted_order(
         environment="MOCK",
         symbol="005930",
         market="KRX",
-        side="BUY",
+        side=side,
         order_type="LIMIT",
         limit_price=Decimal(70000),
         requested_quantity=2,
@@ -88,6 +102,8 @@ def persisted_order(
         status=status,
         idempotency_key=idempotency_key,
         request_hash="a" * 64,
+        unfilled_policy=unfilled_policy,
+        fill_timeout_seconds=fill_timeout_seconds,
         trading_date=date(2026, 8, 4),
         correlation_id="corr-order-send",
         **({"created_at": created_at} if created_at is not None else {}),
@@ -246,3 +262,159 @@ def test_polling_query_uses_postgresql_skip_locked() -> None:
     ).upper()
 
     assert "FOR UPDATE SKIP LOCKED" in sql
+
+
+def test_entry_buy_ack_schedules_cancel_and_only_cancels_after_timeout(db: Session) -> None:
+    identity = ready_worker(db)
+    order = persisted_order(
+        db,
+        action="BUY",
+        unfilled_policy="CANCEL",
+        fill_timeout_seconds=10,
+    )
+    now = datetime.now(UTC)
+    client = FakeOrderClient(KiwoomOrderAcknowledgement("1234567", "KRX"))
+
+    sent = send_new_order_once(db, client, identity, order.id, now=now)
+    persisted = db.get(TradingOrder, order.id)
+    assert sent.status == "ACKNOWLEDGED"
+    assert persisted is not None
+    assert persisted.next_action_at == now.replace(tzinfo=None) + timedelta(seconds=10)
+    assert cancel_next_expired_buy_once(
+        db, client, identity, now=now + timedelta(seconds=9)
+    ) is None
+
+    client.outcome = KiwoomOrderAcknowledgement(
+        "7654321", "KRX", original_order_id="1234567", affected_quantity=2
+    )
+    cancelled = cancel_next_expired_buy_once(
+        db, client, identity, now=now + timedelta(seconds=10)
+    )
+
+    assert cancelled is not None
+    assert cancelled.status == "CANCEL_PENDING"
+    assert cancelled.requested_quantity == 2
+    assert len(client.cancel_requests) == 1
+    assert client.cancel_requests[0].quantity == 2
+    assert cancel_next_expired_buy_once(
+        db, client, identity, now=now + timedelta(seconds=20)
+    ) is None
+    assert len(client.cancel_requests) == 1
+
+
+def test_partial_entry_buy_cancels_only_actual_remainder(db: Session) -> None:
+    identity = ready_worker(db)
+    now = datetime.now(UTC)
+    order = persisted_order(
+        db,
+        action="BUY",
+        unfilled_policy="CANCEL",
+        fill_timeout_seconds=10,
+    )
+    order.broker_order_id = "1234567"
+    order.status = "PARTIALLY_FILLED"
+    order.filled_quantity = 1
+    order.remaining_quantity = 1
+    order.next_action_at = now
+    db.commit()
+    client = FakeOrderClient(KiwoomOrderAcknowledgement("7654321", "KRX"))
+
+    result = cancel_next_expired_buy_once(db, client, identity, now=now)
+
+    assert result is not None
+    assert result.requested_quantity == 1
+    assert client.cancel_requests[0].quantity == 1
+    persisted = db.get(TradingOrder, order.id)
+    assert persisted is not None
+    assert (persisted.filled_quantity, persisted.cancelled_quantity, persisted.remaining_quantity) == (
+        1,
+        0,
+        1,
+    )
+
+
+def test_unknown_cancel_closes_gate_and_is_never_resent(db: Session) -> None:
+    identity = ready_worker(db)
+    now = datetime.now(UTC)
+    order = persisted_order(db, action="BUY", unfilled_policy="CANCEL")
+    order.broker_order_id = "1234567"
+    order.status = "OPEN"
+    order.next_action_at = now
+    db.commit()
+    client = FakeOrderClient(
+        KiwoomOrderOutcomeUnknownError("KIWOOM_ORDER_OUTCOME_UNKNOWN", "unknown")
+    )
+
+    result = cancel_next_expired_buy_once(db, client, identity, now=now)
+    repeated = cancel_next_expired_buy_once(
+        db, client, identity, now=now + timedelta(seconds=30)
+    )
+
+    assert result is not None and result.status == "UNKNOWN"
+    assert repeated is None
+    assert len(client.cancel_requests) == 1
+    gate = db.get(TradingGate, ACCOUNT_ALIAS)
+    assert gate is not None
+    assert (gate.status, gate.reason) == (
+        "RECONCILING",
+        "ORDER_CANCEL_OUTCOME_UNKNOWN",
+    )
+
+
+def test_explicit_cancel_rejection_preserves_quantities_and_requires_reconciliation(
+    db: Session,
+) -> None:
+    identity = ready_worker(db)
+    now = datetime.now(UTC)
+    order = persisted_order(db, action="BUY", unfilled_policy="CANCEL")
+    order.broker_order_id = "1234567"
+    order.status = "PARTIALLY_FILLED"
+    order.filled_quantity = 1
+    order.remaining_quantity = 1
+    order.next_action_at = now
+    db.commit()
+    client = FakeOrderClient(
+        KiwoomOrderRejectedError("KIWOOM_ORDER_REJECTED", "cancel rejected")
+    )
+
+    result = cancel_next_expired_buy_once(db, client, identity, now=now)
+
+    assert result is not None and result.status == "RECONCILING"
+    persisted = db.get(TradingOrder, order.id)
+    assert persisted is not None
+    assert (persisted.filled_quantity, persisted.cancelled_quantity, persisted.remaining_quantity) == (
+        1,
+        0,
+        1,
+    )
+    gate = db.get(TradingGate, ACCOUNT_ALIAS)
+    assert gate is not None
+    assert (gate.status, gate.reason) == ("RECONCILING", "ORDER_CANCEL_REJECTED")
+
+
+def test_sell_and_nonexpired_buy_are_not_auto_cancelled(db: Session) -> None:
+    identity = ready_worker(db)
+    now = datetime.now(UTC)
+    sell = persisted_order(
+        db,
+        idempotency_key="sell-not-cancelled",
+        side="SELL",
+        unfilled_policy="CANCEL",
+    )
+    sell.broker_order_id = "1234567"
+    sell.status = "OPEN"
+    sell.next_action_at = now
+    buy = persisted_order(
+        db,
+        idempotency_key="future-buy",
+        action="BUY",
+        unfilled_policy="CANCEL",
+    )
+    buy.broker_order_id = "2345678"
+    buy.status = "OPEN"
+    buy.next_action_at = now + timedelta(seconds=1)
+    db.commit()
+    client = FakeOrderClient(KiwoomOrderAcknowledgement("7654321", "KRX"))
+
+    assert cancel_next_expired_buy_once(db, client, identity, now=now) is None
+    assert client.cancel_requests == []

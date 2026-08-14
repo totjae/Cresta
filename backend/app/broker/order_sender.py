@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from sqlalchemy import select
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.broker.kiwoom import (
     KiwoomAdapterError,
+    KiwoomCancelRequest,
     KiwoomOrderAcknowledgement,
     KiwoomOrderOutcomeUnknownError,
     KiwoomOrderRejectedError,
@@ -25,6 +26,8 @@ from app.reconciliation import ACCOUNT_ALIAS
 class OrderClient(Protocol):
     def place_order(self, request: KiwoomOrderRequest) -> KiwoomOrderAcknowledgement: ...
 
+    def cancel_order(self, request: KiwoomCancelRequest) -> KiwoomOrderAcknowledgement: ...
+
 
 class KiwoomOrderSenderError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
@@ -37,6 +40,14 @@ class KiwoomSendResult:
     order_id: str
     status: str
     broker_order_id: str | None
+    sent: bool
+
+
+@dataclass(frozen=True)
+class KiwoomCancelResult:
+    order_id: str
+    status: str
+    requested_quantity: int
     sent: bool
 
 
@@ -170,6 +181,97 @@ def send_next_created_order(
     return _send_locked_order(db, client, identity, order, observed_at=observed_at)
 
 
+def cancel_next_expired_buy_once(
+    db: Session,
+    client: OrderClient,
+    identity: LeaseIdentity,
+    *,
+    now: datetime | None = None,
+) -> KiwoomCancelResult | None:
+    """Cancel at most one expired entry BUY remainder; never retries a request."""
+    observed_at = now or datetime.now(UTC)
+    order = db.scalar(
+        select(TradingOrder)
+        .where(
+            TradingOrder.account_alias == ACCOUNT_ALIAS,
+            TradingOrder.environment == "MOCK",
+            TradingOrder.side == "BUY",
+            TradingOrder.unfilled_policy == "CANCEL",
+            TradingOrder.status.in_(("ACKNOWLEDGED", "OPEN", "PARTIALLY_FILLED")),
+            TradingOrder.remaining_quantity > 0,
+            TradingOrder.next_action_at.is_not(None),
+            TradingOrder.next_action_at <= observed_at,
+        )
+        .order_by(TradingOrder.next_action_at, TradingOrder.created_at, TradingOrder.id)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+    if order is None:
+        db.rollback()
+        return None
+    _require_worker_ready(db, identity, now=observed_at)
+    if not order.broker_order_id:
+        order.next_action_at = None
+        _transition(db, order, "RECONCILING", occurred_at=observed_at)
+        _mark_gate_reconciling(db, "UNFILLED_ORDER_BROKER_ID_MISSING")
+        db.commit()
+        return KiwoomCancelResult(order.id, order.status, 0, False)
+
+    quantity = order.remaining_quantity
+    request = KiwoomCancelRequest(
+        original_order_id=order.broker_order_id,
+        symbol=order.symbol,
+        quantity=quantity,
+        market=order.market,
+    )
+    _transition(db, order, "CANCEL_PENDING", occurred_at=observed_at)
+    order.next_action_at = None
+    _event(
+        db,
+        order,
+        "UNFILLED_CANCEL_REQUESTED",
+        {"remaining_quantity": quantity, "policy": order.unfilled_policy},
+        occurred_at=observed_at,
+    )
+    db.commit()
+
+    try:
+        acknowledgement = client.cancel_order(request)
+    except KiwoomOrderOutcomeUnknownError:
+        return _finish_cancel(
+            db,
+            identity,
+            order.id,
+            quantity=quantity,
+            status="UNKNOWN",
+            event_type="ORDER_CANCEL_OUTCOME_UNKNOWN",
+            gate_reason="ORDER_CANCEL_OUTCOME_UNKNOWN",
+            occurred_at=observed_at,
+        )
+    except (KiwoomOrderRejectedError, KiwoomAdapterError):
+        return _finish_cancel(
+            db,
+            identity,
+            order.id,
+            quantity=quantity,
+            status="RECONCILING",
+            event_type="ORDER_CANCEL_REJECTED",
+            gate_reason="ORDER_CANCEL_REJECTED",
+            occurred_at=observed_at,
+        )
+
+    return _finish_cancel(
+        db,
+        identity,
+        order.id,
+        quantity=quantity,
+        status="CANCEL_PENDING",
+        event_type="ORDER_CANCEL_ACKNOWLEDGED",
+        occurred_at=observed_at,
+        cancel_broker_order_id=acknowledgement.broker_order_id,
+    )
+
+
 def _next_created_order_statement():
     return (
         select(TradingOrder)
@@ -268,6 +370,8 @@ def _finish_send(
     if broker_order_id is not None:
         order.broker_order_id = broker_order_id
     _transition(db, order, status, occurred_at=occurred_at)
+    if status == "ACKNOWLEDGED" and order.unfilled_policy == "CANCEL":
+        order.next_action_at = occurred_at + timedelta(seconds=order.fill_timeout_seconds)
     _event(
         db,
         order,
@@ -280,3 +384,49 @@ def _finish_send(
     db.commit()
     db.refresh(order)
     return KiwoomSendResult(order.id, order.status, order.broker_order_id, True)
+
+
+def _finish_cancel(
+    db: Session,
+    identity: LeaseIdentity,
+    order_id: str,
+    *,
+    quantity: int,
+    status: str,
+    event_type: str,
+    occurred_at: datetime,
+    gate_reason: str | None = None,
+    cancel_broker_order_id: str | None = None,
+) -> KiwoomCancelResult:
+    if not lease_is_current(db, identity):
+        db.rollback()
+        raise KiwoomOrderSenderError(
+            "WORKER_LEASE_LOST_AFTER_CANCEL", "Worker lease was lost after cancellation"
+        )
+    order = db.scalar(
+        select(TradingOrder).where(TradingOrder.id == order_id).with_for_update()
+    )
+    if order is None:
+        db.rollback()
+        raise KiwoomOrderSenderError("ORDER_NOT_FOUND", "Order does not exist")
+    if order.status != "CANCEL_PENDING":
+        db.rollback()
+        return KiwoomCancelResult(order.id, order.status, quantity, True)
+    if status != "CANCEL_PENDING":
+        _transition(db, order, status, occurred_at=occurred_at)
+    _event(
+        db,
+        order,
+        event_type,
+        {
+            "cancel_broker_order_id_present": cancel_broker_order_id is not None,
+            "requested_quantity": quantity,
+            "status": status,
+        },
+        occurred_at=occurred_at,
+    )
+    if gate_reason is not None:
+        _mark_gate_reconciling(db, gate_reason)
+    db.commit()
+    db.refresh(order)
+    return KiwoomCancelResult(order.id, order.status, quantity, True)

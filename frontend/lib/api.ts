@@ -347,6 +347,11 @@ export type OrderSummary = {
   client_order_id: string;
   broker_order_id: string | null;
   replacement_sequence: number;
+  unfilled_policy: "NONE" | "CANCEL";
+  fill_timeout_seconds: number;
+  max_reprice_attempts: number;
+  reprice_attempts: number;
+  next_action_at: string | null;
   trading_date: string;
   version: number;
   created_at: string;
@@ -365,9 +370,13 @@ export type PositionSummary = {
   market: string;
   symbol: string;
   quantity: number;
+  available_quantity: number;
   average_price: string;
+  managed_quantity: number;
+  managed_average_price: string;
+  external_quantity: number;
   state: string;
-  origin: "CRESTA_MANAGED" | "EXTERNAL";
+  origin: "CRESTA_MANAGED" | "EXTERNAL" | "MIXED";
   version: number;
   created_at: string;
   updated_at: string;

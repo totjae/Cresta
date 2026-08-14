@@ -258,12 +258,10 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     assert stored_routes["CORE"]["declared_output_schema_version"] == "agent-core-v1"
     assert stored_routes["CORE"]["effective_output_schema_version"] == "agent-core-v2"
     assert (
-        stored_routes["TECHNICAL_SCOUT"]["declared_output_schema_version"]
-        == "agent-assessment-v1"
+        stored_routes["TECHNICAL_SCOUT"]["declared_output_schema_version"] == "agent-assessment-v1"
     )
     assert (
-        stored_routes["TECHNICAL_SCOUT"]["effective_output_schema_version"]
-        == "agent-assessment-v2"
+        stored_routes["TECHNICAL_SCOUT"]["effective_output_schema_version"] == "agent-assessment-v2"
     )
     pending_auditor = next(
         stage for stage in body["stages"] if stage["role"] == "EVIDENCE_CANDIDATE_AUDITOR"
@@ -296,9 +294,7 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     assert completed_body["shadow_assessment"] == "UNKNOWN"
     assert completed_body["evidence_bundle"]["state"] == "PARTIAL"
     auditor = next(
-        stage
-        for stage in completed_body["stages"]
-        if stage["role"] == "EVIDENCE_CANDIDATE_AUDITOR"
+        stage for stage in completed_body["stages"] if stage["role"] == "EVIDENCE_CANDIDATE_AUDITOR"
     )
     assert auditor["state"] == "SUCCEEDED"
     assert auditor["invocation"] is None
@@ -311,16 +307,12 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     )
     assert sum(stage["invocation"] is not None for stage in completed_body["stages"]) == 2
     news = next(
-        stage
-        for stage in completed_body["stages"]
-        if stage["role"] == "NEWS_DISCLOSURE_SCOUT"
+        stage for stage in completed_body["stages"] if stage["role"] == "NEWS_DISCLOSURE_SCOUT"
     )
     assert news["state"] == "INSUFFICIENT_DATA"
     assert news["invocation"]["actual_provider"] == "CRESTA_MOCK"
     position_risk = next(
-        stage
-        for stage in completed_body["stages"]
-        if stage["role"] == "POSITION_RISK_SCOUT"
+        stage for stage in completed_body["stages"] if stage["role"] == "POSITION_RISK_SCOUT"
     )
     assert position_risk["state"] == "NOT_APPLICABLE"
     assert position_risk["output"]["stance"] == "UNKNOWN"
@@ -328,9 +320,7 @@ def test_diagnostic_agent_runtime_is_idempotent_and_never_trades(
     assert position_risk["output"]["exit_risk_score"] is None
     assert position_risk["invocation"] is None
     market_sector = next(
-        stage
-        for stage in completed_body["stages"]
-        if stage["role"] == "MARKET_SECTOR_SCOUT"
+        stage for stage in completed_body["stages"] if stage["role"] == "MARKET_SECTOR_SCOUT"
     )
     assert market_sector["state"] == "INSUFFICIENT_DATA"
     assert market_sector["invocation"] is None
@@ -384,7 +374,10 @@ def test_agent_context_and_position_snapshot_change_idempotency_key(
         account_alias="KIWOOM_MOCK_PRIMARY",
         symbol="005930",
         quantity=3,
+        available_quantity=3,
         average_price=Decimal(69500),
+        managed_quantity=3,
+        managed_average_price=Decimal(69500),
         state="OPEN",
     )
     db.add(position)
@@ -467,7 +460,10 @@ def test_stale_position_input_is_insufficient_without_provider_call(
             account_alias="KIWOOM_MOCK_PRIMARY",
             symbol="005930",
             quantity=3,
+            available_quantity=3,
             average_price=Decimal(69500),
+            managed_quantity=3,
+            managed_average_price=Decimal(69500),
             state="OPEN",
             created_at=stale_at,
             updated_at=stale_at,
@@ -509,7 +505,10 @@ def test_active_risk_policy_provenance_is_frozen_at_admission(
             account_alias="KIWOOM_MOCK_PRIMARY",
             symbol="005930",
             quantity=3,
+            available_quantity=3,
             average_price=Decimal(69500),
+            managed_quantity=3,
+            managed_average_price=Decimal(69500),
             state="OPEN",
         )
     )
@@ -635,7 +634,10 @@ def test_corrupted_position_snapshot_is_conflicted_and_core_is_unknown(
             account_alias="KIWOOM_MOCK_PRIMARY",
             symbol="005930",
             quantity=3,
+            available_quantity=3,
             average_price=Decimal(69500),
+            managed_quantity=3,
+            managed_average_price=Decimal(69500),
             state="OPEN",
         )
     )

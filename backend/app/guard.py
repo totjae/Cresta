@@ -22,6 +22,7 @@ from app.models import GuardEvaluation, Position
 
 CRESTA_MANAGED = "CRESTA_MANAGED"
 EXTERNAL = "EXTERNAL"
+MIXED = "MIXED"
 
 
 def rule(code: str, passed: bool) -> dict[str, object]:
@@ -37,12 +38,12 @@ def blocking_code(rules: list[dict[str, object]]) -> str:
 
 
 def is_cresta_managed(position: Position | None) -> bool:
-    """An automatic SELL target must be a Cresta-managed position.
+    """Return whether an automatic SELL has any Cresta-managed quantity.
 
-    External positions (entered outside Cresta, detected by reconciliation in
-    a later step) are never auto-sold by triggers.
+    A MIXED position is eligible only for its managed portion. Purely external
+    positions are never auto-sold by triggers.
     """
-    return position is not None and getattr(position, "origin", CRESTA_MANAGED) == CRESTA_MANAGED
+    return position is not None and int(getattr(position, "managed_quantity", 0)) > 0
 
 
 def persist_guard_evaluation(
