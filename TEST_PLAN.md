@@ -9,7 +9,7 @@
 - `T-ORD-LIFE-005`: 명시적 취소 업무 거절은 `RECONCILING`으로 전환하고 원주문의 수량을 변경하지 않는다.
 - `T-ORD-LIFE-006`: SELL·종료 주문·미도래 주문은 첫 자동취소 대상에서 제외한다.
 
-Local evidence: migration `20260814_0037` upgrade→downgrade→upgrade, 관련 집중시험 43개, backend 전체 344개, Ruff, Frontend TypeScript·production build와 주문 원장 집중 component 시험이 통과했다. Frontend 전체 14개 중 기존 운영 휴장 비동기 시험 1개는 실패하고 13개가 통과했다. Ubuntu PostgreSQL migration과 실제 장중 `kt10003` 취소·부분체결 경쟁은 아직 미검증이다.
+Evidence: migration `20260814_0037` upgrade→downgrade→upgrade, 관련 집중시험 43개, backend 전체 344개, Ruff, Frontend TypeScript·production build와 주문 원장 집중 component 시험이 통과했다. Frontend 전체 14개 중 기존 운영 휴장 비동기 시험 1개는 실패하고 13개가 통과했다. 2026-08-15 Ubuntu PostgreSQL migration, SHADOW 격리 관련 회귀, 주문 API 계약과 기존 주문의 `NONE/0` 보존을 확인했다. 실제 장중 `kt10003` 취소·부분체결 경쟁은 아직 미검증이다.
 
 ### T-POS-MANAGED — Broker 총수량과 Cresta 관리수량 분리 (2026-08-14)
 
@@ -19,7 +19,7 @@ Local evidence: migration `20260814_0037` upgrade→downgrade→upgrade, 관련 
 - `T-POS-MANAGED-004`: `MIXED` fixed stop은 관리평균단가로 발화하고 외부수량을 제외한 관리수량만 SELL 주문에 넣으며, 순수 `EXTERNAL`은 fail-closed인지 확인한다.
 - `T-POS-MANAGED-005`: 인증된 포지션 API와 Console이 총수량·매도가능수량·Broker 평균단가·관리수량·관리평균단가·외부수량·origin을 표시하는지 확인한다.
 
-Evidence: migration `20260814_0036` upgrade→downgrade→upgrade, backend 전체 337개 회귀, Ruff, Frontend TypeScript·포지션 집중 component 시험·production build 통과. Frontend 전체 14개 중 기존 운영 휴장 시험 1개는 비동기 timeout으로 실패했다. Ubuntu 적용과 실제 계좌 재분류는 대기 중이다.
+Evidence: migration `20260814_0036` upgrade→downgrade→upgrade, backend 전체 337개 회귀, Ruff, Frontend TypeScript·포지션 집중 component 시험·production build 통과. Frontend 전체 14개 중 기존 운영 휴장 시험 1개는 비동기 timeout으로 실패했다. 2026-08-15 Ubuntu 적용 후 키움 snapshot 재대조에서 `005930` 1주가 `managed=1/external=0/CRESTA_MANAGED`로 분류됐고 포지션 API 계약과 관련 회귀가 통과했다.
 
 ### 2026-08-14 키움 projection Console 조회
 

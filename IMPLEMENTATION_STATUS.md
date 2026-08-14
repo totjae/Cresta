@@ -5,14 +5,14 @@
 - 승인형·자동 `BUY` 주문은 `CANCEL / 10초 / 시장가 전환 없음` 정책을 주문 row에 영속하고, Broker 접수 시 `next_action_at`을 계산한다. worker는 만료된 주문을 한 건씩 잠근 뒤 `CANCEL_PENDING`을 commit하고 실제 남은 수량만 `kt10003`으로 한 번 요청한다.
 - 정상 취소 응답도 완료로 오인하지 않고 `CANCEL_PENDING`을 유지한다. 다음 키움 계좌 snapshot에서 원주문이 미체결 목록에서 사라진 경우에만 늦은 체결을 먼저 반영하고 나머지를 `CANCELLED`로 확정한다. 응답 유실은 `UNKNOWN`, 명시적 거절은 `RECONCILING`으로 보존하고 거래 gate를 닫는다.
 - 주문 조회 API와 Console에 미체결 정책·timeout·재호가 횟수·다음 자동처리 시각을 추가했다. 손절·일반매도 재호가와 시장가 fallback, 종목 board·상품구분 기반 호가단위 보정은 아직 열지 않았다.
-- migration `20260814_0037` upgrade→downgrade→upgrade, 주문 송신·취소·부분체결·reconciliation 집중시험 43개, backend 전체 344개, Ruff, Frontend TypeScript·production build·집중 component 시험이 통과했다. 전체 회귀에서 발견한 기존 LLM fallback 호출 표시 순서도 primary→fallback으로 결정론화했다. Frontend 전체 14개 중 이번 변경과 무관한 기존 운영 휴장 비동기 시험 1개는 계속 실패하고 13개가 통과했다. 실제 Ubuntu PostgreSQL 적용과 장중 키움 취소 인수시험은 미수행 상태다.
+- migration `20260814_0037` upgrade→downgrade→upgrade, 주문 송신·취소·부분체결·reconciliation 집중시험 43개, backend 전체 344개, Ruff, Frontend TypeScript·production build·집중 component 시험이 통과했다. 전체 회귀에서 발견한 기존 LLM fallback 호출 표시 순서도 primary→fallback으로 결정론화했다. Frontend 전체 14개 중 이번 변경과 무관한 기존 운영 휴장 비동기 시험 1개는 계속 실패하고 13개가 통과했다. 2026-08-15 Ubuntu PostgreSQL에 `0037`을 적용하고 SHADOW 격리 집중시험, 주문 API 계약, worker `READY`를 확인했다. 기존 주문 3건은 migration 안전 기본값인 `NONE/0`으로 보존됐다. 장중 키움 `kt10003` 취소·부분체결 경쟁 인수시험은 미수행 상태다.
 
 ### 2026-08-14 Broker 권위 수량과 Cresta 관리수량 분리
 
 - 키움 snapshot의 `quantity`, `available_quantity`, `average_price`를 계좌의 최종 사실로 유지하면서, `BROKER_IMPORTED`가 아닌 Cresta 주문의 확정 체결만 재생해 `managed_quantity`와 `managed_average_price`를 별도로 계산한다. 총수량 중 관리수량이 0이면 `EXTERNAL`, 전부면 `CRESTA_MANAGED`, 일부면 `MIXED`로 분류하고 반복 reconciliation에서도 같은 결과를 낸다.
 - FIXED_STOP은 Broker 전체 평균단가가 아니라 Cresta 관리평균단가로 발화 가격을 계산하며, 자동 SELL 수량은 `min(managed_quantity, available_quantity)`를 넘지 않는다. 따라서 `MIXED`의 외부 보유분과 순수 `EXTERNAL` 포지션은 자동 매도하지 않는다.
 - `/positions`와 Console은 총수량·매도가능수량·Broker 평균단가·Cresta 관리수량·관리평균단가·외부수량을 함께 표시한다. Paper 체결은 전량 `CRESTA_MANAGED`로 유지한다.
-- migration `20260814_0036` upgrade→downgrade→upgrade, backend 전체 337개 회귀, Ruff, Frontend TypeScript·집중 component 시험·production build가 통과했다. Frontend 전체 14개 중 기존 운영 휴장 비동기 시험 1개는 이번 변경과 무관한 timeout으로 남아 있다. Ubuntu PostgreSQL 적용과 실제 키움 snapshot 재분류는 아직 수행하지 않았다.
+- migration `20260814_0036` upgrade→downgrade→upgrade, backend 전체 337개 회귀, Ruff, Frontend TypeScript·집중 component 시험·production build가 통과했다. Frontend 전체 14개 중 기존 운영 휴장 비동기 시험 1개는 이번 변경과 무관한 timeout으로 남아 있다. 2026-08-15 Ubuntu PostgreSQL 적용과 키움 snapshot 재대조 후 `005930` 1주가 `managed_quantity=1`, `external_quantity=0`, `CRESTA_MANAGED`로 결정론적으로 재분류됐고 포지션 API 계약과 관련 집중시험이 통과했다.
 
 ### 2026-08-14 키움 projection Console 조회 보정
 
@@ -160,9 +160,9 @@
 | --- | --- | --- | --- |
 | 제품 범위와 실행 권한 | `docs/PRODUCT_REQUIREMENTS.md` | 구현 중 | 기본 행동 8종 mode 설정 구현; 거래/진단 판단 분리와 SHADOW→승인→MOCK 자동 단계 명세 완료, 실행 연결 미구현 |
 | 거래 세션과 감시 일정 | `docs/TRADING_SESSION_SPEC.md` | 명세 완료 | NXT는 키움 모의투자 검증 불가 |
-| 주문 가격과 미체결 처리 | `docs/ORDER_EXECUTION_SPEC.md` | 구현 중 | Paper와 키움 CREATED polling·ACK/REJECTED/UNKNOWN 구현; 승인형 BUY·FIXED_STOP SELL 주문 생성 연결(MARKETABLE_LIMIT 간소화, 호가단위 보정은 후속), 미체결 재호가·실제 전략 주문 미구현 |
+| 주문 가격과 미체결 처리 | `docs/ORDER_EXECUTION_SPEC.md` | 구현 중 | Paper와 키움 CREATED polling·ACK/REJECTED/UNKNOWN, 신규 BUY 접수 10초 후 잔량 1회 취소·snapshot 확정 구현; 승인형 BUY·FIXED_STOP SELL 주문 생성 연결(MARKETABLE_LIMIT 간소화, 호가단위 보정·매도 재호가는 후속), 실제 장중 취소 경쟁 미검증 |
 | 주문 상태 머신과 키움 매핑 | `docs/ORDER_STATE_MACHINE_SPEC.md` | 구현 중 | Paper·키움 송신 전이 구현; 승인 생명주기(PENDING→APPROVED/REJECTED/EXPIRED/INVALIDATED)·원자 주문 생성 구현, PARTIAL_SELL·FULL_SELL·TAKE_PROFIT 주문은 후속 |
-| 계좌·주문 재동기화 | `docs/RECONCILIATION_SPEC.md` | 구현 중 | snapshot 대조와 상시 worker READY·재시작 fencing은 실서버 통과; `00`·`04` 이벤트 즉시 gate 차단·debounce·BROKER_EVENT 대조 로컬 통과, 외부 포지션 `EXTERNAL` 태깅 설계 추가(자동 편입·실제 체결·장애주입 미검증) |
+| 계좌·주문 재동기화 | `docs/RECONCILIATION_SPEC.md` | 구현 중 | snapshot 대조와 상시 worker READY·재시작 fencing은 실서버 통과; `00`·`04` 이벤트 즉시 gate 차단·debounce·BROKER_EVENT 대조 로컬 통과, Broker 총수량과 Cresta 관리수량 분리·`EXTERNAL/MIXED/CRESTA_MANAGED` 재분류 실서버 통과(장애주입 미검증) |
 | 시스템 아키텍처 | `docs/SYSTEM_DESIGN.md` | 구현 중 | Backend·Console·gateway·키움 worker·AI scheduler·별도 Agent worker·Watch와 SHADOW 실행 구현; 공통 Order Creation Service·승인 경로·FIXED_STOP 자동 매도 연결 |
 | HTTP/WebSocket API | `docs/API_SPEC.md` | 구현 중 | 인증·상태·주문/체결·포지션·quote·승인 조회·승인/거절 구현; 거래 명령·stream 미구현 |
 | UI 콘셉트 참고자료 | `stitch_cresta_ai_intraday_trading_system/` | 참고자료 | 실제 Console 구현물이 아님 |
