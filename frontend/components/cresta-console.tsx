@@ -1085,8 +1085,74 @@ function LlmFoundationPanel({
   </section>;
 }
 
+type DecisionPageTab = "operations" | "advisory" | "diagnostic" | "history";
+
+const decisionPageTabs: Array<{ id: DecisionPageTab; label: string }> = [
+  { id: "operations", label: "운영 판단" },
+  { id: "advisory", label: "자동 포지션 분석" },
+  { id: "diagnostic", label: "수동 진단" },
+  { id: "history", label: "전체 이력" },
+];
+
+function compactReasons(reasons: string[]) {
+  const visible = reasons.slice(0, 3);
+  return `${visible.join(" · ")}${reasons.length > visible.length ? ` · +${reasons.length - visible.length}` : ""}`;
+}
+
+function DecisionHistoryList({
+  items,
+  title,
+  emptyTitle,
+}: {
+  items: DecisionData[];
+  title: string;
+  emptyTitle: string;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(12);
+  const orderedItems = [...items].sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+  const selected = orderedItems.find((item) => item.decision_id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (selectedId && !items.some((item) => item.decision_id === selectedId)) setSelectedId(null);
+  }, [items, selectedId]);
+
+  return <section className="panel decision-history-panel" aria-label={title}>
+    <div className="panel-head"><div><Bot size={18} /><span>{title}</span></div><span className="status-pill neutral">{items.length}건</span></div>
+    {items.length === 0 ? <div className="empty-state"><Bot size={24} /><h3>{emptyTitle}</h3><p>조건에 맞는 판단이 생성되면 최신순으로 표시됩니다.</p></div> : <>
+      <div className="decision-summary-list">
+        {orderedItems.slice(0, visibleCount).map((item) => {
+          const selectedRow = item.decision_id === selectedId;
+          return <button
+            type="button"
+            className={`decision-summary-row${selectedRow ? " active" : ""}`}
+            key={item.decision_id}
+            aria-expanded={selectedRow}
+            onClick={() => setSelectedId(selectedRow ? null : item.decision_id)}
+          >
+            <span className="decision-summary-main"><strong>{item.symbol} · {item.market}</strong><small>{item.purpose === "TRADING" ? "운영 판단" : "수동 Mock 진단"} · {formatDateTime(item.created_at)}</small></span>
+            <span className="decision-summary-action">{item.core.action}</span>
+            <span className="decision-summary-reasons">{compactReasons(item.core.reason_codes) || "근거 없음"}</span>
+            <OrderStatus status={item.execution?.state ?? item.execution_outcome ?? item.purpose} />
+            <ChevronRight className="decision-summary-chevron" size={17} aria-hidden="true" />
+          </button>;
+        })}
+      </div>
+      {visibleCount < items.length && <button className="secondary-button history-more" type="button" onClick={() => setVisibleCount((count) => count + 12)}>더 보기 · {items.length - visibleCount}건 남음</button>}
+      {selected && <article className="decision-detail" aria-label={`${selected.symbol} 판단 상세`}>
+        <div className="detail-head"><div><span className="card-label">DECISION DETAIL</span><h2>{selected.symbol} · {selected.core.action}</h2></div><button className="icon-button" type="button" onClick={() => setSelectedId(null)} aria-label="판단 상세 닫기"><X /></button></div>
+        <div className="detail-summary"><div><span>판단 목적</span><b>{selected.purpose}</b></div><div><span>실행 단계</span><b>{selected.execution?.stage ?? "진단 전용"}</b></div><div><span>실행 결과</span><b>{selected.execution?.state ?? selected.execution_outcome}</b></div><div><span>신뢰도</span><b>{Number(selected.core.confidence).toFixed(2)}</b></div></div>
+        <dl><div><dt>Scout</dt><dd>{selected.scout.trend_state} · {selected.scout.entry_score}점</dd></div><div><dt>입력 schema</dt><dd>{selected.input_schema_version ?? "legacy"}</dd></div><div><dt>지표 버전</dt><dd>{selected.indicator_calculator_version ?? "미준비"}</dd></div><div><dt>입력 hash</dt><dd className="mono">{selected.input_hash ? selected.input_hash.slice(0, 12) : "없음"}</dd></div><div><dt>snapshot</dt><dd className="mono">{selected.input_snapshot_id}</dd></div><div><dt>모델</dt><dd>{selected.model_id}</dd></div></dl>
+        <div className="decision-detail-reasons"><strong>전체 판단 근거</strong><p className="reason-codes">{selected.core.reason_codes.join(" · ") || "근거 없음"}</p></div>
+        <small>{formatDateTime(selected.created_at)} · {selected.decision_id}</small>
+      </article>}
+    </>}
+  </section>;
+}
+
 function DecisionsPage({ session, onSessionExpired }: { session: SessionData; onSessionExpired: () => void }) {
   const [items, setItems] = useState<DecisionData[]>([]);
+  const [tab, setTab] = useState<DecisionPageTab>("operations");
   const [symbol, setSymbol] = useState("005930");
   const [market, setMarket] = useState<"KRX" | "NXT">("KRX");
   const [busy, setBusy] = useState(false);
@@ -1119,10 +1185,21 @@ function DecisionsPage({ session, onSessionExpired }: { session: SessionData; on
     <PageHeading kicker="MOCK SCOUT · CORE" title="AI 판단" description="결정론적 Mock 모델로 판단 계약과 실행 권한 분기를 검증합니다." />
     <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> 이 화면의 진단 실행은 주문이나 승인을 생성하지 않습니다. 별도의 TRADING 판단만 실행 정책과 Guard를 거쳐 모의 주문 또는 승인을 생성합니다.</div>
     {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
-    <AgentRuntimePanel session={session} onSessionExpired={onSessionExpired} />
-    <section className="panel decision-control"><div className="panel-head"><div><Bot size={18} /><span>최신 snapshot 진단</span></div><span className="status-pill neutral">deterministic-mock-v2</span></div><form className="diagnostic-form" onSubmit={evaluate}><label htmlFor="decision-symbol">종목코드</label><input id="decision-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required /><label htmlFor="decision-market">시장</label><select id="decision-market" value={market} onChange={(event) => setMarket(event.target.value as "KRX" | "NXT")}><option value="KRX">KRX</option><option value="NXT">NXT</option></select><button className="primary-button" disabled={busy || symbol.length !== 6}>{busy ? "판단 중" : "Mock 판단 실행"}</button></form></section>
-    <section className="decision-grid">{items.length === 0 ? <article className="panel empty-state"><Bot size={26} /><h3>저장된 AI 판단이 없습니다</h3><p>최신 시세 snapshot이 준비된 종목으로 진단을 실행하세요.</p></article> : items.map((item) => <article className="panel decision-card" key={item.decision_id}><div className="panel-head"><div><Bot size={17} /><span>{item.symbol} · {item.market}</span></div><OrderStatus status={item.execution?.state ?? item.purpose} /></div><div className="decision-action"><strong>{item.core.action}</strong><span>confidence {Number(item.core.confidence).toFixed(2)}</span></div><dl><div><dt>Scout</dt><dd>{item.scout.trend_state} · {item.scout.entry_score}점</dd></div><div><dt>판단 목적</dt><dd>{item.purpose}</dd></div><div><dt>실행 단계</dt><dd>{item.execution?.stage ?? "진단 전용"}</dd></div><div><dt>실행 결과</dt><dd>{item.execution?.state ?? "실행 없음"}</dd></div><div><dt>입력 schema</dt><dd>{item.input_schema_version ?? "legacy"}</dd></div><div><dt>지표 버전</dt><dd>{item.indicator_calculator_version ?? "미준비"}</dd></div><div><dt>입력 hash</dt><dd className="mono">{item.input_hash ? item.input_hash.slice(0, 12) : "없음"}</dd></div><div><dt>snapshot</dt><dd className="mono">{item.input_snapshot_id}</dd></div></dl><p className="reason-codes">{item.core.reason_codes.join(" · ")}</p><small>{formatDateTime(item.created_at)} · {item.model_id}</small></article>)}</section>
-    <ApprovalsPanel session={session} onSessionExpired={onSessionExpired} />
+    <div className="llm-tabs decision-page-tabs" role="tablist" aria-label="AI 판단 분류">{decisionPageTabs.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)} role="tab" aria-selected={tab === item.id}>{item.label}</button>)}</div>
+    {tab === "operations" && <>
+      <DecisionHistoryList items={items.filter((item) => item.purpose === "TRADING")} title="운영 판단" emptyTitle="저장된 운영 판단이 없습니다" />
+      <ApprovalsPanel session={session} onSessionExpired={onSessionExpired} />
+    </>}
+    {tab === "advisory" && <AgentRuntimePanel session={session} onSessionExpired={onSessionExpired} view="advisory" />}
+    {tab === "diagnostic" && <>
+      <AgentRuntimePanel session={session} onSessionExpired={onSessionExpired} view="diagnostic" />
+      <section className="panel decision-control"><div className="panel-head"><div><Bot size={18} /><span>최신 snapshot 진단</span></div><span className="status-pill neutral">deterministic-mock-v2</span></div><form className="diagnostic-form" onSubmit={evaluate}><label htmlFor="decision-symbol">종목코드</label><input id="decision-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required /><label htmlFor="decision-market">시장</label><select id="decision-market" value={market} onChange={(event) => setMarket(event.target.value as "KRX" | "NXT")}><option value="KRX">KRX</option><option value="NXT">NXT</option></select><button className="primary-button" disabled={busy || symbol.length !== 6}>{busy ? "판단 중" : "Mock 판단 실행"}</button></form></section>
+      <DecisionHistoryList items={items.filter((item) => item.purpose === "DIAGNOSTIC")} title="수동 Mock 진단 이력" emptyTitle="저장된 수동 Mock 진단이 없습니다" />
+    </>}
+    {tab === "history" && <>
+      <AgentRuntimePanel session={session} onSessionExpired={onSessionExpired} view="all" />
+      <DecisionHistoryList items={items} title="전체 Decision 이력" emptyTitle="저장된 Decision이 없습니다" />
+    </>}
   </>;
 }
 
@@ -1208,9 +1285,11 @@ const agentRuntimeRoles = [
 function AgentRuntimePanel({
   session,
   onSessionExpired,
+  view,
 }: {
   session: SessionData;
   onSessionExpired: () => void;
+  view: "advisory" | "diagnostic" | "all";
 }) {
   const [runs, setRuns] = useState<AgentRunData[]>([]);
   const [routes, setRoutes] = useState<LlmRoleRoute[]>([]);
@@ -1221,6 +1300,8 @@ function AgentRuntimePanel({
   const [invocationOutputs, setInvocationOutputs] = useState<Record<string, AgentInvocationOutputData>>({});
   const [outputErrors, setOutputErrors] = useState<Record<string, string>>({});
   const [outputLoadingId, setOutputLoadingId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(12);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -1263,6 +1344,7 @@ function AgentRuntimePanel({
     try {
       const run = await agentApi.diagnostic(session.csrf_token, symbol, market, routeIds);
       setRuns((current) => [run, ...current.filter((item) => item.run_id !== run.run_id)]);
+      setSelectedRunId(run.run_id);
       setMessage(run.created ? "DIAGNOSTIC Agent run을 등록했습니다. Worker가 비동기로 실행하며 주문은 생성되지 않습니다." : "같은 입력의 기존 Agent run을 반환했습니다.");
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
@@ -1288,25 +1370,62 @@ function AgentRuntimePanel({
     }
   }
 
-  return <section className="panel execution-policy-panel" aria-labelledby="agent-runtime-title">
-    <div className="panel-head"><div><Bot size={18} /><span id="agent-runtime-title">Agent Worker v2</span></div><span className="status-pill neutral">비동기 · 모델 SHADOW</span></div>
-    <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> 수동 DIAGNOSTIC은 승인·주문을 만들지 않습니다. Scheduler의 POSITION advisory는 모델 결과를 SHADOW로 검증한 뒤 서버 결합 정책과 Guard를 통과한 경우에만 별도 판단으로 처리합니다.</div>
-    <form className="diagnostic-form" onSubmit={runDiagnostic}>
-      <label htmlFor="agent-symbol">Agent 종목코드</label><input id="agent-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required />
-      <label htmlFor="agent-market">Agent 시장</label><select id="agent-market" value={market} onChange={(event) => setMarket(event.target.value as "KRX" | "NXT")}><option value="KRX">KRX</option><option value="NXT">NXT</option></select>
-      <button className="primary-button" disabled={busy || symbol.length !== 6 || missingRoles.length > 0}>{busy ? "등록 중" : "DIAGNOSTIC DAG 등록"}</button>
-    </form>
-    <p className="policy-version-note">Route 준비: {agentRuntimeRoles.length - missingRoles.length}/{agentRuntimeRoles.length}{missingRoles.length ? ` · 누락 ${missingRoles.join(", ")}` : " · READY"}</p>
-    {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
-    <div className="decision-grid">{runs.map((run) => <article className="panel decision-card" key={run.run_id}>
-      <div className="panel-head"><div><Bot size={17} /><span>{run.symbol} · {run.market}</span></div><OrderStatus status={run.state} /></div>
-      <div className="decision-action"><strong>{run.core_action ? `실행 ${run.core_action}` : "-"}</strong><span>{run.dag_version}</span></div>
-      <dl><div><dt>SHADOW 평가</dt><dd>{run.shadow_assessment ?? "-"}</dd></div><div><dt>분석 맥락</dt><dd>{run.analysis_context ?? "LEGACY"}</dd></div><div><dt>목적</dt><dd>{run.purpose}</dd></div><div><dt>실행 경계</dt><dd>{run.purpose === "TRADING_ADVISORY" ? `${run.execution_stage} 모델 · 서버 결합 ${run.fusion_state ?? "PENDING"}` : `${run.execution_stage} · 주문 없음`}</dd></div>{run.purpose === "TRADING_ADVISORY" && <><div><dt>결합 정책</dt><dd>{run.fusion_policy_version ?? "-"}</dd></div><div><dt>결합 결과</dt><dd>{run.fusion_reason_code ?? run.fusion_state ?? "PENDING"}</dd></div></>}<div><dt>증거</dt><dd>{run.evidence_bundle?.state ?? "없음"}</dd></div><div><dt>시장·업종 입력</dt><dd>{run.market_context_snapshot_id ? "고정됨" : "없음"}</dd></div><div><dt>Stage</dt><dd>{run.stages.length}개</dd></div><div><dt>LLM 호출</dt><dd>{run.stages.reduce((count, stage) => count + stage.invocations.length, 0)}개</dd></div><div><dt>입력 hash</dt><dd className="mono">{run.input_hash.slice(0, 12)}</dd></div><div><dt>계약</dt><dd>{run.assessment_schema_version ?? "v1"} · {run.core_schema_version ?? "v1"} · {run.score_policy_version ?? "없음"} · {run.server_input_policy_version ?? "기존 입력"}</dd></div></dl>
-      <p className="reason-codes">{run.stages.map((stage) => `${stage.role}: ${stage.state === "NOT_APPLICABLE" ? "해당 없음" : stage.state}${stage.attempt_count ? ` (${stage.attempt_count}/${stage.max_attempts})` : ""}`).join(" · ")}</p>
-      <p className="reason-codes">{run.stages.filter((stage) => stage.output).map(agentStageOutputSummary).join(" · ") || "Stage 결과 없음"}</p>
-      <p className="reason-codes">{run.stages.flatMap((stage) => stage.invocations.map((invocation) => `${stage.role} #${invocation.attempt_number}: ${invocation.actual_provider ?? "Provider 미확인"} / ${invocation.actual_model ?? invocation.requested_model_alias ?? invocation.requested_model_profile_id ?? "모델 미확인"} · ${invocation.state} · schema ${invocation.validation_status} · ${invocation.latency_ms}ms${invocation.error_code ? ` · ${invocation.error_code}` : ""}`)).join(" · ") || "LLM 호출 이력 없음"}</p>
+  const filteredRuns = runs.filter((run) => view === "all"
+    || (view === "advisory" && run.purpose === "TRADING_ADVISORY")
+    || (view === "diagnostic" && run.purpose === "DIAGNOSTIC"))
+    .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+  const selectedRun = filteredRuns.find((run) => run.run_id === selectedRunId) ?? null;
+  const panelTitle = view === "advisory" ? "자동 포지션 분석" : view === "diagnostic" ? "수동 Agent 진단" : "전체 Agent 이력";
+
+  useEffect(() => {
+    setVisibleCount(12);
+    setSelectedRunId(null);
+  }, [view]);
+
+  return <section className="panel execution-policy-panel decision-history-panel" aria-labelledby={`agent-runtime-title-${view}`}>
+    <div className="panel-head"><div><Bot size={18} /><span id={`agent-runtime-title-${view}`}>{panelTitle}</span></div><span className="status-pill neutral">{filteredRuns.length}건 · 모델 SHADOW</span></div>
+    {view === "advisory" && <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> Scheduler가 만든 POSITION 분석만 표시합니다. `ESCALATED`는 주문 성공이 아니라 서버 결합 정책이 위험 대응을 강화했다는 뜻입니다.</div>}
+    {view === "diagnostic" && <>
+      <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> 수동 DIAGNOSTIC은 승인·주문을 만들지 않으며 자동 포지션 분석과 분리해 기록합니다.</div>
+      <form className="diagnostic-form" onSubmit={runDiagnostic}>
+        <label htmlFor="agent-symbol">Agent 종목코드</label><input id="agent-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required />
+        <label htmlFor="agent-market">Agent 시장</label><select id="agent-market" value={market} onChange={(event) => setMarket(event.target.value as "KRX" | "NXT")}><option value="KRX">KRX</option><option value="NXT">NXT</option></select>
+        <button className="primary-button" disabled={busy || symbol.length !== 6 || missingRoles.length > 0}>{busy ? "등록 중" : "DIAGNOSTIC DAG 등록"}</button>
+      </form>
+      <p className="policy-version-note">Route 준비: {agentRuntimeRoles.length - missingRoles.length}/{agentRuntimeRoles.length}{missingRoles.length ? ` · 누락 ${missingRoles.join(", ")}` : " · READY"}</p>
+      {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
+    </>}
+    {filteredRuns.length === 0 ? <div className="empty-state"><Bot size={24} /><h3>{view === "advisory" ? "자동 포지션 분석 이력이 없습니다" : "Agent 이력이 없습니다"}</h3><p>{view === "advisory" ? "장중 scheduler가 열린 포지션을 분석하면 이곳에 표시됩니다." : "조건에 맞는 Agent run이 생성되면 최신순으로 표시됩니다."}</p></div> : <>
+      <div className="decision-summary-list">
+        {filteredRuns.slice(0, visibleCount).map((run) => {
+          const selectedRow = run.run_id === selectedRunId;
+          const reasonCodes = run.stages.flatMap((stage) => Array.isArray(stage.output?.reason_codes) ? stage.output.reason_codes.filter((reason): reason is string => typeof reason === "string") : []);
+          return <button
+            type="button"
+            className={`decision-summary-row${selectedRow ? " active" : ""}`}
+            key={run.run_id}
+            aria-expanded={selectedRow}
+            onClick={() => setSelectedRunId(selectedRow ? null : run.run_id)}
+          >
+            <span className="decision-summary-main"><strong>{run.symbol} · {run.market}</strong><small>{run.purpose === "TRADING_ADVISORY" ? "자동 포지션 분석" : "수동 Agent 진단"} · {run.analysis_context ?? "LEGACY"} · {formatDateTime(run.created_at)}</small></span>
+            <span className="decision-summary-action">{run.core_action ?? run.shadow_assessment ?? "-"}</span>
+            <span className="decision-summary-reasons">{run.purpose === "TRADING_ADVISORY" ? `${run.fusion_state ?? "PENDING"}${run.fusion_reason_code ? ` · ${run.fusion_reason_code}` : ""}` : compactReasons(reasonCodes) || "Stage 결과 대기"}</span>
+            <OrderStatus status={run.state} />
+            <ChevronRight className="decision-summary-chevron" size={17} aria-hidden="true" />
+          </button>;
+        })}
+      </div>
+      {visibleCount < filteredRuns.length && <button className="secondary-button history-more" type="button" onClick={() => setVisibleCount((count) => count + 12)}>더 보기 · {filteredRuns.length - visibleCount}건 남음</button>}
+    </>}
+    {selectedRun && <article className="decision-detail" aria-label={`${selectedRun.symbol} Agent run 상세`}>
+      <div className="detail-head"><div><span className="card-label">AGENT RUN DETAIL</span><h2>{selectedRun.symbol} · {selectedRun.core_action ?? selectedRun.shadow_assessment ?? "결과 대기"}</h2></div><button className="icon-button" type="button" onClick={() => setSelectedRunId(null)} aria-label="Agent run 상세 닫기"><X /></button></div>
+      <div className="detail-summary"><div><span>화면 분류</span><b>{selectedRun.purpose === "TRADING_ADVISORY" ? "자동 포지션 분석" : "수동 Agent 진단"}</b></div><div><span>분석 맥락</span><b>{selectedRun.analysis_context ?? "LEGACY"}</b></div><div><span>SHADOW 평가</span><b>{selectedRun.shadow_assessment ?? "-"}</b></div><div><span>상태</span><OrderStatus status={selectedRun.state} /></div></div>
+      <dl><div><dt>원본 목적</dt><dd>{selectedRun.purpose}</dd></div><div><dt>실행 경계</dt><dd>{selectedRun.purpose === "TRADING_ADVISORY" ? `${selectedRun.execution_stage} 모델 · 서버 결합 ${selectedRun.fusion_state ?? "PENDING"}` : `${selectedRun.execution_stage} · 주문 없음`}</dd></div>{selectedRun.purpose === "TRADING_ADVISORY" && <><div><dt>결합 정책</dt><dd>{selectedRun.fusion_policy_version ?? "-"}</dd></div><div><dt>결합 결과</dt><dd>{selectedRun.fusion_reason_code ?? selectedRun.fusion_state ?? "PENDING"}</dd></div><div><dt>결합 판단 ID</dt><dd className="mono">{selectedRun.fusion_decision_id ?? "생성 없음"}</dd></div></>}<div><dt>증거</dt><dd>{selectedRun.evidence_bundle?.state ?? "없음"}</dd></div><div><dt>시장·업종 입력</dt><dd>{selectedRun.market_context_snapshot_id ? "고정됨" : "없음"}</dd></div><div><dt>Stage</dt><dd>{selectedRun.stages.length}개</dd></div><div><dt>LLM 호출</dt><dd>{selectedRun.stages.reduce((count, stage) => count + stage.invocations.length, 0)}개</dd></div><div><dt>입력 hash</dt><dd className="mono">{selectedRun.input_hash.slice(0, 12)}</dd></div><div><dt>계약</dt><dd>{selectedRun.assessment_schema_version ?? "v1"} · {selectedRun.core_schema_version ?? "v1"} · {selectedRun.score_policy_version ?? "없음"} · {selectedRun.server_input_policy_version ?? "기존 입력"}</dd></div></dl>
+      <div className="decision-detail-reasons"><strong>Stage 상태</strong><p className="reason-codes">{selectedRun.stages.map((stage) => `${stage.role}: ${stage.state === "NOT_APPLICABLE" ? "해당 없음" : stage.state}${stage.attempt_count ? ` (${stage.attempt_count}/${stage.max_attempts})` : ""}`).join(" · ")}</p></div>
+      <div className="decision-detail-reasons"><strong>Agent 결과</strong><p className="reason-codes">{selectedRun.stages.filter((stage) => stage.output).map(agentStageOutputSummary).join(" · ") || "Stage 결과 없음"}</p></div>
+      <div className="decision-detail-reasons"><strong>LLM 호출 이력</strong><p className="reason-codes">{selectedRun.stages.flatMap((stage) => stage.invocations.map((invocation) => `${stage.role} #${invocation.attempt_number}: ${invocation.actual_provider ?? "Provider 미확인"} / ${invocation.actual_model ?? invocation.requested_model_alias ?? invocation.requested_model_profile_id ?? "모델 미확인"} · ${invocation.state} · schema ${invocation.validation_status} · ${invocation.latency_ms}ms${invocation.error_code ? ` · ${invocation.error_code}` : ""}`)).join(" · ") || "LLM 호출 이력 없음"}</p></div>
       <div className="invocation-history">
-        {run.stages.flatMap((stage) => stage.invocations.map((invocation) => {
+        {selectedRun.stages.flatMap((stage) => stage.invocations.map((invocation) => {
           const output = invocationOutputs[invocation.invocation_id];
           const error = outputErrors[invocation.invocation_id];
           return <div className="invocation-output-row" key={invocation.invocation_id}>
@@ -1316,7 +1435,7 @@ function AgentRuntimePanel({
                 className="secondary-button"
                 type="button"
                 disabled={outputLoadingId === invocation.invocation_id}
-                onClick={() => void loadInvocationOutput(run.run_id, invocation.invocation_id)}
+                onClick={() => void loadInvocationOutput(selectedRun.run_id, invocation.invocation_id)}
               >{outputLoadingId === invocation.invocation_id ? "불러오는 중" : "구조화 응답 보기"}</button>}
             </div>
             {error && <p className="invocation-output-error">{error}</p>}
@@ -1330,8 +1449,8 @@ function AgentRuntimePanel({
           </div>;
         }))}
       </div>
-      <small>{formatDateTime(run.created_at)} · {run.run_id}</small>
-    </article>)}</div>
+      <small>{formatDateTime(selectedRun.created_at)} · {selectedRun.run_id}</small>
+    </article>}
   </section>;
 }
 

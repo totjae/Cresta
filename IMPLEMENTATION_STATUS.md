@@ -1,5 +1,12 @@
 # Cresta 구현 상태
 
+### 2026-08-18 AI 판단 Console 정보구조 개편
+
+- AI 판단 화면을 `운영 판단`, `자동 포지션 분석`, `수동 진단`, `전체 이력` 네 탭으로 분리했다. 실제 TRADING Decision과 승인, scheduler 소유 `TRADING_ADVISORY`, 수동 Agent/Mock DIAGNOSTIC이 기본 화면에서 서로 섞이지 않는다.
+- Decision과 Agent run은 최신순 요약 행으로 표시하고 처음 12개만 렌더링한다. `더 보기`는 12개씩 확장하며 전체 reason, DAG stage, provider 호출과 구조화 응답은 사용자가 선택한 단일 상세 영역에서만 렌더링한다.
+- `TRADING_ADVISORY`는 Console에서 `자동 포지션 분석`으로 표시하되 상세에는 원본 목적, `position-agent-fusion-v1`, fusion state/reason/결합 판단 ID를 유지한다. `ESCALATED`는 주문 성공이 아님을 탭 안내에 고정했다.
+- 관련 component 시험 4개와 TypeScript·production build가 통과했다. 전체 component 16개 중 기존 운영 휴장 비동기 시험 1개만 실패하고 이번 변경 관련 15개는 통과했다. Ubuntu Console 배포와 실제 데이터 시각 확인은 미검증이다.
+
 ### 2026-08-17 외부 Agent POSITION 판단 안전 결합 1차
 
 - scheduler는 열린 포지션의 결정론적 `TRADING/POSITION` 판단을 먼저 기존 실행 권한·Guard 계층에 전달한 뒤, 5개 ACTIVE SHADOW route가 모두 준비된 경우에만 그 판단을 basis로 갖는 별도 `TRADING_ADVISORY` Agent run을 생성한다. 수동 `DIAGNOSTIC` run은 계속 주문·승인과 완전히 격리된다.

@@ -1,5 +1,15 @@
 # Cresta 테스트 계획
 
+### T-AI-CONSOLE-IA — AI 판단 이력 정보구조 개편 (2026-08-18)
+
+- `T-AI-CONSOLE-IA-001`: AI 판단 화면의 기본 탭이 `운영 판단`이고 `자동 포지션 분석`, `수동 진단`, `전체 이력`을 키보드와 포인터로 전환할 수 있는지 확인한다.
+- `T-AI-CONSOLE-IA-002`: `TRADING_ADVISORY` run은 자동 포지션 탭에만 나타나며 요약 행에서 `자동 포지션 분석`, POSITION context, Core/SHADOW 결과, fusion 상태와 시각을 식별할 수 있는지 확인한다.
+- `T-AI-CONSOLE-IA-003`: 수동 Agent·Mock 진단 입력은 수동 진단 탭에서만 보이고 DIAGNOSTIC 결과가 자동 포지션 분석과 섞이지 않는지 확인한다.
+- `T-AI-CONSOLE-IA-004`: 초기 목록은 최대 12개 요약 행만 렌더링하고 `더 보기`로 다음 12개를 확장하며, 전체 stage·reason·호출·구조화 응답은 선택한 단일 상세만 렌더링하는지 확인한다.
+- `T-AI-CONSOLE-IA-005`: 운영 판단 탭은 TRADING Decision과 승인 영역만 표시하고 DIAGNOSTIC Decision은 수동 진단, 모든 유형의 요약 이력은 전체 이력에서 조회되는지 확인한다.
+
+Evidence: 탭 분리, advisory/diagnostic 격리, 단일 상세, reason 축약과 12개 단위 확장을 포함한 관련 component 시험 4개가 통과했다. TypeScript와 Next.js production build가 통과했다. 전체 component 16개 중 이번 변경과 무관한 기존 운영 휴장 비동기 시험 1개만 실패해 15개가 통과했으며 Ubuntu Console 배포·실데이터 시각 검증은 대기 중이다.
+
 ### T-POSITION-AGENT-FUSION — 외부 Agent POSITION 판단 안전 결합 (2026-08-17)
 
 - `T-POSITION-FUSION-001`: 열린 포지션 scheduler tick이 결정론적 TRADING basis를 먼저 실행 계층에 전달하고, 5개 ACTIVE route가 준비된 경우 같은 basis를 정확히 하나의 `TRADING_ADVISORY/PENDING` run에 연결하는지 확인한다.

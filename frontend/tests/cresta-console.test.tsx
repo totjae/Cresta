@@ -583,13 +583,50 @@ describe("Mock AI decisions", () => {
 
     await user.click(await screen.findByRole("button", { name: /AI 판단/ }));
     expect(await screen.findByText(/주문이나 승인을 생성하지 않습니다/)).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "수동 진단" }));
     await user.click(screen.getByRole("button", { name: "Mock 판단 실행" }));
     expect(await screen.findByText(/진단 판단이 BUY/)).toBeInTheDocument();
-    expect((await screen.findAllByText("DIAGNOSTIC")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /005930.*수동 Mock 진단.*BUY/ }));
+    expect(await screen.findByText("DIAGNOSTIC")).toBeInTheDocument();
     expect(await screen.findByText("scout-input-v1")).toBeInTheDocument();
     expect(await screen.findByText("watch-indicators-v2")).toBeInTheDocument();
     expect(await screen.findByText("abcdef123456")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/orders"))).toBe(false);
+  });
+
+  it("groups decision history into tabs and expands it twelve rows at a time", async () => {
+    const decisions = Array.from({ length: 13 }, (_, index) => ({
+      decision_id: `decision-${index}`, evaluation_request_id: `evaluation-${index}`, symbol: "005930", market: "KRX",
+      input_snapshot_id: `snapshot-${index}`, decision_input_id: `input-${index}`,
+      input_schema_version: "scout-input-v1", input_hash: `${index}`.padEnd(64, "a"),
+      indicator_snapshot_id: `indicator-${index}`, indicator_calculator_version: "watch-indicators-v2",
+      model_id: "deterministic-position-v1", prompt_version: "position-policy-v1",
+      scout: { trend_state: "NEUTRAL", entry_score: 50, reason_codes: ["POSITION_MONITORING"] },
+      core: { action: "HOLD", confidence: "0.70", risk_level: "LOW", reason_codes: ["POSITION_MONITORING", "RISK_STABLE", "NO_EXIT_SIGNAL", "FOURTH_REASON"] },
+      purpose: "TRADING", configuration_version_id: null, execution_mode: "DISABLED",
+      execution_outcome: "DISABLED", execution: null,
+      valid_until: "2026-08-18T01:10:00Z", created_at: `2026-08-18T01:${String(index).padStart(2, "0")}:00Z`,
+    }));
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-tabs", login_id: "admin", expires_at: "2026-08-18T09:00:00Z", csrf_token: "csrf-tabs" });
+      if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
+      if (path === "/api/v1/decisions") return jsonResponse({ items: decisions });
+      if (path === "/api/v1/approvals") return jsonResponse({ schema_version: "1.0", request_id: "approvals-tabs", items: [] });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CrestaConsole />);
+
+    await user.click(await screen.findByRole("button", { name: /AI 판단/ }));
+    expect(screen.getByRole("tab", { name: "운영 판단" })).toHaveAttribute("aria-selected", "true");
+    expect((await screen.findAllByRole("button", { name: /005930.*운영 판단.*HOLD/ }))).toHaveLength(12);
+    expect(screen.queryByText("FOURTH_REASON")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /더 보기.*1건 남음/ }));
+    expect(await screen.findAllByRole("button", { name: /005930.*운영 판단.*HOLD/ })).toHaveLength(13);
+    await user.click(screen.getAllByRole("button", { name: /005930.*운영 판단.*HOLD/ })[0]);
+    expect(await screen.findByText(/FOURTH_REASON/)).toBeInTheDocument();
   });
 });
 
@@ -660,14 +697,18 @@ describe("Agent Worker v2", () => {
     render(<CrestaConsole />);
 
     await user.click(await screen.findByRole("button", { name: /AI 판단/ }));
-    expect(await screen.findByText("비동기 · 모델 SHADOW")).toBeInTheDocument();
-    expect(await screen.findByText(/Route 준비: 5\/5/)).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "운영 판단" })).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByRole("tab", { name: "자동 포지션 분석" }));
+    expect(await screen.findByText("1건 · 모델 SHADOW")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /005930.*자동 포지션 분석.*WAIT/ }));
     expect(await screen.findByText("SHADOW 모델 · 서버 결합 ESCALATED")).toBeInTheDocument();
     expect(await screen.findByText("position-agent-fusion-v1")).toBeInTheDocument();
     expect(await screen.findByText("LLM_EXIT_RISK_HIGH")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "수동 진단" }));
+    expect(await screen.findByText(/Route 준비: 5\/5/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "DIAGNOSTIC DAG 등록" }));
     expect(await screen.findByText(/Worker가 비동기로 실행/)).toBeInTheDocument();
-    expect((await screen.findAllByText("실행 WAIT")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("WAIT")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("UNKNOWN")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText(/agent-server-input-v1/)).length).toBeGreaterThan(0);
     expect((await screen.findAllByText(/POSITION_RISK_SCOUT: 해당 없음/)).length).toBeGreaterThan(0);
