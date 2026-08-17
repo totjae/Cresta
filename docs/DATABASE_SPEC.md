@@ -335,6 +335,14 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-149 | `agent_runs`는 nullable `server_input_policy_version`, `market_context_snapshot_id`, `market_context_snapshot_hash`를 저장한다. 기존 v1~v4 run은 null로 의미를 보존한다. |
 | DB-150 | position 파생값과 Risk Policy provenance는 기존 frozen `position_snapshot_json`과 그 hash에 포함한다. 별도 mutable 계산 행이나 stage 실행 시 재계산을 허용하지 않는다. |
 | DB-151 | migration `20260811_0027_server_owned_agent_inputs`는 기존 run을 재작성하지 않고 신규 table·nullable column·index와 제약만 추가한다. downgrade는 신규 참조 column을 제거한 뒤 context table을 삭제한다. |
+
+## POSITION Agent 결합 provenance
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-152 | `agent_runs.purpose`는 기존 `DIAGNOSTIC`과 scheduler 전용 `TRADING_ADVISORY`를 구분한다. advisory row만 unique `basis_decision_id`, `fusion_policy_version`, `fusion_state`를 가지며 진단 row에는 이 필드가 null이어야 한다. |
+| DB-153 | advisory의 `fusion_state`는 `PENDING | NO_ESCALATION | ESCALATED | EXPIRED | FAILED_SAFE`만 허용한다. 상향 판단이 생성된 경우 unique `fusion_decision_id`와 안정적인 `fusion_reason_code`를 저장한다. |
+| DB-154 | migration `20260817_0038_position_agent_fusion` upgrade는 기존 Agent run을 재작성하지 않고 nullable provenance와 제약을 추가한다. 기준·결합 판단은 별도 불변 `decisions` row로 유지한다. downgrade는 신규 advisory run을 `DIAGNOSTIC` 이력으로 축소한 뒤 결합 provenance column을 제거하며 이미 생성된 불변 판단·실행 이력은 삭제하지 않는다. |
 ## 거래시장 선택 평가
 
 `venue_selection_evaluations`는 [거래시장 자동 선택 명세](VENUE_SELECTION_SPEC.md)의 SHADOW 평가를 보존한다. 사용자·종목·방향·수량·주문유형·긴급도·세션·거래일 상태·캘린더 정책과 판정 근거·NXT 적격성·SOR 지원 여부·양 시장 snapshot 참조·선택 결과·reason code·canonical input hash를 저장한다. 이 테이블은 주문 권한을 가지지 않으며 `order_creation_allowed=false`로 고정한다.
@@ -347,4 +355,4 @@ market_snapshots(symbol, market, observed_at desc)
 - Migration `20260812_0029`는 `instrument_venue_states`를 추가한다. downgrade는 상태 원장만 제거하며 기존 market snapshot과 SHADOW 평가를 보존한다.
 - Migration `20260812_0030`은 거래시장 평가에 거래일 상태·캘린더 근거·정책 버전을 추가한다.
 - Migration `20260812_0031`은 운영 휴장 이력과 평가별 적용 override 참조를 추가한다. downgrade는 평가 참조와 override 원장을 제거하되 기존 venue 평가의 기본 캘린더 근거는 보존한다.
-- 현재 schema head는 `20260812_0030`이다.
+- 현재 schema head는 `20260817_0038`이다.

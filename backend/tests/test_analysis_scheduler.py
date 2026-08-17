@@ -166,6 +166,57 @@ def test_tick_admits_shadow_agent_run_when_all_active_routes_exist(
     run_analysis_tick(db, slot=slot, settings=settings, now=now)
     run = db.scalar(select(AgentRun))
     assert run is not None and run.state == "CREATED"
+    assert run.purpose == "DIAGNOSTIC"
+    assert db.scalar(select(func.count()).select_from(AgentStageRun)) == 8
+
+
+def test_tick_links_position_basis_to_scheduler_owned_trading_advisory(
+    client: TestClient, db: Session, admin: User, settings: Settings
+) -> None:
+    now = _at_kst(2026, 8, 5, 10, 5)
+    _watch_with_snapshot(db, admin, now)
+    db.add(
+        Position(
+            account_alias="KIWOOM_MOCK_PRIMARY",
+            symbol="005930",
+            quantity=10,
+            available_quantity=10,
+            managed_quantity=10,
+            average_price=Decimal(100),
+            managed_average_price=Decimal(100),
+            state="OPEN",
+            origin="CRESTA_MANAGED",
+        )
+    )
+    db.commit()
+    csrf = _login(client)
+    headers = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+    route_ids = _routes(client, headers)
+    assert client.post(
+        "/api/v1/ai/role-assignments/activation-preview",
+        headers=headers,
+        json={"schema_version": "1.0", "route_ids": route_ids},
+    ).status_code == 200
+    assert client.post(
+        "/api/v1/ai/role-assignments/activate",
+        headers=headers,
+        json={"schema_version": "1.0", "route_ids": route_ids},
+    ).status_code == 200
+    slot, _ = analysis_slot(now)
+    assert slot is not None
+
+    result = run_analysis_tick(db, slot=slot, settings=settings, now=now)
+
+    basis = db.scalar(select(Decision).where(Decision.model_id == "deterministic-position-v1"))
+    run = db.scalar(select(AgentRun))
+    assert result.decision_count == 1
+    assert basis is not None and basis.purpose == "TRADING"
+    assert run is not None
+    assert run.purpose == "TRADING_ADVISORY"
+    assert run.analysis_context == "POSITION"
+    assert run.basis_decision_id == basis.id
+    assert run.fusion_policy_version == "position-agent-fusion-v1"
+    assert run.fusion_state == "PENDING"
     assert db.scalar(select(func.count()).select_from(AgentStageRun)) == 8
 
 

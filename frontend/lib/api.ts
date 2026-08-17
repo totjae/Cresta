@@ -156,7 +156,7 @@ export type AgentRunData = {
   request_id: string;
   run_id: string;
   created: boolean;
-  purpose: "DIAGNOSTIC";
+  purpose: "DIAGNOSTIC" | "TRADING_ADVISORY";
   execution_stage: "SHADOW";
   market: "KRX" | "NXT";
   symbol: string;
@@ -175,6 +175,11 @@ export type AgentRunData = {
   state: string;
   core_action: "WAIT" | null;
   shadow_assessment: "ENTRY_STRONG" | "ENTRY_SUPPORTIVE" | "NEUTRAL" | "ENTRY_ADVERSE" | "HOLD_SUPPORTIVE" | "EXIT_RISK_ELEVATED" | "EXIT_RISK_HIGH" | "UNKNOWN" | null;
+  basis_decision_id: string | null;
+  fusion_policy_version: string | null;
+  fusion_state: string | null;
+  fusion_reason_code: string | null;
+  fusion_decision_id: string | null;
   valid_until: string;
   stages: AgentStageData[];
   evidence_bundle: null | {

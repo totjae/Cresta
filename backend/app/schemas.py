@@ -975,7 +975,7 @@ class AgentRunResponse(StrictModel):
     request_id: str
     run_id: str
     created: bool = False
-    purpose: Literal["DIAGNOSTIC"]
+    purpose: Literal["DIAGNOSTIC", "TRADING_ADVISORY"]
     execution_stage: Literal["SHADOW"]
     market: Literal["KRX", "NXT"]
     symbol: str
@@ -1006,6 +1006,11 @@ class AgentRunResponse(StrictModel):
         ]
         | None
     )
+    basis_decision_id: str | None
+    fusion_policy_version: str | None
+    fusion_state: str | None
+    fusion_reason_code: str | None
+    fusion_decision_id: str | None
     valid_until: datetime
     stages: list[AgentStageRunResponse]
     evidence_bundle: AgentEvidenceBundleResponse | None

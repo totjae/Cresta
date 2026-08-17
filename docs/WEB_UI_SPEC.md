@@ -419,7 +419,8 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 | UI-116 | SHADOW 비교 화면은 같은 입력에서 모델별 출력·schema 통과·latency·cost 차이를 표시하고 어떤 결과도 승인·주문을 생성하지 않았음을 고정 표시한다. |
 | UI-117 | provider 장애·circuit open·rate/cost limit·필수 stage 실패는 `연결됨`이나 `판단 성공`으로 표시하지 않고 신규매수에 미치는 차단 이유를 함께 표시한다. |
 | UI-118 | AI 판단 화면의 Agent Runtime v3 패널은 종목·시장과 5개 필수 role의 활성 SHADOW route 준비 상태를 표시하고 모두 준비된 경우에만 DIAGNOSTIC run 생성을 허용한다. |
-| UI-119 | run 목록·상세는 DAG·stage 상태·실제 provider/model·evidence bundle 상태·Core action을 표시하고 `SHADOW · 주문 없음`을 고정 표시한다. raw prompt·응답·credential은 입력하거나 표시하지 않는다. |
+| UI-119 | run 목록·상세는 DAG·stage 상태·실제 provider/model·evidence bundle 상태·Core action을 표시한다. `DIAGNOSTIC`은 `SHADOW · 주문 없음`, scheduler 소유 `TRADING_ADVISORY`는 `모델 SHADOW · 서버 결합`과 결합 상태·정책·reason을 표시한다. raw prompt·응답·credential은 입력하거나 표시하지 않는다. |
+| UI-144 | advisory 카드의 `ESCALATED`는 주문 체결을 뜻하지 않는다. 연결된 최종 판단 ID와 결합 reason을 표시하고 실제 승인·주문 상태는 기존 AI 판단 및 승인·주문 화면에서 조회하게 한다. |
 | UI-120 | AI 설정 화면은 `Provider`, `역할별 배정`, `이력` 영역을 분리한다. 모델 목록과 사용 전환은 해당 Provider 카드 안에서 관리한다. |
 | UI-121 | Provider 기본 화면은 provider당 한 행 또는 카드로 이름·Adapter·health·credential 설정 여부를 표시하고 등록·수정·연결 시험은 modal 또는 별도 편집 panel에서 수행한다. |
 | UI-122 | Provider 카드의 모델 목록은 alias·provider model ID·검증 상태를 표시하고 사용 여부를 전환한다. 같은 모델을 역할 수만큼 복제 생성하지 않는다. |

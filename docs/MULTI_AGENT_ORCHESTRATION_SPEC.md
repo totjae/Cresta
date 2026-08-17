@@ -221,7 +221,7 @@ StageRun: PENDING -> RUNNING -> SUCCEEDED
 | ID | 요구사항 |
 | --- | --- |
 | MAO-080 | 신규 agent, provider, model, prompt 또는 DAG version은 처음에 `SHADOW`로만 실행한다. |
-| MAO-081 | SHADOW run은 운영 판단과 동일 입력을 사용할 수 있지만 실행 결과·승인·주문을 생성하지 않는다. |
+| MAO-081 | 공개·수동 `DIAGNOSTIC` SHADOW run은 운영 판단과 동일 입력을 사용할 수 있지만 실행 결과·승인·주문을 생성하지 않는다. scheduler 소유 `TRADING_ADVISORY`는 모델 출력을 직접 실행하지 않고 [AI 판단 계약 AI-124~130](AI_DECISION_SPEC.md)의 서버 결합 입력으로만 사용할 수 있다. |
 | MAO-082 | 활성 후보는 고정 fixture schema 통과율 100%, 허용되지 않은 행동 0건, 증거 환각 0건, timeout·비용·지연 목표와 회귀평가를 통과해야 한다. |
 | MAO-083 | `APPROVAL_ONLY` 진입은 사용자 TOTP 재인증, 변경 사유, 활성 DAG·route·prompt·model version과 시험 근거를 요구한다. 자동 주문 확대는 별도 제품 실행 단계 게이트를 다시 통과해야 한다. |
 
@@ -274,7 +274,7 @@ app/llm/*                     Provider/Gateway 호출 계층
 | MAO-103 | worker 재시작 또는 lease 만료 시 외부 호출이 시작되지 않은 내부 fixture stage만 다시 `PENDING`으로 돌릴 수 있다. invocation이 생성된 stage는 자동 재전송하지 않고 `TIMED_OUT` 또는 `FAILED`로 격리한다. |
 | MAO-104 | 입력 `valid_until` 또는 stage `timeout_at`을 넘긴 작업은 provider를 호출하지 않고 `TIMED_OUT`으로 종료한다. 실패한 의존성을 가진 하위 stage는 `FAILED/AGENT_DEPENDENCY_FAILED`로 종료한다. |
 | MAO-105 | route·model version과 유효 generation parameter는 admission 시 `route_versions_json`에 고정한다. 실행 중 현재 ACTIVE route가 변경되어도 이미 등록된 run의 snapshot은 바뀌지 않는다. |
-| MAO-106 | Agent Worker v2는 등록·검증된 Mock 또는 외부 Adapter를 `DIAGNOSTIC/SHADOW`에서 호출하고 SHADOW 경계를 유지한다. worker가 완료한 run에서도 `Decision`, `Approval`, `TradingOrder`는 생성하지 않는다. |
+| MAO-106 | Agent Worker v2는 등록·검증된 Mock 또는 외부 Adapter를 `SHADOW`에서 호출한다. `DIAGNOSTIC` 완료는 어떤 거래 리소스도 만들지 않는다. `TRADING_ADVISORY` 완료는 AI-124~130 검증 후 서버 소유 결합 판단만 만들 수 있으며 Adapter와 Agent Core는 승인·주문 API를 직접 호출할 수 없다. |
 | MAO-107 | Console은 `CREATED/RUNNING` run이 존재하는 동안 목록을 주기적으로 갱신하고 현재 stage 상태를 표시한다. 버튼은 admission 응답 후 해제하며 전체 DAG 완료까지 HTTP 요청을 붙잡지 않는다. |
 
 ### 12.3 운영 단계 단순 실패 계약
@@ -293,7 +293,7 @@ app/llm/*                     Provider/Gateway 호출 계층
 | MAO-114 | 외부 Scout에는 server-owned snapshot·indicator·position·evidence 요약과 허용된 input reference만 전달한다. credential, 주문 도구, 원시 HTML과 내부 객체는 전달하지 않는다. |
 | MAO-115 | Provider가 JSON을 반환했다는 사실만으로 성공 처리하지 않는다. 서버는 역할별 `agent-assessment-v1` 또는 `agent-core-v1` Pydantic 계약으로 다시 검증하고, 실패하면 invocation을 `INVALID_OUTPUT/FAILED`로 기록한다. |
 | MAO-116 | Scout 모델 출력에는 평가 필드만 허용한다. `stage_run_id`, role, symbol, input reference, 관측·만료 시각은 서버가 현재 run에서 덧붙이며 모델이 위조하거나 변경할 수 없다. 모델의 evidence reference는 실제 입력 reference의 부분집합이어야 한다. |
-| MAO-117 | 외부 Core 응답은 현재 SHADOW 계약상 `WAIT`만 허용한다. 유효한 외부 응답은 stage output에 저장하지만 판단·승인·주문 테이블에는 복사하지 않는다. |
+| MAO-117 | 외부 Core 응답은 SHADOW 계약상 `WAIT`만 허용하고 별도 `shadow_assessment`만 제공한다. `DIAGNOSTIC` 출력은 판단·승인·주문 테이블에 복사하지 않는다. `TRADING_ADVISORY` 출력도 직접 행동으로 복사하지 않고 AI-124~130의 서버 mapping과 멱등 검사를 통과해야 한다. |
 | MAO-118 | Mock Adapter는 결정론적 fixture 출력을 계속 사용한다. 외부 primary가 실패해 Mock fallback이 성공한 경우에도 stage 결과는 Mock fixture로 생성하고 두 invocation 이력을 모두 보존한다. |
 | MAO-119 | Adapter가 `TIMED_OUT`, `RATE_LIMITED`, `PROVIDER_ERROR`, `INVALID_OUTPUT` 또는 `AMBIGUOUS`로 종료한 invocation은 하위 `FAIL_STOP` stage 예외 처리가 상태·오류 코드·검증 결과를 덮어쓰지 않는다. `AGENT_INVOCATION_OUTCOME_UNKNOWN`은 Adapter 결과가 기록되지 않은 `RUNNING` invocation에만 사용한다. |
 

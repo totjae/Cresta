@@ -36,6 +36,7 @@
 | EXE-003 | 입력에는 decision 또는 rule trigger ID, 사용자, 계좌 alias, symbol·market, snapshot, position, 실행 권한·위험·전략 설정 버전과 correlation ID가 필요하다. |
 | EXE-004 | 입력 snapshot·판단·설정 중 하나가 없거나 만료·상위 schema·비활성 버전이면 `FAILED_SAFE`로 종료하고 주문을 만들지 않는다. |
 | EXE-005 | 실행 권한과 Guard는 같은 사용자·계좌·종목에 대해 서버가 다시 조회하며 호출자가 전달한 mode·한도·Guard 결과를 신뢰하지 않는다. |
+| EXE-006 | `position-agent-fusion-v1` 판단은 다른 TRADING 판단과 동일한 실행 경로만 사용한다. Agent run·Core·Provider는 승인 또는 주문을 직접 만들 수 없으며 결합 provenance가 없거나 AI-124~130 검증에 실패한 판단은 실행하지 않는다. |
 
 ### 3.2 행동 정규화
 

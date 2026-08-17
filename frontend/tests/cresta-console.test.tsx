@@ -613,6 +613,8 @@ describe("Agent Worker v2", () => {
       server_input_policy_version: "agent-server-input-v1", market_context_snapshot_id: null, market_context_snapshot_hash: null,
       assessment_schema_version: "agent-assessment-v2", core_schema_version: "agent-core-v2", score_policy_version: "score-policy-v1",
       route_versions: {}, state: "PARTIAL", core_action: "WAIT", shadow_assessment: "UNKNOWN", valid_until: "2026-08-06T01:01:00Z",
+      basis_decision_id: null, fusion_policy_version: null, fusion_state: null,
+      fusion_reason_code: null, fusion_decision_id: null,
       stages: roles.map((role, index) => ({
         stage_run_id: `stage-${index}`, role, sequence: index + 1, dependencies: [], route_id: `route-${index}`,
         state: role === "NEWS_DISCLOSURE_SCOUT" ? "INSUFFICIENT_DATA" : role === "POSITION_RISK_SCOUT" ? "NOT_APPLICABLE" : "SUCCEEDED",
@@ -625,12 +627,24 @@ describe("Agent Worker v2", () => {
       evidence_bundle: { bundle_id: "bundle-1", state: "PARTIAL", policy_version: "fixture-none-v1", evidence_ids: [], reason_codes: ["NO_EXTERNAL_EVIDENCE_FIXTURE"], bundle_hash: "d".repeat(64), as_of: "2026-08-06T01:00:00Z" },
       created_at: "2026-08-06T01:00:00Z", completed_at: "2026-08-06T01:00:00Z",
     };
+    const advisoryRun = {
+      ...run,
+      request_id: "agent-advisory-1",
+      run_id: "run-advisory-1",
+      purpose: "TRADING_ADVISORY",
+      analysis_context: "POSITION",
+      basis_decision_id: "decision-basis-1",
+      fusion_policy_version: "position-agent-fusion-v1",
+      fusion_state: "ESCALATED",
+      fusion_reason_code: "LLM_EXIT_RISK_HIGH",
+      fusion_decision_id: "decision-fusion-1",
+    };
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-agent", login_id: "admin", expires_at: "2026-08-06T09:00:00Z", csrf_token: "csrf-agent" });
       if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
       if (path === "/api/v1/decisions") return jsonResponse({ items: [] });
-      if (path === "/api/v1/ai/agent-runs" && !init?.method) return jsonResponse({ schema_version: "1.0", request_id: "runs-1", items: [] });
+      if (path === "/api/v1/ai/agent-runs" && !init?.method) return jsonResponse({ schema_version: "1.0", request_id: "runs-1", items: [advisoryRun] });
       if (path === "/api/v1/ai/routes") return jsonResponse({ schema_version: "1.0", request_id: "routes-1", items: routes });
       if (path === "/api/v1/ai/agent-runs/diagnostic") return jsonResponse(run, 201);
       if (path === "/api/v1/ai/agent-runs/run-1/invocations/inv-0/output") return jsonResponse({
@@ -646,17 +660,20 @@ describe("Agent Worker v2", () => {
     render(<CrestaConsole />);
 
     await user.click(await screen.findByRole("button", { name: /AI 판단/ }));
-    expect(await screen.findByText("비동기 · SHADOW · 주문 없음")).toBeInTheDocument();
+    expect(await screen.findByText("비동기 · 모델 SHADOW")).toBeInTheDocument();
     expect(await screen.findByText(/Route 준비: 5\/5/)).toBeInTheDocument();
+    expect(await screen.findByText("SHADOW 모델 · 서버 결합 ESCALATED")).toBeInTheDocument();
+    expect(await screen.findByText("position-agent-fusion-v1")).toBeInTheDocument();
+    expect(await screen.findByText("LLM_EXIT_RISK_HIGH")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "DIAGNOSTIC DAG 등록" }));
     expect(await screen.findByText(/Worker가 비동기로 실행/)).toBeInTheDocument();
-    expect(await screen.findByText("실행 WAIT")).toBeInTheDocument();
-    expect(await screen.findByText("UNKNOWN")).toBeInTheDocument();
-    expect(await screen.findByText(/agent-server-input-v1/)).toBeInTheDocument();
-    expect(await screen.findByText(/POSITION_RISK_SCOUT: 해당 없음/)).toBeInTheDocument();
+    expect((await screen.findAllByText("실행 WAIT")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("UNKNOWN")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/agent-server-input-v1/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/POSITION_RISK_SCOUT: 해당 없음/)).length).toBeGreaterThan(0);
     await user.click(screen.getAllByRole("button", { name: "구조화 응답 보기" })[0]);
-    expect(await screen.findByText(/Provider 원문이 아니라 Adapter가 추출한/)).toBeInTheDocument();
-    expect(await screen.findByText(/PRICE_BELOW_VWAP/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/Provider 원문이 아니라 Adapter가 추출한/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/PRICE_BELOW_VWAP/)).length).toBeGreaterThan(0);
 
     const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/ai/agent-runs/diagnostic");
     expect(call?.[1]).toEqual(expect.objectContaining({ headers: expect.objectContaining({ "X-CSRF-Token": "csrf-agent" }) }));

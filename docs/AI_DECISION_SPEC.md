@@ -208,12 +208,26 @@ core_output:
 | ID | 요구사항 |
 | --- | --- |
 | AI-117 | scheduler는 평가 대상 종목에 `OPEN` 포지션이 있으면 ENTRY가 아니라 `decision_kind=POSITION` 판단을 생성한다. 같은 종목·슬롯의 ENTRY와 POSITION은 서로 다른 evaluation request ID를 사용하며 각각 한 번만 생성한다. |
-| AI-118 | 첫 MOCK 구현의 POSITION 판단은 서버 소유 `deterministic-position-v1` 정책을 사용한다. 외부 Provider의 DIAGNOSTIC Agent 결과를 TRADING 판단으로 복사하거나 승격하지 않는다. |
+| AI-118 | POSITION의 기준 판단은 서버 소유 `deterministic-position-v1` 정책을 사용한다. 공개·수동 `DIAGNOSTIC` Agent 결과는 TRADING 판단으로 복사하거나 승격하지 않는다. 활성 route가 모두 준비된 경우 scheduler만 같은 기준 판단에 결합된 별도 `TRADING_ADVISORY` run을 만들 수 있다. |
 | AI-119 | POSITION 입력은 현재 market·indicator snapshot과 포지션 ID·version, 수량·평균단가·현재가·미실현손익률·고정손절 거리·고점 대비 하락률을 canonical JSON에 고정한다. 입력 생성 후 포지션이나 시세가 바뀌어도 기존 판단을 수정하지 않는다. |
 | AI-120 | 데이터가 정상일 때 exit risk score는 `position-policy-v1`의 고정 가중치만 사용한다. 고정손절 도달 또는 90점 이상은 `FULL_SELL`, 70~89점은 `PARTIAL_SELL`과 `sell_ratio=0.5`, 그 외는 `HOLD`다. 모델 confidence는 수량이나 Guard 한도를 확대하지 않는다. |
 | AI-121 | snapshot·지표·포지션 freshness가 불충분하거나 포지션 원가가 유효하지 않으면 `HOLD/DATA_INSUFFICIENT`로 축소한다. 데이터 오류를 매도 또는 보유 안전성의 근거로 추정하지 않으며 독립 Guard의 고정손절은 계속 동작한다. |
 | AI-122 | POSITION 판단 유효시간은 최대 5분이다. 실행 시점에는 현재 포지션 version·관리수량·예약수량·최신 정상 시세와 Guard를 다시 검사하며 판단 입력의 수량을 그대로 주문수량으로 사용하지 않는다. |
 | AI-123 | 단일계좌·단일사용자 MVP에서는 열린 계좌 포지션을 감시 종목 해제 여부와 무관하게 scheduler 대상에 포함한다. 활성 사용자가 둘 이상이어서 계좌 소유자를 유일하게 결정할 수 없으면 자동 귀속하지 않고 기존 사용자별 감시 대상만 처리한다. |
+
+### 6.2.2 POSITION 외부 Agent 결합 정책 v1
+
+외부 Agent는 주문 행동을 직접 반환하지 않는다. 서버가 검증된 `shadow_assessment`를 같은 입력의 결정론적 POSITION 판단과 비대칭적으로 결합해 별도의 최종 `TRADING` 판단을 만들 수 있다. 이 절이 결합 정책의 단일 기준이며 Agent·실행 문서는 이 절을 참조한다.
+
+| ID | 요구사항 |
+| --- | --- |
+| AI-124 | scheduler만 `purpose=TRADING_ADVISORY`, `analysis_context=POSITION` run을 생성할 수 있다. 공개 진단 API는 계속 `DIAGNOSTIC`만 생성하며 advisory run을 요청하거나 기존 진단 run을 거래에 연결할 수 없다. |
+| AI-125 | advisory run은 기준 `deterministic-position-v1` 판단 ID를 admission 시 고정한다. 기준 판단과 Agent run의 사용자·시장·종목·market snapshot ID·canonical position snapshot hash가 모두 같지 않으면 결합을 `FAILED_SAFE`로 종료한다. |
+| AI-126 | 결합 입력은 완료된 v2 Core stage, `incomplete_roles=[]`, 모든 POSITION 필수 Scout의 `SUCCEEDED`, 허용 evidence reference 검사 통과와 `confidence >= 0.70`을 요구한다. 실패·timeout·schema 오류·`UNKNOWN`·불완전 Scout는 결합 판단을 만들지 않으며 기준 결정론 판단과 독립 Guard trigger는 그대로 유지한다. |
+| AI-127 | `position-agent-fusion-v1`은 위험을 낮추지 않는 비대칭 정책이다. `HOLD_SUPPORTIVE | NEUTRAL`은 기준 행동을 유지하고, `EXIT_RISK_ELEVATED`는 기준보다 강한 경우에만 `PARTIAL_SELL(0.5)`, `EXIT_RISK_HIGH`는 기준보다 강한 경우에만 `FULL_SELL` 후보를 만든다. 기준 `FULL_SELL`을 낮추거나 LLM confidence로 수량을 확대하지 않는다. |
+| AI-128 | 결합으로 행동이 상향될 때만 원본 기준 판단과 advisory run을 참조하는 새 불변 `purpose=TRADING`, `model_id=position-agent-fusion-v1` 판단을 만든다. 같은 기준 판단·run·정책 version은 최종 판단을 최대 하나만 만들며 원본 판단·Agent 출력은 수정하지 않는다. |
+| AI-129 | 결합 판단은 기준 판단의 `valid_until`을 넘길 수 없다. 완료 시 이미 만료됐거나 현재 포지션 version이 바뀐 경우 새 판단을 만들지 않는다. 정상적인 최신 market snapshot 전진은 허용하되 생성된 판단은 기존 실행 권한과 Cresta Guard의 관리수량·예약수량·최신 시세·가격편차 검사를 동일하게 통과해야 한다. |
+| AI-130 | 결합 실패는 `NO_ESCALATION | EXPIRED | FAILED_SAFE | ESCALATED` 상태와 안정적인 reason code로 Agent run에 기록한다. 결합 실패 때문에 기존 결정론 실행을 취소·되돌리거나 고정손절을 지연하지 않는다. |
 
 ### 6.3 Scout 입력 snapshot과 지표 기반 Mock 계약
 
@@ -255,8 +269,8 @@ core_output:
 | AI-105 | `agent-assessment-v2`는 `status != SUCCEEDED`이면 `entry_score`와 `exit_risk_score`를 모두 null로 강제한다. `NOT_APPLICABLE`은 성공이나 실패로 점수 통계에 포함하지 않고 별도 분모로 집계한다. |
 | AI-106 | `score-policy-v1`은 0–24 `STRONGLY_ADVERSE`, 25–44 `ADVERSE`, 45–55 `MIXED`, 56–74 `SUPPORTIVE`, 75–100 `STRONGLY_SUPPORTIVE` 의미를 제공한다. 이 점수는 SHADOW 비교용이며 Guard 한도나 주문금액에 사용하지 않는다. 경계 변경은 replay 근거와 새 정책 version을 요구한다. |
 | AI-107 | `agent-core-v2`의 실행 `action`은 계속 `WAIT`로 고정하고 별도 `shadow_assessment`를 기록한다. ENTRY는 `ENTRY_STRONG`, `ENTRY_SUPPORTIVE`, `NEUTRAL`, `ENTRY_ADVERSE`, `UNKNOWN`을 허용하고 POSITION은 `HOLD_SUPPORTIVE`, `NEUTRAL`, `EXIT_RISK_ELEVATED`, `EXIT_RISK_HIGH`, `UNKNOWN`을 허용한다. |
-| AI-108 | 필수 역할이 불완전하거나 schema·evidence 검증이 실패하면 Core의 `shadow_assessment`는 `UNKNOWN`이어야 한다. 유효한 평가는 판단·승인·주문을 생성하지 않고 사후 성과 측정에만 사용한다. |
-| AI-109 | 모델별 성능 비교는 `shadow_assessment`, schema 통과율, unsupported claim, latency, 비용과 판단 후 5분·10분·30분 수익률 및 MFE·MAE를 같은 입력 집합에서 측정한다. 조건부 Core 승격이나 모델 자동 교체는 이 평가 근거가 생기기 전에는 구현하지 않는다. |
+| AI-108 | 필수 역할이 불완전하거나 schema·evidence 검증이 실패하면 Core의 `shadow_assessment`는 `UNKNOWN`이어야 한다. `DIAGNOSTIC` 평가는 판단·승인·주문을 생성하지 않는다. scheduler 소유 `TRADING_ADVISORY`만 AI-124~130의 별도 서버 결합 정책에 입력될 수 있다. |
+| AI-109 | 모델별 성능 비교는 `shadow_assessment`, schema 통과율, unsupported claim, latency, 비용과 판단 후 5분·10분·30분 수익률 및 MFE·MAE를 같은 입력 집합에서 측정한다. 모델 자동 교체는 구현하지 않으며 첫 거래 결합은 AI-124~130의 위험 상향 전용 정책으로 제한한다. |
 
 ### 6.6 서버 소유 판단 입력 v1
 

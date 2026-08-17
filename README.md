@@ -23,7 +23,7 @@
 - 키움 `ka10075`·`ka10076`·`kt00018` 연속조회 정규화와 읽기 전용 DB 대조 `kiwoom-reconcile-check`
 - PostgreSQL 단일 lease·fencing, 키움 WebSocket LOGIN·`00`/`04` 구독, PING echo와 주기·이벤트 기반 재동기화를 수행하는 별도 Broker worker
 - KST 평일 08:00~20:00에 감시 종목과 단일사용자 계좌의 열린 포지션을 5분·10분 슬롯으로 평가하고 ENTRY 또는 POSITION TRADING 판단을 Guard에 인계하는 별도 AI scheduler
-- ACTIVE 역할 배정 snapshot으로 DIAGNOSTIC DAG를 등록하고 stage claim·lease·fencing·만료 복구를 수행하는 별도 Agent worker
+- ACTIVE 역할 배정 snapshot으로 수동 DIAGNOSTIC 또는 scheduler 소유 POSITION TRADING_ADVISORY DAG를 등록하고 stage claim·lease·fencing·만료 복구를 수행하는 별도 Agent worker
 - Agent 호출별 Adapter 추출 구조화 JSON을 검증 전 단계에서 제한적으로 보관하고 Console에서 필요할 때만 조회하는 응답 이력
 - `USER_DEFAULT / RISK_POLICY`의 진입금액·투자한도·보유/진입 횟수·고정손절·시세·spread·가격편차·일일손실한도(REALIZED_PLUS_UNREALIZED/REALIZED_ONLY)·연속손실횟수를 버전으로 검증·활성화하는 Guard 위험 설정 UI/API
 - `scout-input-v1` canonical 입력·hash와 지표·포지션 provenance를 저장하고 이를 사용하는 ENTRY `deterministic-mock-v2`와 POSITION `deterministic-position-v1` Scout/Core
@@ -64,7 +64,7 @@ npm test
 npm run build
 ```
 
-현재 AI 실험 경로는 외부 Provider route와 선택형 OpenDART·KRX·NAVER API HUB 증거 수집을 사용하는 Agent Runtime v6를 포함한다. Web Console의 AI 판단 화면에서 5개 role route 준비도를 확인하고 ENTRY/POSITION context, 서버 계산 포지션 위험값과 검증된 Market Context가 고정된 DIAGNOSTIC DAG를 실행할 수 있다. Market Context가 없으면 시장·업종 값을 추정하지 않고, 불완전한 필수 Scout가 있으면 Core Provider 호출 없이 `WAIT/UNKNOWN`으로 축소한다. 승인·주문은 생성하지 않는다.
+현재 AI 경로는 외부 Provider route와 선택형 OpenDART·KRX·NAVER API HUB 증거 수집을 사용하는 Agent Runtime v6를 포함한다. Web Console에서 실행하는 DIAGNOSTIC DAG는 계속 주문·승인을 만들지 않는다. 열린 포지션의 scheduler는 결정론적 POSITION 판단을 먼저 독립 처리한 뒤, 5개 route가 준비된 경우에만 `TRADING_ADVISORY`를 실행한다. 외부 Core의 구조화 평가는 서버 소유 `position-agent-fusion-v1`이 동일 snapshot·포지션 version·유효시간·필수 stage를 재검증하고 기존 판단보다 강한 청산 위험만 새 TRADING Decision으로 기록한다. 이 Decision도 행동별 실행 권한·Guard·승인/자동 주문 계층을 그대로 통과하며, 불완전한 입력·낮은 신뢰도·실패·만료는 원 결정론적 판단과 고정손절에 영향을 주지 않는다.
 
 AI 설정은 Provider·Model 카탈로그와 역할별 배정을 분리한다. 등록한 모델은 여러 Scout·Core에서 재사용할 수 있고 역할별 generation parameter override와 이력, 5개 역할의 원자적 일괄 활성화를 지원한다.
 

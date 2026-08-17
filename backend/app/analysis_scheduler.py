@@ -10,7 +10,11 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agents.runtime import ROUTE_ROLES, create_diagnostic_run
+from app.agents.runtime import (
+    ROUTE_ROLES,
+    create_diagnostic_run,
+    create_position_advisory_run,
+)
 from app.analysis_scheduler_state import (
     SCHEDULER_NAME,
     SchedulerIdentity,
@@ -216,14 +220,23 @@ def run_analysis_tick(
             )
             route_ids = _active_agent_routes(db, user.id)
             if route_ids is not None:
-                create_diagnostic_run(
-                    db,
-                    user=user,
-                    market=market,
-                    symbol=symbol,
-                    route_ids=route_ids,
-                    now=now,
-                )
+                if position is not None:
+                    create_position_advisory_run(
+                        db,
+                        user=user,
+                        basis_decision=decision,
+                        route_ids=route_ids,
+                        now=now,
+                    )
+                else:
+                    create_diagnostic_run(
+                        db,
+                        user=user,
+                        market=market,
+                        symbol=symbol,
+                        route_ids=route_ids,
+                        now=now,
+                    )
             decisions += int(created)
         except Exception:
             db.rollback()

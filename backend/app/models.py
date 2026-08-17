@@ -1498,7 +1498,10 @@ class LlmInvocation(Base):
 class AgentRun(Base):
     __tablename__ = "agent_runs"
     __table_args__ = (
-        CheckConstraint("purpose = 'DIAGNOSTIC'", name="ck_agent_runs_foundation_purpose"),
+        CheckConstraint(
+            "purpose IN ('DIAGNOSTIC','TRADING_ADVISORY')",
+            name="ck_agent_runs_foundation_purpose",
+        ),
         CheckConstraint("market IN ('KRX','NXT')", name="ck_agent_runs_market"),
         CheckConstraint(
             "state IN ('CREATED','RUNNING','SUCCEEDED','PARTIAL','FAILED','CANCELLED')",
@@ -1514,6 +1517,18 @@ class AgentRun(Base):
             "'ENTRY_STRONG','ENTRY_SUPPORTIVE','NEUTRAL','ENTRY_ADVERSE',"
             "'HOLD_SUPPORTIVE','EXIT_RISK_ELEVATED','EXIT_RISK_HIGH','UNKNOWN')",
             name="ck_agent_runs_shadow_assessment",
+        ),
+        CheckConstraint(
+            "fusion_state IS NULL OR fusion_state IN ("
+            "'PENDING','NO_ESCALATION','ESCALATED','EXPIRED','FAILED_SAFE')",
+            name="ck_agent_runs_fusion_state",
+        ),
+        CheckConstraint(
+            "(purpose = 'DIAGNOSTIC' AND basis_decision_id IS NULL "
+            "AND fusion_policy_version IS NULL AND fusion_state IS NULL) OR "
+            "(purpose = 'TRADING_ADVISORY' AND basis_decision_id IS NOT NULL "
+            "AND fusion_policy_version IS NOT NULL AND fusion_state IS NOT NULL)",
+            name="ck_agent_runs_advisory_context",
         ),
         Index("ix_agent_runs_owner_created", "owner_id", "created_at"),
     )
@@ -1537,6 +1552,15 @@ class AgentRun(Base):
     position_snapshot_json: Mapped[str | None] = mapped_column(Text)
     position_snapshot_hash: Mapped[str | None] = mapped_column(String(64))
     shadow_assessment: Mapped[str | None] = mapped_column(String(32))
+    basis_decision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decisions.id"), unique=True, index=True
+    )
+    fusion_policy_version: Mapped[str | None] = mapped_column(String(32))
+    fusion_state: Mapped[str | None] = mapped_column(String(24))
+    fusion_reason_code: Mapped[str | None] = mapped_column(String(64))
+    fusion_decision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decisions.id"), unique=True, index=True
+    )
     server_input_policy_version: Mapped[str | None] = mapped_column(String(32))
     market_context_snapshot_id: Mapped[str | None] = mapped_column(
         ForeignKey("market_context_snapshots.id"), index=True

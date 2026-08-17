@@ -1,5 +1,20 @@
 # Cresta 테스트 계획
 
+### T-POSITION-AGENT-FUSION — 외부 Agent POSITION 판단 안전 결합 (2026-08-17)
+
+- `T-POSITION-FUSION-001`: 열린 포지션 scheduler tick이 결정론적 TRADING basis를 먼저 실행 계층에 전달하고, 5개 ACTIVE route가 준비된 경우 같은 basis를 정확히 하나의 `TRADING_ADVISORY/PENDING` run에 연결하는지 확인한다.
+- `T-POSITION-FUSION-002`: 수동 DIAGNOSTIC run은 basis/fusion provenance가 없고 판단·승인·주문을 생성하지 않는지 확인한다.
+- `T-POSITION-FUSION-003`: 동일 사용자·시장·종목·market snapshot·canonical position hash와 current position version이 모두 일치하며 basis가 유효한 경우에만 결합하는지 확인한다.
+- `T-POSITION-FUSION-004`: 필수 4 Scout와 Core가 모두 `SUCCEEDED`, Core v2 schema 통과, `incomplete_roles=[]`, `shadow_assessment!=UNKNOWN`이어야 하며 실패·timeout·schema 오류·누락은 `FAILED_SAFE`로 종료하는지 확인한다.
+- `T-POSITION-FUSION-005`: confidence 0.70 이상 `EXIT_RISK_ELEVATED`는 기존 HOLD보다 강한 `PARTIAL_SELL(0.5)`, `EXIT_RISK_HIGH`는 `FULL_SELL`을 새 불변 Decision으로 만들고, `HOLD_SUPPORTIVE/NEUTRAL`과 낮은 confidence는 새 Decision을 만들지 않는지 확인한다.
+- `T-POSITION-FUSION-006`: 결합은 결정론적 행동을 낮추지 않고 confidence로 수량을 확대하지 않으며 기존 `PARTIAL_SELL/FULL_SELL`보다 약하거나 같은 결과를 무시하는지 확인한다.
+- `T-POSITION-FUSION-007`: 결합 Decision도 기존 행동별 실행 권한·Guard·승인/자동 주문 경계로만 전달되고, 같은 run 재처리가 Decision·DecisionExecution·승인·주문을 중복 생성하지 않는지 확인한다.
+- `T-POSITION-FUSION-008`: basis 만료와 position version 변경은 각각 `EXPIRED`/`FAILED_SAFE`로 종료하고, 독립적으로 이미 처리된 결정론적 판단과 FIXED_STOP을 취소하지 않는지 확인한다.
+- `T-POSITION-FUSION-009`: migration `20260817_0038`의 upgrade→downgrade→upgrade가 통과하고 DIAGNOSTIC/advisory 제약과 basis/fusion Decision FK·유일성이 유지되는지 확인한다.
+- `T-POSITION-FUSION-010`: Console 조회가 `DIAGNOSTIC · 주문 없음`과 `TRADING_ADVISORY · 모델 SHADOW/서버 결합`을 구분하고 fusion policy/state/reason을 표시하는지 확인한다.
+
+Evidence: 집중시험 14개, backend 전체 364개와 Ruff, SQLite migration `20260817_0038` upgrade→downgrade→upgrade가 통과했다. Frontend TypeScript·production build는 통과했고 component 전체 15개 중 기존 운영 휴장 비동기 시험 1개는 이번 변경과 무관하게 실패해 14개가 통과했다. Ubuntu PostgreSQL migration, 실제 외부 Provider POSITION advisory, Guard 이후 키움 모의 SELL 송신·체결은 배포 후 인수시험으로 남긴다.
+
 ## 2026-08-14 신규매수 미체결 취소 1차
 
 - `T-ORD-LIFE-001`: BUY 주문 접수 시 10초 뒤 `next_action_at`이 영속되고 그 전에는 취소하지 않는다.

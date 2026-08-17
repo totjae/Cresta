@@ -124,6 +124,20 @@ def _finalize_run(db: Session, run: AgentRun, now: datetime) -> None:
             else "SUCCEEDED"
         )
     run.completed_at = now
+    if run.purpose == "TRADING_ADVISORY":
+        try:
+            from app.position_agent_fusion import finalize_position_advisory
+
+            finalize_position_advisory(
+                db,
+                run=run,
+                settings=get_settings(),
+                now=now,
+            )
+        except Exception:
+            logger.exception("POSITION Agent advisory fusion failed run=%s", run.id)
+            run.fusion_state = "FAILED_SAFE"
+            run.fusion_reason_code = "FUSION_INTERNAL_ERROR"
 
 
 def recover_expired_stages(db: Session, *, now: datetime) -> int:

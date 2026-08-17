@@ -39,6 +39,7 @@ from app.market_context import select_market_context
 from app.models import (
     AgentRun,
     AgentStageRun,
+    Decision,
     EvidenceItem,
     IndicatorSnapshot,
     LlmInvocation,
@@ -51,6 +52,7 @@ from app.models import (
     Position,
     User,
 )
+from app.position_agent_fusion import FUSION_POLICY_VERSION
 
 DAG_VERSION = "agent-dag-v6"
 V2_DAG_VERSIONS = frozenset({"agent-dag-v4", "agent-dag-v5", DAG_VERSION})
@@ -930,15 +932,29 @@ def _assessment_v2(
     return AgentAssessmentV2(**legacy.model_dump(exclude={"schema_version"}))
 
 
-def create_diagnostic_run(
+def _create_run(
     db: Session,
     *,
     user: User,
     market: str,
     symbol: str,
     route_ids: dict[str, str],
+    purpose: str,
+    basis_decision: Decision | None,
     now: datetime | None = None,
 ) -> tuple[AgentRun, bool]:
+    if purpose not in {"DIAGNOSTIC", "TRADING_ADVISORY"}:
+        raise AgentRuntimeError("AGENT_PURPOSE_NOT_ALLOWED", 409)
+    if purpose == "DIAGNOSTIC" and basis_decision is not None:
+        raise AgentRuntimeError("AGENT_DIAGNOSTIC_BASIS_NOT_ALLOWED", 409)
+    if purpose == "TRADING_ADVISORY" and (
+        basis_decision is None
+        or basis_decision.purpose != "TRADING"
+        or basis_decision.decision_kind != "POSITION"
+        or basis_decision.symbol != symbol
+        or basis_decision.market != market
+    ):
+        raise AgentRuntimeError("AGENT_ADVISORY_BASIS_INVALID", 409)
     observed = now or datetime.now(UTC)
     settings = get_settings()
     if settings.dart_enabled and settings.dart_configuration_status() != "CONFIGURED":
@@ -961,6 +977,8 @@ def create_diagnostic_run(
         .order_by(Position.updated_at.desc(), Position.id)
     )
     analysis_context = "POSITION" if position is not None else "ENTRY"
+    if purpose == "TRADING_ADVISORY" and analysis_context != "POSITION":
+        raise AgentRuntimeError("AGENT_ADVISORY_POSITION_NOT_FOUND", 409)
     position_snapshot: dict[str, object] = (
         build_position_snapshot(
             db,
@@ -1038,6 +1056,8 @@ def create_diagnostic_run(
         for role, binding in sorted(bindings.items())
     }
     input_record = {
+        "purpose": purpose,
+        "basis_decision_id": basis_decision.id if basis_decision else None,
         "market": market,
         "symbol": symbol,
         "market_snapshot_id": snapshot.id,
@@ -1064,7 +1084,7 @@ def create_diagnostic_run(
     }
     input_hash = _hash(input_record)
     idempotency_key = _hash(
-        {"owner_id": user.id, "purpose": "DIAGNOSTIC", "input_hash": input_hash}
+        {"owner_id": user.id, "purpose": purpose, "input_hash": input_hash}
     )
     existing = db.scalar(select(AgentRun).where(AgentRun.idempotency_key == idempotency_key))
     if existing is not None:
@@ -1074,6 +1094,7 @@ def create_diagnostic_run(
 
     run = AgentRun(
         owner_id=user.id,
+        purpose=purpose,
         market=market,
         symbol=symbol,
         market_snapshot_id=snapshot.id,
@@ -1088,6 +1109,11 @@ def create_diagnostic_run(
         route_versions_json=_canonical(route_versions),
         idempotency_key=idempotency_key,
         state="CREATED",
+        basis_decision_id=basis_decision.id if basis_decision else None,
+        fusion_policy_version=(
+            FUSION_POLICY_VERSION if purpose == "TRADING_ADVISORY" else None
+        ),
+        fusion_state="PENDING" if purpose == "TRADING_ADVISORY" else None,
         valid_until=observed
         + timedelta(
             milliseconds=max(
@@ -1121,6 +1147,47 @@ def create_diagnostic_run(
     db.commit()
     db.refresh(run)
     return run, True
+
+
+def create_diagnostic_run(
+    db: Session,
+    *,
+    user: User,
+    market: str,
+    symbol: str,
+    route_ids: dict[str, str],
+    now: datetime | None = None,
+) -> tuple[AgentRun, bool]:
+    return _create_run(
+        db,
+        user=user,
+        market=market,
+        symbol=symbol,
+        route_ids=route_ids,
+        purpose="DIAGNOSTIC",
+        basis_decision=None,
+        now=now,
+    )
+
+
+def create_position_advisory_run(
+    db: Session,
+    *,
+    user: User,
+    basis_decision: Decision,
+    route_ids: dict[str, str],
+    now: datetime | None = None,
+) -> tuple[AgentRun, bool]:
+    return _create_run(
+        db,
+        user=user,
+        market=basis_decision.market,
+        symbol=basis_decision.symbol,
+        route_ids=route_ids,
+        purpose="TRADING_ADVISORY",
+        basis_decision=basis_decision,
+        now=now,
+    )
 
 
 def list_agent_runs(db: Session, owner_id: str, limit: int = 50) -> list[AgentRun]:

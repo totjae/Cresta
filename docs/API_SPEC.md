@@ -402,6 +402,13 @@ POST /api/v1/ai/providers/{provider_id}/credential
 | API-153 | v5 run은 `agent-server-input-v1`과 선택된 Market Context reference를 반환하고, context가 없으면 ID·hash를 null로 반환한다. null은 API 오류가 아니라 Scout 결측 입력을 뜻한다. |
 | API-154 | Market Context를 외부에서 생성·수정하는 운영 HTTP endpoint는 제공하지 않는다. |
 
+### POSITION Agent 결합 조회
+
+| ID | 요구사항 |
+| --- | --- |
+| API-155 | Agent run 목록·상세는 `DIAGNOSTIC | TRADING_ADVISORY` purpose와 nullable `basis_decision_id`, `fusion_policy_version`, `fusion_state`, `fusion_reason_code`, `fusion_decision_id`를 반환한다. position 원문과 credential은 반환하지 않는다. |
+| API-156 | `POST /ai/agent-runs/diagnostic`은 계속 `DIAGNOSTIC`만 생성한다. `TRADING_ADVISORY`를 생성·재실행·승격하는 공개 HTTP endpoint는 제공하지 않으며 scheduler만 내부 admission을 호출한다. |
+
 ## 거래 캘린더 운영 휴장 API
 
 - `GET /api/v1/venue-selections/calendar-overrides`는 활성 override와 최근 해제 이력을 반환한다.

@@ -1,5 +1,12 @@
 # Cresta 구현 상태
 
+### 2026-08-17 외부 Agent POSITION 판단 안전 결합 1차
+
+- scheduler는 열린 포지션의 결정론적 `TRADING/POSITION` 판단을 먼저 기존 실행 권한·Guard 계층에 전달한 뒤, 5개 ACTIVE SHADOW route가 모두 준비된 경우에만 그 판단을 basis로 갖는 별도 `TRADING_ADVISORY` Agent run을 생성한다. 수동 `DIAGNOSTIC` run은 계속 주문·승인과 완전히 격리된다.
+- 외부 Core 출력은 직접 행동 코드나 주문수량을 만들지 않는다. 서버 소유 `position-agent-fusion-v1`이 동일 사용자·종목·시장·시세 snapshot·포지션 canonical hash와 position version, basis 유효시간, 필수 Scout/Core 성공을 재검증한 뒤 `EXIT_RISK_ELEVATED`를 최소 `PARTIAL_SELL(0.5)`, `EXIT_RISK_HIGH`를 `FULL_SELL`로만 상향할 수 있다. 신뢰도 기준은 0.70이며 `HOLD_SUPPORTIVE/NEUTRAL`, 낮은 신뢰도와 기존 판단보다 약한 결과는 원 판단을 유지한다.
+- 결합 결과는 원 판단을 수정하지 않고 `CRESTA_FUSION / position-agent-fusion-v1`의 새 불변 TRADING Decision으로 기록된다. 이후에도 행동별 `DISABLED/MANUAL_APPROVAL/AUTOMATIC`, 전체 Guard, 승인과 공통 Order Creation Service를 반드시 거친다. Agent 실패·timeout·schema 오류·필수 역할 누락·만료·포지션 version 변경은 `FAILED_SAFE/EXPIRED/NO_ESCALATION`으로 기록하며 결정론적 판단과 고정손절에는 영향을 주지 않는다.
+- migration `20260817_0038`에 basis/fusion provenance와 상태 제약을 추가했다. 로컬 집중시험 14개, backend 전체 364개와 Ruff, SQLite migration `upgrade→downgrade→upgrade`가 통과했다. Frontend TypeScript·production build는 통과했고 component 전체 15개 중 이번 변경과 무관한 기존 운영 휴장 비동기 시험 1개가 실패해 14개가 통과했다. Ubuntu PostgreSQL 적용, 실제 외부 Provider POSITION advisory와 키움 모의 SELL 송신은 아직 미검증이다.
+
 ### 2026-08-17 보유 포지션 정기 판단 1차
 
 - scheduler가 같은 종목의 `OPEN` 포지션을 발견하면 ENTRY 대신 `decision_kind=POSITION` 판단을 생성한다. 단일계좌·단일사용자 MVP에서는 감시 목록에서 해제된 열린 포지션도 KRX 분석 대상으로 유지하며, 활성 사용자가 둘 이상이면 계좌 포지션을 임의 사용자에게 귀속하지 않는다.
