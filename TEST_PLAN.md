@@ -8,7 +8,7 @@
 - `T-AI-CONSOLE-IA-004`: 초기 목록은 최대 12개 요약 행만 렌더링하고 `더 보기`로 다음 12개를 확장하며, 전체 stage·reason·호출·구조화 응답은 선택한 단일 상세만 렌더링하는지 확인한다.
 - `T-AI-CONSOLE-IA-005`: 운영 판단 탭은 TRADING Decision과 승인 영역만 표시하고 DIAGNOSTIC Decision은 수동 진단, 모든 유형의 요약 이력은 전체 이력에서 조회되는지 확인한다.
 
-Evidence: 탭 분리, advisory/diagnostic 격리, 단일 상세, reason 축약과 12개 단위 확장을 포함한 관련 component 시험 4개가 통과했다. TypeScript와 Next.js production build가 통과했다. 전체 component 16개 중 이번 변경과 무관한 기존 운영 휴장 비동기 시험 1개만 실패해 15개가 통과했으며 Ubuntu Console 배포·실데이터 시각 검증은 대기 중이다.
+Evidence: 탭 분리, advisory/diagnostic 격리, 단일 상세, reason 축약과 12개 단위 확장을 포함한 관련 component 시험 4개가 통과했다. TypeScript와 Next.js production build가 통과했다. 전체 component 16개 중 이번 변경과 무관한 기존 운영 휴장 비동기 시험 1개만 실패해 15개가 통과했다. Ubuntu Console에 `1ba7554`를 배포한 뒤 Compose 전체 서비스 healthy, 내부 root/healthz HTTP 200, 외부 HTTPS root 200·TLS 검증 0 및 healthz 정상 응답을 확인했다. 인증 후 실제 데이터 시각 검증은 대기 중이다.
 
 ### T-POSITION-AGENT-FUSION — 외부 Agent POSITION 판단 안전 결합 (2026-08-17)
 
