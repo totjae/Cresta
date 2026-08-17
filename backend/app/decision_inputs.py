@@ -44,6 +44,7 @@ def build_decision_input(
     state: MarketStreamState,
     observed_at: datetime,
     quote_stale_seconds: int,
+    position_snapshot: dict[str, object] | None = None,
 ) -> tuple[DecisionInputSnapshot, dict[str, object]]:
     observed = _utc(observed_at)
     received_at = _utc(snapshot.received_at)
@@ -111,7 +112,7 @@ def build_decision_input(
             "received_at": received_at.isoformat(),
         },
         "indicators": indicators,
-        "position": None,
+        "position": position_snapshot,
         "open_orders": [],
         "account_risk_summary": None,
         "market_context": None,

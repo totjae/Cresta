@@ -203,6 +203,18 @@ core_output:
 | AI-084 | 종목 하나의 평가 실패는 같은 tick의 다른 종목을 중단시키지 않는다. 판단·SHADOW 실행·Guard·감사는 종목별 transaction으로 commit하며 실패 종목은 rollback한다. |
 | AI-085 | scheduler lease의 현재 owner만 tick을 실행한다. lease를 잃으면 새 판단 생성을 즉시 중단하며 다른 인스턴스가 만료 후 현재 슬롯을 멱등 재처리할 수 있다. |
 
+### 6.2.1 보유 포지션 정기 판단
+
+| ID | 요구사항 |
+| --- | --- |
+| AI-117 | scheduler는 평가 대상 종목에 `OPEN` 포지션이 있으면 ENTRY가 아니라 `decision_kind=POSITION` 판단을 생성한다. 같은 종목·슬롯의 ENTRY와 POSITION은 서로 다른 evaluation request ID를 사용하며 각각 한 번만 생성한다. |
+| AI-118 | 첫 MOCK 구현의 POSITION 판단은 서버 소유 `deterministic-position-v1` 정책을 사용한다. 외부 Provider의 DIAGNOSTIC Agent 결과를 TRADING 판단으로 복사하거나 승격하지 않는다. |
+| AI-119 | POSITION 입력은 현재 market·indicator snapshot과 포지션 ID·version, 수량·평균단가·현재가·미실현손익률·고정손절 거리·고점 대비 하락률을 canonical JSON에 고정한다. 입력 생성 후 포지션이나 시세가 바뀌어도 기존 판단을 수정하지 않는다. |
+| AI-120 | 데이터가 정상일 때 exit risk score는 `position-policy-v1`의 고정 가중치만 사용한다. 고정손절 도달 또는 90점 이상은 `FULL_SELL`, 70~89점은 `PARTIAL_SELL`과 `sell_ratio=0.5`, 그 외는 `HOLD`다. 모델 confidence는 수량이나 Guard 한도를 확대하지 않는다. |
+| AI-121 | snapshot·지표·포지션 freshness가 불충분하거나 포지션 원가가 유효하지 않으면 `HOLD/DATA_INSUFFICIENT`로 축소한다. 데이터 오류를 매도 또는 보유 안전성의 근거로 추정하지 않으며 독립 Guard의 고정손절은 계속 동작한다. |
+| AI-122 | POSITION 판단 유효시간은 최대 5분이다. 실행 시점에는 현재 포지션 version·관리수량·예약수량·최신 정상 시세와 Guard를 다시 검사하며 판단 입력의 수량을 그대로 주문수량으로 사용하지 않는다. |
+| AI-123 | 단일계좌·단일사용자 MVP에서는 열린 계좌 포지션을 감시 종목 해제 여부와 무관하게 scheduler 대상에 포함한다. 활성 사용자가 둘 이상이어서 계좌 소유자를 유일하게 결정할 수 없으면 자동 귀속하지 않고 기존 사용자별 감시 대상만 처리한다. |
+
 ### 6.3 Scout 입력 snapshot과 지표 기반 Mock 계약
 
 | ID | 요구사항 |

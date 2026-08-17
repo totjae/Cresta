@@ -524,6 +524,38 @@ describe("execution policy settings", () => {
 describe("Mock AI decisions", () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  it("shows decision-driven SELL approval language and managed-quantity warning", async () => {
+    const pendingSell = {
+      schema_version: "1.0", request_id: "approval-list-1", approval_id: "approval-sell-1",
+      execution_id: "execution-sell-1", decision_id: "decision-sell-1", user_id: "user-1",
+      state: "PENDING", symbol: "005930", market: "KRX", action: "PARTIAL_SELL",
+      reference_price: "70000.0000", quantity: 3, order_id: null, result_code: null,
+      expires_at: "2026-08-13T01:35:00Z", created_at: "2026-08-13T01:30:00Z",
+      updated_at: "2026-08-13T01:30:00Z",
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "sell-session", login_id: "admin", expires_at: "2026-08-13T09:00:00Z", csrf_token: "csrf-sell" });
+      if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
+      if (path === "/api/v1/decisions") return jsonResponse({ items: [] });
+      if (path === "/api/v1/agent-runs") return jsonResponse({ items: [] });
+      if (path === "/api/v1/ai/routes") return jsonResponse({ items: [] });
+      if (path === "/api/v1/approvals") return jsonResponse({ schema_version: "1.0", request_id: "approval-list-1", items: [pendingSell] });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CrestaConsole />);
+
+    await user.click(await screen.findByRole("button", { name: /AI 판단/ }));
+    expect(await screen.findByText("PARTIAL_SELL")).toBeInTheDocument();
+    expect(screen.getByText("3주 · 기준가 70000.0000")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "승인" }));
+    expect(await screen.findByRole("dialog", { name: "PARTIAL_SELL 주문 승인" })).toBeInTheDocument();
+    expect(screen.getByText(/3주 SELL 주문/)).toBeInTheDocument();
+    expect(screen.getByText(/Cresta 관리수량을 초과하지 않습니다/)).toBeInTheDocument();
+  });
+
   it("shows execution-policy routing without creating an order", async () => {
     const decision = {
       decision_id: "decision-1", evaluation_request_id: "evaluation-1", symbol: "005930", market: "KRX",

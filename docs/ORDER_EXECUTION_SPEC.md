@@ -136,6 +136,7 @@ order_policy:
 | ORD-045 | 자동 취소 전 주문 row를 잠그고 `CANCEL_PENDING`을 commit한 뒤 `kt10003`을 정확히 한 번 호출한다. 취소 요청 결과가 불명확하면 주문을 `UNKNOWN`으로 전환하고 거래 gate를 `RECONCILING/ORDER_CANCEL_OUTCOME_UNKNOWN`으로 닫는다. |
 | ORD-046 | 명시적 취소 업무 거절은 원주문의 체결·잔량을 변경하지 않는다. 주문은 Broker 대조가 필요한 `RECONCILING`으로 전환하고 다음 주문 송신을 중지한다. |
 | ORD-047 | 이 단계의 호가단위 검사는 KRX가 공표한 시장별 주식 호가표 version과 상품 구분을 명시적으로 받은 계산 가격에만 적용한다. Broker 최우선 호가에서 직접 가져온 가격은 수신 Adapter가 유효 호가로 보장하며, 시장·상품 구분 없이 가격만 보고 임의 보정하지 않는다. |
+| ORD-048 | 판단 기반 `PARTIAL_SELL`·`FULL_SELL` 1차는 최신 Broker 최우선 매수호가를 그대로 사용하는 LIMIT 주문만 만든다. 미체결 재호가·시장가 fallback은 별도 정책과 장중 시험 전까지 `NONE`으로 유지한다. |
 
 ### 3.5 주문 전 안전검사
 

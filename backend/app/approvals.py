@@ -1,4 +1,4 @@
-"""Approval lifecycle for MANUAL_APPROVAL BUY orders.
+"""Approval lifecycle for MANUAL_APPROVAL BUY and decision-driven SELL orders.
 
 When ``decision_execution.route_trading_decision`` routes a BUY decision whose
 execution mode is ``MANUAL_APPROVAL`` and the hard Guard passes, it creates an
@@ -10,8 +10,9 @@ and only then is an ``OrderIntent`` + ``TradingOrder(CREATED)`` atomically
 created via ``app.order_creation.create_order``. The broker worker transmits the
 CREATED order; this service never sends it.
 
-FIXED_STOP SELL is automatic (``AUTOMATIC`` mode) and does not go through
-approval — it calls ``create_order`` directly from ``stop_trigger``.
+Decision-driven ``PARTIAL_SELL`` and ``FULL_SELL`` approvals capture the
+position identity/version and exact Cresta-managed quantity. ``FIXED_STOP``
+SELL remains automatic and calls ``create_order`` from ``stop_trigger``.
 """
 
 from __future__ import annotations
@@ -55,6 +56,9 @@ def _scope_snapshot(
     reference_price: Decimal | None,
     quantity: int,
     now: datetime,
+    *,
+    position_id: str | None = None,
+    position_version: int | None = None,
 ) -> dict[str, object]:
     return {
         "schema_version": "approval-scope-v1",
@@ -65,6 +69,8 @@ def _scope_snapshot(
         "action": decision.action,
         "reference_price": str(reference_price) if reference_price is not None else None,
         "quantity": quantity,
+        "position_id": position_id,
+        "position_version": position_version,
         "valid_until": _utc(decision.valid_until).isoformat(),
         "captured_at": _utc(now).isoformat(),
     }
@@ -75,6 +81,13 @@ def _marketable_buy_price(snapshot: MarketSnapshot | None) -> Decimal | None:
     if snapshot is None:
         return None
     return snapshot.best_ask_price
+
+
+def _marketable_sell_price(snapshot: MarketSnapshot | None) -> Decimal | None:
+    """MARKETABLE_LIMIT sell price = current best bid."""
+    if snapshot is None:
+        return None
+    return snapshot.best_bid_price
 
 
 def _buy_quantity(entry_order_amount: Decimal | None, price: Decimal | None) -> int:
@@ -99,7 +112,7 @@ def create_approval(
     settings: Settings,
     now: datetime | None = None,
 ) -> Approval:
-    """Create a ``PENDING`` approval for a MANUAL_APPROVAL BUY execution.
+    """Create one immutable ``PENDING`` approval for a supported decision.
 
     Captures the reference price and whole-share quantity into an immutable
     scope snapshot so the approval can be invalidated if the price deviates
@@ -108,15 +121,36 @@ def create_approval(
     """
     current = now or datetime.now(UTC)
     snapshot = db.get(MarketSnapshot, decision.input_snapshot_id)
-    reference_price = _marketable_buy_price(snapshot)
     from app.risk_policy import active_risk_policy, risk_policy_payload
 
     risk_config = active_risk_policy(db, user.id)
     risk_policy = risk_policy_payload(risk_config)
-    quantity = _buy_quantity(risk_policy.entry_order_amount, reference_price)
+    position_id: str | None = None
+    position_version: int | None = None
+    if decision.action == "BUY":
+        reference_price = _marketable_buy_price(snapshot)
+        quantity = _buy_quantity(risk_policy.entry_order_amount, reference_price)
+    elif decision.action in {"PARTIAL_SELL", "FULL_SELL"}:
+        from app.decision_execution import _sell_plan
+
+        plan = _sell_plan(db, decision, snapshot=snapshot, lock_position=True)
+        reference_price = _marketable_sell_price(snapshot)
+        quantity = plan.quantity
+        if plan.position is not None:
+            position_id = plan.position.id
+            position_version = plan.position.version
+    else:
+        raise ApprovalError("ACTION_NOT_IMPLEMENTED", 409)
     if quantity <= 0:
         raise ApprovalError("APPROVAL_QUANTITY_INVALID", 409)
-    scope = _scope_snapshot(decision, reference_price, quantity, current)
+    scope = _scope_snapshot(
+        decision,
+        reference_price,
+        quantity,
+        current,
+        position_id=position_id,
+        position_version=position_version,
+    )
     approval = Approval(
         execution_id=execution.id,
         decision_id=decision.id,
@@ -203,29 +237,53 @@ def _evaluate_approval(
     approval_snapshot). When ``blocking_code`` is None the approval may
     proceed to order creation.
     """
-    from app.decision_execution import _buy_guard_rules
+    from app.decision_execution import _buy_guard_rules, _sell_guard_rules, _sell_plan
     from app.risk_policy import active_risk_policy, risk_policy_payload
 
     risk_config = active_risk_policy(db, user.id)
     risk_policy = risk_policy_payload(risk_config)
     snapshot = _latest_snapshot_for_approval(db, decision)
-    rules = _buy_guard_rules(
-        db,
-        decision,
-        user,
-        settings,
-        risk_policy,
-        now,
-        snapshot=snapshot,
-    )
-    current_price = _marketable_buy_price(snapshot)
-    # Price-deviation gate (ORD-010/ORD-011): reject if the ask moved beyond
-    # the configured tolerance since the approval was captured.
     scope = json.loads(approval.scope_snapshot_json)
+    quantity = int(scope.get("quantity") or 0)
+    if decision.action == "BUY":
+        rules = _buy_guard_rules(
+            db,
+            decision,
+            user,
+            settings,
+            risk_policy,
+            now,
+            snapshot=snapshot,
+        )
+        current_price = _marketable_buy_price(snapshot)
+    elif decision.action in {"PARTIAL_SELL", "FULL_SELL"}:
+        plan = _sell_plan(db, decision, snapshot=snapshot, lock_position=True)
+        rules = _sell_guard_rules(
+            db,
+            decision,
+            settings,
+            risk_policy,
+            now,
+            plan=plan,
+            expected_position_id=(
+                str(scope["position_id"]) if scope.get("position_id") else None
+            ),
+            expected_position_version=(
+                int(scope["position_version"])
+                if scope.get("position_version") is not None
+                else None
+            ),
+            requested_quantity=quantity,
+        )
+        current_price = _marketable_sell_price(snapshot)
+    else:
+        rules = [rule("ACTION_NOT_IMPLEMENTED", False)]
+        current_price = None
+    # Price-deviation gate (ORD-010/ORD-011): reject if the executable quote
+    # moved beyond the configured tolerance since the approval was captured.
     reference_price = (
         Decimal(str(scope["reference_price"])) if scope.get("reference_price") else None
     )
-    quantity = int(scope.get("quantity") or 0)
     if not _price_deviation_ok(
         reference_price, current_price, risk_policy.max_price_deviation_pct
     ):
@@ -276,6 +334,7 @@ def approve(
     execution = db.get(DecisionExecution, approval.execution_id)
     if execution is None:
         raise ApprovalError("EXECUTION_NOT_FOUND", 404)
+    approval_scope = json.loads(approval.scope_snapshot_json)
 
     rules, blocked, current_price, quantity, approval_snapshot = _evaluate_approval(
         db, approval=approval, decision=decision, user=user, settings=settings, now=current
@@ -287,10 +346,14 @@ def approve(
         subject_id=approval.id,
         rules=rules,
         snapshot_id=approval_snapshot.id if approval_snapshot else None,
-        position_version=None,
+        position_version=(
+            int(approval_scope["position_version"])
+            if approval_scope.get("position_version") is not None
+            else None
+        ),
         execution_policy_version_id=execution.execution_policy_version_id,
         risk_policy_version_id=execution.risk_policy_version_id,
-        halt_scope="ENTRY_HALT" if blocked else None,
+        halt_scope="ENTRY_HALT" if blocked and decision.action == "BUY" else None,
         valid_until=decision.valid_until,
         now=current,
     )
@@ -325,11 +388,12 @@ def approve(
         db.commit()
         raise ApprovalError(blocked, 409)
 
+    side = "BUY" if decision.action == "BUY" else "SELL"
     request = OrderRequest(
         symbol=decision.symbol,
         market=decision.market,
-        side="BUY",
-        action="BUY",
+        side=side,
+        action=decision.action,
         order_type="LIMIT",
         limit_price=current_price,
         quantity=quantity,
@@ -338,8 +402,8 @@ def approve(
             "environment": "MOCK",
             "symbol": decision.symbol,
             "market": decision.market,
-            "side": "BUY",
-            "action": "BUY",
+            "side": side,
+            "action": decision.action,
             "order_type": "LIMIT",
             "limit_price": str(current_price) if current_price is not None else None,
             "quantity": quantity,
@@ -347,6 +411,8 @@ def approve(
             "decision_id": decision.id,
             "reference_snapshot_id": decision.input_snapshot_id,
             "approval_snapshot_id": approval_snapshot.id if approval_snapshot else None,
+            "position_id": approval_scope.get("position_id"),
+            "position_version": approval_scope.get("position_version"),
             "idempotency_key": idempotency_key,
         },
         correlation_id=correlation_id,

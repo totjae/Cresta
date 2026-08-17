@@ -60,6 +60,8 @@
 | EXE-012 | `FULL_SELL`과 `FIXED_STOP`은 보유수량에서 이미 미체결 매도 주문에 예약된 수량을 뺀 매도가능수량만 사용한다. |
 | EXE-013 | `BUY` 수량은 AI confidence가 아니라 활성 전략의 `entry_order_amount`와 Guard 기준가격으로 계산한다. 설정이 없으면 `ORDER_SIZE_NOT_CONFIGURED`, 계산 결과가 1주 미만이면 `QUANTITY_BELOW_ONE`으로 차단한다. |
 | EXE-014 | 첫 구현 미지원 행동은 실행 권한이 `AUTOMATIC`이어도 `ACTION_NOT_IMPLEMENTED`이며 다른 행동으로 대체하지 않는다. |
+| EXE-015 | 판단 기반 `PARTIAL_SELL`·`FULL_SELL`은 Broker 총수량이 아니라 `min(managed_quantity, available_quantity)`에서 활성·불명 SELL 주문 예약수량을 뺀 수량만 사용한다. 순수 외부 보유분은 승인·자동 모드 모두 주문하지 않는다. |
+| EXE-016 | 판단 기반 SELL의 첫 주문가는 판단 snapshot의 최우선 매수호가를 `MARKETABLE_LIMIT`로 사용한다. 승인 시에는 최신 정상 snapshot의 최우선 매수호가와 포지션 version을 다시 검사하며, 임의 호가단위 계산·시장가 전환·재호가는 하지 않는다. |
 
 ### 3.3 실행 상태와 멱등성
 
@@ -162,6 +164,7 @@ SPREAD_TOO_WIDE | PRICE_DEVIATION_EXCEEDED | DATABASE_UNAVAILABLE
 | EXE-054 | Guard 기준가격·수량·노출 계산은 Decimal/정수 연산을 사용하고 수수료·세금 포함 정책과 이미 예약된 미체결 금액·수량을 반영한다. |
 | EXE-055 | `BROKER_SEND` 단계는 worker의 현재 lease·fencing, gate, 주문 상태·계좌·수량 불변조건을 다시 검사한다. 실패하면 송신하지 않고 주문을 안전 상태 또는 재동기화로 전환한다. |
 | EXE-056 | Guard 차단은 decision 실행 결과, `risk_events`와 감사 로그에 reason code·scope·입력 version을 남기며 비밀값과 전체 계좌번호를 저장하지 않는다. 고정 손절 trigger의 차단 기록은 `stop_triggers` 상태(`EXIT_PENDING`)와 `risk_events`(scope=`FIXED_STOP`)에 함께 기록하며, 일일손실·spread·연결위험은 후속에서 같은 `risk_events` 원장을 재사용한다. |
+| EXE-057 | `PARTIAL_SELL`·`FULL_SELL` Guard는 포지션 존재·OPEN 상태·Cresta 관리수량·Broker 매도가능수량·포지션 version·활성/불명 주문·최신 정상 시세·거래상태·Broker gate·재동기화·MOCK 환경을 검사한다. 신규진입 전용 한도와 `PAUSE_ENTRY`는 청산을 막지 않는다. |
 
 ### 3.7 주문 생성 경계
 
@@ -207,6 +210,7 @@ MOCK_AUTOMATIC: 명세된 4개 행동의 키움 모의투자 자동 실행 허�
 - 승인 성공 transaction에서 proof·승인·Guard·주문·감사가 함께 commit되거나 모두 rollback된다.
 - Guard 차단 reason과 판단 reference snapshot·승인 시점 최신 snapshot·설정·포지션 version으로 결과를 재현할 수 있다.
 - 자동 주문도 사용자 승인 주문과 동일한 주문 상태 머신·Broker worker·UNKNOWN 재동기화를 사용한다.
+- 부분·전량매도의 승인 범위에는 `position_id`, `position_version`, 정확한 수량과 reference snapshot·가격을 고정하며 승인 시 하나라도 달라져 안전한 주문을 보장할 수 없으면 `INVALIDATED`로 종료한다.
 - `SHADOW → APPROVAL_ONLY → MOCK_AUTOMATIC` 단계가 시험 근거 없이 확대되지 않는다.
 
 ## 6. 미결정·보류 항목

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.approvals import create_approval
@@ -19,7 +20,9 @@ from app.models import (
     GuardEvaluation,
     MarketSnapshot,
     MarketStreamState,
+    Position,
     TradingGate,
+    TradingOrder,
     User,
     WatchlistItem,
 )
@@ -35,10 +38,39 @@ from app.risk_calc import (
 from app.risk_events import RISK_EVENT_SCOPE_DAILY_LOSS, active_risk_events
 from app.risk_policy import active_risk_policy, risk_policy_payload
 from app.schemas import RiskPolicyPayload
+from app.venue_selection import classify_session
 
 ACCOUNT_ALIAS = "KIWOOM_MOCK_PRIMARY"
 NO_ACTIONS = {"WAIT", "REJECT", "RISK_BLOCK", "HOLD"}
 SUPPORTED_ACTIONS = {"BUY", "PARTIAL_SELL", "FULL_SELL", "FIXED_STOP"}
+SELL_ACTIONS = {"PARTIAL_SELL", "FULL_SELL"}
+ACTIVE_ORDER_STATES = {
+    "CREATED",
+    "VALIDATING",
+    "SUBMITTING",
+    "ACKNOWLEDGED",
+    "OPEN",
+    "PARTIALLY_FILLED",
+    "CANCEL_PENDING",
+    "REPLACE_PENDING",
+    "UNKNOWN",
+    "RECONCILING",
+}
+TRADABLE_SESSIONS_BY_MARKET = {
+    "KRX": {"KRX_ONLY", "DUAL_CONTINUOUS"},
+    "NXT": {"NXT_PRE", "DUAL_CONTINUOUS", "NXT_AFTER"},
+}
+ORDER_ENABLED_STAGES = {"APPROVAL_ONLY", "MOCK_AUTOMATIC"}
+
+
+@dataclass(frozen=True)
+class SellPlan:
+    position: Position | None
+    snapshot: MarketSnapshot | None
+    sellable_quantity: int
+    quantity: int
+    price: Decimal | None
+    sell_ratio: Decimal | None
 
 
 def _utc(value: datetime) -> datetime:
@@ -155,6 +187,168 @@ def _buy_guard_rules(
     ]
 
 
+def _sell_ratio(decision: Decision) -> Decimal | None:
+    if decision.action != "PARTIAL_SELL":
+        return None
+    try:
+        value = json.loads(decision.core_output_json).get("sell_ratio")
+        ratio = Decimal(str(value))
+    except (AttributeError, TypeError, ValueError, InvalidOperation, json.JSONDecodeError):
+        return None
+    return ratio if Decimal("0.01") <= ratio <= Decimal("1.0") else None
+
+
+def _sellable_managed_quantity(db: Session, position: Position | None) -> int:
+    if position is None:
+        return 0
+    reserved = int(
+        db.scalar(
+            select(func.coalesce(func.sum(TradingOrder.remaining_quantity), 0)).where(
+                TradingOrder.account_alias == position.account_alias,
+                TradingOrder.symbol == position.symbol,
+                TradingOrder.side == "SELL",
+                TradingOrder.status.in_(ACTIVE_ORDER_STATES),
+            )
+        )
+        or 0
+    )
+    broker_sellable_managed = min(
+        max(0, int(position.managed_quantity)),
+        max(0, int(position.available_quantity)),
+    )
+    return max(0, broker_sellable_managed - reserved)
+
+
+def _has_active_symbol_order(db: Session, decision: Decision) -> bool:
+    return (
+        db.scalar(
+            select(TradingOrder.id).where(
+                TradingOrder.account_alias == ACCOUNT_ALIAS,
+                TradingOrder.symbol == decision.symbol,
+                TradingOrder.status.in_(ACTIVE_ORDER_STATES),
+            )
+        )
+        is not None
+    )
+
+
+def _position_for_sell(
+    db: Session, decision: Decision, *, lock: bool = False
+) -> Position | None:
+    query = select(Position).where(
+        Position.account_alias == ACCOUNT_ALIAS,
+        Position.symbol == decision.symbol,
+    )
+    if lock:
+        query = query.with_for_update()
+    return db.scalar(query)
+
+
+def _sell_plan(
+    db: Session,
+    decision: Decision,
+    *,
+    snapshot: MarketSnapshot | None,
+    lock_position: bool = False,
+) -> SellPlan:
+    position = _position_for_sell(db, decision, lock=lock_position)
+    sellable = _sellable_managed_quantity(db, position)
+    ratio = _sell_ratio(decision)
+    if decision.action == "FULL_SELL":
+        quantity = sellable
+    elif ratio is not None:
+        quantity = int(
+            (Decimal(sellable) * ratio).to_integral_value(rounding=ROUND_DOWN)
+        )
+    else:
+        quantity = 0
+    price = snapshot.best_bid_price if snapshot is not None else None
+    return SellPlan(
+        position=position,
+        snapshot=snapshot,
+        sellable_quantity=sellable,
+        quantity=quantity,
+        price=price,
+        sell_ratio=ratio,
+    )
+
+
+def _sell_guard_rules(
+    db: Session,
+    decision: Decision,
+    settings: Settings,
+    risk_policy: RiskPolicyPayload,
+    now: datetime,
+    *,
+    plan: SellPlan,
+    expected_position_id: str | None = None,
+    expected_position_version: int | None = None,
+    requested_quantity: int | None = None,
+) -> list[dict[str, object]]:
+    position = plan.position
+    snapshot = plan.snapshot
+    stream = db.get(MarketStreamState, (decision.market, decision.symbol))
+    gate = db.get(TradingGate, ACCOUNT_ALIAS)
+    quantity = plan.quantity if requested_quantity is None else requested_quantity
+    fresh = bool(
+        snapshot
+        and stream
+        and stream.current_snapshot_id == snapshot.id
+        and snapshot.quality == "NORMAL"
+        and stream.quality == "NORMAL"
+        and snapshot.trading_status == "TRADING"
+        and _utc(snapshot.received_at) <= now
+        and (now - _utc(snapshot.received_at)).total_seconds()
+        <= risk_policy.quote_stale_seconds
+    )
+    session = classify_session(now)
+    return [
+        _rule("ENVIRONMENT_NOT_MOCK", settings.environment.upper() == "MOCK"),
+        _rule("DECISION_EXPIRED", now <= _utc(decision.valid_until)),
+        _rule(
+            "POSITION_FOUND",
+            position is not None and position.state == "OPEN" and position.quantity > 0,
+        ),
+        _rule(
+            "POSITION_ID_MATCH",
+            expected_position_id is None
+            or (position is not None and position.id == expected_position_id),
+        ),
+        _rule(
+            "POSITION_VERSION_MATCH",
+            expected_position_version is None
+            or (position is not None and position.version == expected_position_version),
+        ),
+        _rule(
+            "POSITION_MANAGED_QUANTITY_POSITIVE",
+            position is not None and position.managed_quantity > 0,
+        ),
+        _rule(
+            "SELL_RATIO_VALID",
+            decision.action != "PARTIAL_SELL" or plan.sell_ratio is not None,
+        ),
+        _rule("NO_ACTIVE_OR_UNKNOWN_ORDER", not _has_active_symbol_order(db, decision)),
+        _rule("QUANTITY_BELOW_ONE", quantity >= 1),
+        _rule(
+            "SELL_QUANTITY_AVAILABLE",
+            quantity >= 1 and quantity <= plan.sellable_quantity,
+        ),
+        _rule("BROKER_READY", gate is not None and gate.status == "READY"),
+        _rule(
+            "NOT_RECONCILING", gate is not None and gate.status != "RECONCILING"
+        ),
+        _rule("MARKET_DATA_FRESH", fresh),
+        _rule(
+            "MARKETABLE_SELL_PRICE_AVAILABLE",
+            plan.price is not None and plan.price > 0,
+        ),
+        _rule(
+            "MARKET_SESSION_TRADABLE",
+            session in TRADABLE_SESSIONS_BY_MARKET.get(decision.market, set()),
+        ),
+    ]
+
+
 def route_trading_decision(
     db: Session,
     *,
@@ -168,12 +362,11 @@ def route_trading_decision(
 
     In the ``SHADOW`` stage no approval or order is ever created — the execution
     ends in ``SHADOW_RECORDED`` (or ``GUARD_BLOCKED``). In the ``APPROVAL_ONLY``
-    stage a BUY decision whose hard Guard passes either creates a ``PENDING``
-    approval (``MANUAL_APPROVAL`` mode) or, for ``AUTOMATIC`` mode, creates the
-    CREATED order directly via the shared order creation service. Sell actions
-    remain rule-triggered (FIXED_STOP) rather than decision-driven; non-BUY
-    supported actions stay ``ACTION_NOT_IMPLEMENTED`` until the take-profit
-    milestone wires them through the same service.
+    stage a supported decision whose hard Guard passes either creates a
+    ``PENDING`` approval (``MANUAL_APPROVAL`` mode) or, for ``AUTOMATIC`` mode,
+    creates the CREATED order directly via the shared order creation service.
+    Decision-driven SELL orders are limited to the Cresta-managed, currently
+    broker-sellable portion of the position.
     """
     if decision.purpose != "TRADING":
         return None
@@ -217,6 +410,7 @@ def route_trading_decision(
     db.flush()
 
     guard: GuardEvaluation | None = None
+    sell_plan: SellPlan | None = None
     if normalized_action == "NO_ACTION":
         execution.state = "NO_ACTION"
         execution.result_code = action
@@ -237,6 +431,22 @@ def route_trading_decision(
                 current,
                 snapshot=decision_snapshot,
             )
+        elif action in SELL_ACTIONS:
+            decision_snapshot = db.get(MarketSnapshot, decision.input_snapshot_id)
+            sell_plan = _sell_plan(
+                db,
+                decision,
+                snapshot=decision_snapshot,
+                lock_position=True,
+            )
+            rules = _sell_guard_rules(
+                db,
+                decision,
+                settings,
+                risk_policy,
+                current,
+                plan=sell_plan,
+            )
         else:
             rules = [_rule("ACTION_NOT_IMPLEMENTED", False)]
         blocked = [item for item in rules if item["result"] == "BLOCKED"]
@@ -249,6 +459,11 @@ def route_trading_decision(
             rule_results_json=json.dumps(rules, separators=(",", ":"), sort_keys=True),
             halt_scope="ENTRY_HALT" if blocked and action == "BUY" else None,
             snapshot_id=decision.input_snapshot_id,
+            position_version=(
+                sell_plan.position.version
+                if sell_plan is not None and sell_plan.position is not None
+                else None
+            ),
             execution_policy_version_id=config.id if config else None,
             risk_policy_version_id=risk_config.id if risk_config else None,
             evaluated_at=current,
@@ -260,7 +475,7 @@ def route_trading_decision(
         if blocked:
             execution.state = "GUARD_BLOCKED"
             execution.result_code = str(blocked[0]["code"])
-        elif action == "BUY" and settings.execution_stage == "APPROVAL_ONLY":
+        elif action in {"BUY", *SELL_ACTIONS} and settings.execution_stage in ORDER_ENABLED_STAGES:
             if mode == "MANUAL_APPROVAL":
                 # Defer order creation to user approval; the approval service
                 # re-runs the Guard and price-deviation check before creating
@@ -275,7 +490,7 @@ def route_trading_decision(
                 )
                 execution.approval_id = approval.id
                 # create_approval commits and sets execution.state APPROVAL_PENDING.
-            elif mode == "AUTOMATIC":
+            elif mode == "AUTOMATIC" and action == "BUY":
                 execution = _create_buy_order(
                     db,
                     execution=execution,
@@ -283,6 +498,16 @@ def route_trading_decision(
                     user=user,
                     risk_policy=risk_policy,
                     settings=settings,
+                    correlation_id=correlation_id,
+                    current=current,
+                )
+            elif mode == "AUTOMATIC" and sell_plan is not None:
+                execution = _create_sell_order(
+                    db,
+                    execution=execution,
+                    decision=decision,
+                    user=user,
+                    plan=sell_plan,
                     correlation_id=correlation_id,
                     current=current,
                 )
@@ -379,6 +604,68 @@ def _create_buy_order(
             user=user,
             request=request,
             audit_action="AUTOMATIC_BUY_ORDER_CREATED",
+            now=current,
+        )
+    except OrderCreationError as exc:
+        execution.state = "FAILED_SAFE"
+        execution.result_code = exc.code
+        return execution
+    execution.state = "ORDER_CREATED"
+    execution.result_code = "ORDER_CREATED"
+    execution.order_intent_id = order.intent_id
+    return execution
+
+
+def _create_sell_order(
+    db: Session,
+    *,
+    execution: DecisionExecution,
+    decision: Decision,
+    user: User,
+    plan: SellPlan,
+    correlation_id: str,
+    current: datetime,
+) -> DecisionExecution:
+    """Create one decision-driven SELL order after its Guard has passed."""
+    from app.order_creation import OrderCreationError, OrderRequest, create_order
+
+    if plan.position is None or plan.quantity <= 0 or plan.price is None:
+        execution.state = "GUARD_BLOCKED"
+        execution.result_code = "SELL_QUANTITY_AVAILABLE"
+        return execution
+    idempotency_key = f"auto-sell:{decision.id}:{decision.action}"
+    request = OrderRequest(
+        symbol=decision.symbol,
+        market=decision.market,
+        side="SELL",
+        action=decision.action,
+        order_type="LIMIT",
+        limit_price=plan.price,
+        quantity=plan.quantity,
+        idempotency_key=idempotency_key,
+        request_payload={
+            "environment": "MOCK",
+            "symbol": decision.symbol,
+            "market": decision.market,
+            "side": "SELL",
+            "action": decision.action,
+            "order_type": "LIMIT",
+            "limit_price": str(plan.price),
+            "quantity": plan.quantity,
+            "decision_id": decision.id,
+            "position_id": plan.position.id,
+            "position_version": plan.position.version,
+            "reference_snapshot_id": decision.input_snapshot_id,
+            "idempotency_key": idempotency_key,
+        },
+        correlation_id=correlation_id,
+    )
+    try:
+        order = create_order(
+            db,
+            user=user,
+            request=request,
+            audit_action="AUTOMATIC_DECISION_SELL_ORDER_CREATED",
             now=current,
         )
     except OrderCreationError as exc:

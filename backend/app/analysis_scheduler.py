@@ -23,11 +23,19 @@ from app.config import Settings
 from app.db import SessionLocal
 from app.decision_execution import route_trading_decision
 from app.ids import uuid7
-from app.mock_ai import MODEL_ID, PROMPT_VERSION, create_mock_trading_decision
+from app.mock_ai import (
+    MODEL_ID,
+    POSITION_MODEL_ID,
+    POSITION_PROMPT_VERSION,
+    PROMPT_VERSION,
+    create_mock_position_trading_decision,
+    create_mock_trading_decision,
+)
 from app.models import (
     AnalysisSchedulerState,
     LlmRoleRoute,
     MarketStreamState,
+    Position,
     User,
     WatchlistItem,
 )
@@ -78,12 +86,58 @@ def analysis_slot(now: datetime) -> tuple[AnalysisSlot | None, datetime]:
     )
     next_local = slot_local + timedelta(minutes=interval_minutes)
     key = slot_local.strftime("%Y%m%dT%H%M%z")
-    return AnalysisSlot(key, slot_local.astimezone(UTC), next_local.astimezone(UTC)), next_local.astimezone(UTC)
+    return (
+        AnalysisSlot(key, slot_local.astimezone(UTC), next_local.astimezone(UTC)),
+        next_local.astimezone(UTC),
+    )
 
 
 def evaluation_request_id(user_id: str, market: str, symbol: str, slot_key: str) -> str:
     raw = f"{user_id}:{market}:{symbol}:{slot_key}:{MODEL_ID}:{PROMPT_VERSION}"
     return "sched-" + hashlib.sha256(raw.encode()).hexdigest()[:58]
+
+
+def position_evaluation_request_id(
+    user_id: str, market: str, symbol: str, slot_key: str
+) -> str:
+    raw = (
+        f"{user_id}:{market}:{symbol}:{slot_key}:POSITION:"
+        f"{POSITION_MODEL_ID}:{POSITION_PROMPT_VERSION}"
+    )
+    return "sched-" + hashlib.sha256(raw.encode()).hexdigest()[:58]
+
+
+def _analysis_targets(db: Session) -> list[tuple[str, str, str]]:
+    watch_targets = list(
+        db.execute(
+            select(
+                WatchlistItem.user_id,
+                WatchlistItem.market,
+                WatchlistItem.symbol,
+            )
+            .join(User, User.id == WatchlistItem.user_id)
+            .where(User.status == "ACTIVE")
+        ).all()
+    )
+    targets = {
+        (str(user_id), str(market), str(symbol))
+        for user_id, market, symbol in watch_targets
+    }
+    active_users = list(db.scalars(select(User).where(User.status == "ACTIVE")))
+    if len(active_users) == 1:
+        user_id = active_users[0].id
+        watched_symbols = {(target_user, symbol) for target_user, _, symbol in targets}
+        open_symbols = db.scalars(
+            select(Position.symbol).where(
+                Position.account_alias == "KIWOOM_MOCK_PRIMARY",
+                Position.state == "OPEN",
+                Position.quantity > 0,
+            )
+        )
+        for symbol in open_symbols:
+            if (user_id, symbol) not in watched_symbols:
+                targets.add((user_id, "KRX", symbol))
+    return sorted(targets)
 
 
 def _active_agent_routes(db: Session, user_id: str) -> dict[str, str] | None:
@@ -104,18 +158,7 @@ def _active_agent_routes(db: Session, user_id: str) -> dict[str, str] | None:
 def run_analysis_tick(
     db: Session, *, slot: AnalysisSlot, settings: Settings, now: datetime
 ) -> TickResult:
-    targets = list(
-        db.execute(
-            select(
-                WatchlistItem.user_id,
-                WatchlistItem.market,
-                WatchlistItem.symbol,
-            )
-            .join(User, User.id == WatchlistItem.user_id)
-            .where(User.status == "ACTIVE")
-            .order_by(WatchlistItem.user_id, WatchlistItem.market, WatchlistItem.symbol)
-        ).all()
-    )
+    targets = _analysis_targets(db)
     processed = decisions = skipped = failed = 0
     for user_id, market, symbol in targets:
         processed += 1
@@ -130,15 +173,39 @@ def run_analysis_tick(
                 skipped += 1
                 db.rollback()
                 continue
-            decision, created = create_mock_trading_decision(
-                db,
-                user=user,
-                evaluation_request_id=evaluation_request_id(user_id, market, symbol, slot.key),
-                symbol=symbol,
-                market=market,
-                settings=settings,
-                now=now,
+            position = db.scalar(
+                select(Position).where(
+                    Position.account_alias == "KIWOOM_MOCK_PRIMARY",
+                    Position.symbol == symbol,
+                    Position.state == "OPEN",
+                    Position.quantity > 0,
+                )
             )
+            if position is None:
+                decision, created = create_mock_trading_decision(
+                    db,
+                    user=user,
+                    evaluation_request_id=evaluation_request_id(
+                        user_id, market, symbol, slot.key
+                    ),
+                    symbol=symbol,
+                    market=market,
+                    settings=settings,
+                    now=now,
+                )
+            else:
+                decision, created = create_mock_position_trading_decision(
+                    db,
+                    user=user,
+                    position=position,
+                    evaluation_request_id=position_evaluation_request_id(
+                        user_id, market, symbol, slot.key
+                    ),
+                    symbol=symbol,
+                    market=market,
+                    settings=settings,
+                    now=now,
+                )
             route_trading_decision(
                 db,
                 decision=decision,

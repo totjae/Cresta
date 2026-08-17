@@ -1117,7 +1117,7 @@ function DecisionsPage({ session, onSessionExpired }: { session: SessionData; on
 
   return <>
     <PageHeading kicker="MOCK SCOUT · CORE" title="AI 판단" description="결정론적 Mock 모델로 판단 계약과 실행 권한 분기를 검증합니다." />
-    <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> 이 화면의 판단은 주문이나 승인을 생성하지 않습니다. AUTOMATIC도 Guard 미구현 상태에서는 차단됩니다.</div>
+    <div className="console-alert decision-warning" role="note"><ShieldCheck size={17} /> 이 화면의 진단 실행은 주문이나 승인을 생성하지 않습니다. 별도의 TRADING 판단만 실행 정책과 Guard를 거쳐 모의 주문 또는 승인을 생성합니다.</div>
     {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
     <AgentRuntimePanel session={session} onSessionExpired={onSessionExpired} />
     <section className="panel decision-control"><div className="panel-head"><div><Bot size={18} /><span>최신 snapshot 진단</span></div><span className="status-pill neutral">deterministic-mock-v2</span></div><form className="diagnostic-form" onSubmit={evaluate}><label htmlFor="decision-symbol">종목코드</label><input id="decision-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required /><label htmlFor="decision-market">시장</label><select id="decision-market" value={market} onChange={(event) => setMarket(event.target.value as "KRX" | "NXT")}><option value="KRX">KRX</option><option value="NXT">NXT</option></select><button className="primary-button" disabled={busy || symbol.length !== 6}>{busy ? "판단 중" : "Mock 판단 실행"}</button></form></section>
@@ -1175,10 +1175,10 @@ function ApprovalsPanel({ session, onSessionExpired }: { session: SessionData; o
   }
 
   return <section className="panel approval-panel" aria-labelledby="approvals-title">
-    <div className="panel-head"><div><ShieldCheck size={18} /><span id="approvals-title">승인 대기 주문</span></div><span className="status-pill neutral">MANUAL_APPROVAL · BUY</span></div>
+    <div className="panel-head"><div><ShieldCheck size={18} /><span id="approvals-title">승인 대기 주문</span></div><span className="status-pill neutral">MANUAL_APPROVAL</span></div>
     <div className="console-alert" role="note"><CircleAlert size={17} /> 승인 시점에 Guard·가격편차를 재검사합니다. 통과한 주문만 CREATED로 생성되어 키움 모의투자로 송신됩니다.</div>
     {message && <div className="console-alert" role="status"><CircleAlert size={17} /> {message}</div>}
-    {items.length === 0 ? <div className="empty-state"><Bot size={22} /><p>대기 중인 승인이 없습니다. APPROVAL_ONLY 단계에서 BUY 판단이 Guard를 통과하면 이곳에 표시됩니다.</p></div>
+    {items.length === 0 ? <div className="empty-state"><Bot size={22} /><p>대기 중인 승인이 없습니다. APPROVAL_ONLY 단계에서 매수·부분매도·전량매도 판단이 Guard를 통과하면 이곳에 표시됩니다.</p></div>
       : <div className="approval-grid">{items.map((item) => <article className="panel approval-card" key={item.approval_id}>
         <div className="panel-head"><div><Bot size={16} /><span>{item.symbol} · {item.market}</span></div><OrderStatus status={item.state} /></div>
         <div className="decision-action"><strong>{item.action}</strong><span>{item.quantity}주 · 기준가 {item.reference_price ?? "—"}</span></div>
@@ -1190,8 +1190,8 @@ function ApprovalsPanel({ session, onSessionExpired }: { session: SessionData; o
       </article>)}</div>}
     {confirm && <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="approval-confirm-title">
       <span className="section-kicker">APPROVAL CONFIRMATION</span>
-      <h2 id="approval-confirm-title">{confirm.action === "approve" ? "BUY 주문 승인" : "BUY 주문 거절"}</h2>
-      <p>{confirm.action === "approve" ? `${confirm.approval.symbol} ${confirm.approval.quantity}주 BUY 주문을 생성해 키움 모의투자로 송신합니다.` : "이 BUY 판단을 거절합니다. 주문은 생성되지 않습니다."}</p>
+      <h2 id="approval-confirm-title">{confirm.action === "approve" ? `${confirm.approval.action} 주문 승인` : `${confirm.approval.action} 주문 거절`}</h2>
+      <p>{confirm.action === "approve" ? `${confirm.approval.symbol} ${confirm.approval.quantity}주 ${confirm.approval.action === "BUY" ? "BUY" : "SELL"} 주문을 생성해 키움 모의투자로 송신합니다.${confirm.approval.action === "BUY" ? "" : " 매도 수량은 Cresta 관리수량을 초과하지 않습니다."}` : `이 ${confirm.approval.action} 판단을 거절합니다. 주문은 생성되지 않습니다.`}</p>
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setConfirm(null)} disabled={busyId === confirm.approval.approval_id}>취소</button><button className={confirm.action === "approve" ? "primary-button" : "secondary-button"} disabled={busyId === confirm.approval.approval_id} onClick={() => void act(confirm.approval, confirm.action)}>{busyId === confirm.approval.approval_id ? "처리 중" : confirm.action === "approve" ? "승인" : "거절"}</button></div>
     </section></div>}
   </section>;

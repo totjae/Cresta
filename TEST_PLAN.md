@@ -82,6 +82,27 @@ Evidence: 구현 시점 backend 전체 회귀 325개 통과(신규 20), Ruff lin
 
 Evidence: 구현 시점 backend 전체 회귀 305개 통과(신규 16), Ruff lint 통과, migration `20260813_0034` upgrade→downgrade→upgrade 왕복 통과, Frontend TypeScript·14개 component 시험·production build 통과. 2026-08-13 장중 모의투자에서 승인 BUY가 `PENDING→APPROVED`, 주문이 `CREATED→VALIDATING→SUBMITTING→REJECTED`로 전이해 사용자 승인부터 Broker 송신까지 연결됨을 확인했다. 현재 주문 이벤트는 키움의 안전한 업무 거절 코드·사유를 보존하지 않으므로 거절 원인은 미확인이다. 최초 시험에서 확인된 stream 최신 snapshot과 판단 snapshot 간 승인 경쟁 조건은 `T-APR-SNAPSHOT` 구현으로 수정했으며 Ubuntu 장중 재검증은 대기 중이다. FIXED_STOP은 현재 매수호가가 손절가보다 높아 미발화가 정상임을 확인했지만, 실제 가격 도달 후 SELL 주문 송신·체결은 미검증이다. SHADOW 회귀는 `SHADOW_RECORDED`와 Approval·CREATED 주문 0건을 확인했다.
 
+### T-DECISION-SELL — 판단 기반 부분·전량매도 연결 (2026-08-15)
+
+- `T-DECISION-SELL-001`: `PARTIAL_SELL`은 `floor(매도가능 관리수량 × sell_ratio)`를 사용하고 1주 미만을 `QUANTITY_BELOW_ONE`으로 차단하며 전량매도로 승격하지 않는다.
+- `T-DECISION-SELL-002`: `FULL_SELL`은 Broker 총수량이 아니라 예약수량을 제외한 매도가능 관리수량만 사용하고 순수 `EXTERNAL` 포지션을 차단한다.
+- `T-DECISION-SELL-003`: `DISABLED`는 Guard·승인·주문 0건, `MANUAL_APPROVAL`은 PENDING 승인 1건, `AUTOMATIC`은 승인 없이 SELL CREATED 주문 1건을 만든다.
+- `T-DECISION-SELL-004`: 승인 범위에 position ID/version·수량·기준 snapshot/가격을 고정하고 승인 시 version 변경·수량 감소·활성/UNKNOWN 주문·stale 시세·가격편차를 `INVALIDATED`로 종료한다.
+- `T-DECISION-SELL-005`: 동일 판단과 동일 승인 재시도는 승인·OrderIntent·TradingOrder를 최대 1건만 만들며 주문은 Broker worker만 송신한다.
+- `T-DECISION-SELL-006`: Console 승인 카드와 확인창이 BUY 고정 문구 없이 `PARTIAL_SELL`·`FULL_SELL`, 수량과 Cresta 관리분 SELL임을 표시한다.
+
+Evidence: `backend/tests/test_decision_execution_sell.py` 10개와 기존 승인·SHADOW·전체 Risk Guard·Order Creation·position provenance를 합친 관련 backend 38개 시험, Ruff lint, Frontend TypeScript·production build와 SELL 승인 component 시험이 통과했다. DB migration 변경은 없다. 전체 backend 회귀는 Windows pytest 기본 임시 디렉터리 권한 오류가 있어 workspace `--basetemp`로 구간 검증했다. Frontend 전체 15개 중 기존 운영 휴장 비동기 시험 1개는 이번 변경과 무관하게 실패하고 14개가 통과했다. 실제 장중 키움 SELL 접수·부분체결·취소는 별도 인수시험으로 유지한다.
+
+### T-POSITION-DECISION — 보유 포지션 정기 판단 (2026-08-17)
+
+- `T-POSITION-DECISION-001`: 열린 포지션이 있는 scheduler 대상은 같은 슬롯에서 ENTRY 대신 POSITION 판단 하나를 생성하고 반복 tick이 이를 중복 생성하지 않는지 확인한다.
+- `T-POSITION-DECISION-002`: POSITION 입력 JSON에 포지션 ID·version, 수량·평균단가·미실현손익률·고정손절 거리와 현재 지표 snapshot이 고정되고 민감정보가 포함되지 않는지 확인한다.
+- `T-POSITION-DECISION-003`: `position-policy-v1`의 경계값에서 70점 미만은 HOLD, 70~89점은 PARTIAL_SELL 50%, 고정손절 도달 또는 90점 이상은 FULL_SELL인지 확인한다.
+- `T-POSITION-DECISION-004`: stale·degraded·지표 누락·잘못된 원가 입력은 주문 유도 행동이 아니라 HOLD/DATA_INSUFFICIENT로 축소되고 독립 고정손절 trigger에는 영향을 주지 않는지 확인한다.
+- `T-POSITION-DECISION-005`: 단일 활성 사용자의 열린 포지션은 감시 목록에서 해제돼도 scheduler가 분석하며, 복수 활성 사용자 환경에서는 계좌 포지션을 임의 사용자에게 귀속하지 않는지 확인한다.
+
+Evidence: 신규 POSITION 정책·scheduler 시험과 기존 scheduler·Mock AI·SHADOW·판단 SELL·전체 Risk Guard를 합친 집중시험 34개, backend 전체 358개와 Ruff lint가 통과했다. DB migration은 없다. 실제 Ubuntu scheduler 연속운전, POSITION 판단의 승인 카드 생성과 키움 모의 SELL 송신은 다음 구현과 함께 배포해 검증한다.
+
 ### T-STOP-001 — 고정 손절 trigger SHADOW (2026-08-12)
 
 - `T-STOP-001`: `compute_stop_price`가 평균단가와 `fixed_stop_loss_pct`로 손절가를 계산하고 허용 범위(0.1%~20%) 경계를 통과하는지 확인한다.

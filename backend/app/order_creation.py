@@ -2,9 +2,9 @@
 
 Generalizes the OrderIntent + TradingOrder(CREATED) construction used by the
 Paper broker (``app/trading/paper.py``) and the Kiwoom MOCK connection test
-(``app.broker.mock_order_test``) so that approval-based BUY and rule-based
-FIXED_STOP SELL share one atomic, idempotent path. The persisted CREATED order
-is picked up by the existing broker worker FIFO sender
+(``app.broker.mock_order_test``) so that approval/decision-based BUY·SELL and
+rule-based FIXED_STOP SELL share one atomic, idempotent path. The persisted
+CREATED order is picked up by the existing broker worker FIFO sender
 (``app.broker.order_sender.send_next_created_order``), which requires
 ``account_alias == KIWOOM_MOCK_PRIMARY`` and ``environment == MOCK``.
 

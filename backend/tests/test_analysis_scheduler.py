@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -28,6 +29,7 @@ from app.models import (
     IndicatorSnapshot,
     MarketSnapshot,
     MarketStreamState,
+    Position,
     TradingOrder,
     User,
     WatchlistItem,
@@ -165,6 +167,84 @@ def test_tick_admits_shadow_agent_run_when_all_active_routes_exist(
     run = db.scalar(select(AgentRun))
     assert run is not None and run.state == "CREATED"
     assert db.scalar(select(func.count()).select_from(AgentStageRun)) == 8
+
+
+def test_tick_prioritizes_position_decision_and_monitors_unwatched_open_position(
+    db: Session, admin: User, settings: Settings
+) -> None:
+    now = _at_kst(2026, 8, 5, 10, 5)
+    _watch_with_snapshot(db, admin, now)
+    item = db.scalar(select(WatchlistItem))
+    assert item is not None
+    db.delete(item)
+    db.add(
+        Position(
+            account_alias="KIWOOM_MOCK_PRIMARY",
+            symbol="005930",
+            quantity=10,
+            available_quantity=10,
+            managed_quantity=10,
+            average_price=Decimal(100),
+            managed_average_price=Decimal(100),
+            state="OPEN",
+            origin="CRESTA_MANAGED",
+        )
+    )
+    db.commit()
+    slot, _ = analysis_slot(now)
+    assert slot is not None
+
+    first = run_analysis_tick(db, slot=slot, settings=settings, now=now)
+    repeated = run_analysis_tick(db, slot=slot, settings=settings, now=now)
+
+    decision = db.scalar(select(Decision))
+    assert first.processed_count == 1
+    assert first.decision_count == 1
+    assert repeated.decision_count == 0
+    assert decision is not None
+    assert decision.decision_kind == "POSITION"
+    assert decision.action == "HOLD"
+    assert decision.valid_until.replace(tzinfo=UTC) == now + timedelta(minutes=5)
+    position_input = json.loads(
+        db.get(DecisionInputSnapshot, decision.decision_input_id).input_json
+    )["position"]
+    assert position_input["marker"] == "OPEN_POSITION"
+    assert position_input["quantity"] == 10
+    assert position_input["version"] == 1
+    assert db.scalar(select(func.count()).select_from(Decision)) == 1
+    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
+
+
+def test_tick_does_not_assign_unwatched_account_position_with_multiple_active_users(
+    db: Session, admin: User, settings: Settings
+) -> None:
+    now = _at_kst(2026, 8, 5, 10, 5)
+    _watch_with_snapshot(db, admin, now)
+    item = db.scalar(select(WatchlistItem))
+    assert item is not None
+    db.delete(item)
+    db.add(User(login_id="second-active", password_hash="not-used-in-this-test"))
+    db.add(
+        Position(
+            account_alias="KIWOOM_MOCK_PRIMARY",
+            symbol="005930",
+            quantity=10,
+            available_quantity=10,
+            managed_quantity=10,
+            average_price=Decimal(100),
+            managed_average_price=Decimal(100),
+            state="OPEN",
+            origin="CRESTA_MANAGED",
+        )
+    )
+    db.commit()
+    slot, _ = analysis_slot(now)
+    assert slot is not None
+
+    result = run_analysis_tick(db, slot=slot, settings=settings, now=now)
+
+    assert result.processed_count == 0
+    assert db.scalar(select(func.count()).select_from(Decision)) == 0
 
 
 def test_scheduler_lease_fences_duplicate_owner_and_reports_stale(db: Session) -> None:
