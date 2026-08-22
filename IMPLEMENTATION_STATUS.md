@@ -5,14 +5,14 @@
 - 키움 주문·취소 API가 HTTP 200과 업무 `return_code != 0`으로 명시적 거절을 반환하면 Adapter가 정규화된 결과 코드와 안전하게 정제된 사유를 전달하고, 주문 송신기가 기존 append-only `order_events.payload_json`에 두 필드만 보존한다. 응답 원문·계좌번호·토큰·자격증명은 저장하지 않는다.
 - 신규 주문 거절은 기존대로 `REJECTED`, 취소 거절은 수량을 바꾸지 않고 `RECONCILING`과 닫힌 거래 gate를 유지한다. 진단 metadata는 상태 전이·재송신 판단을 바꾸지 않으며 응답 유실과 통신 오류에는 Broker 결과를 추정하지 않는다.
 - 인증된 주문 상세 API는 nullable `broker_result_code`·`broker_result_message`만 다시 정제해 반환하고 Console은 결과가 존재하는 거절 이벤트 아래에만 표시한다. 기존 이벤트 JSON을 활용하므로 DB migration은 없다.
-- Adapter·주문 송신기·주문 API 집중시험 51개, backend 전체 364개, Ruff, Console 집중시험 3개, TypeScript와 production build가 통과했다. Frontend 전체 16개 중 기존 운영 휴장 비동기 시험 1개만 실패하고 15개가 통과했다. 실제 키움 모의투자 거절 응답의 Ubuntu 영속·Console 표시는 배포 후 장중 검증 대상으로 남긴다.
+- Adapter·주문 송신기·주문 API 집중시험 51개, backend 전체 364개, Ruff, Console 집중시험 3개, TypeScript와 production build가 통과했다. Frontend 전체 16개 중 기존 운영 휴장 비동기 시험 1개만 실패하고 15개가 통과했다. 2026-08-22 Ubuntu 기능 브랜치에 `186b25a`를 배포해 서버 이미지 집중시험 51개, 전체 Compose health, Worker `READY`, 인증된 주문 상세와 과거 거절 이벤트의 빈 metadata 비표시를 확인했다. 실제 신규 키움 모의투자 거절의 안전한 코드·사유 영속과 표시만 다음 장중 검증으로 남긴다.
 
 ### 2026-08-18 AI 판단 Console 정보구조 개편
 
 - AI 판단 화면을 `운영 판단`, `자동 포지션 분석`, `수동 진단`, `전체 이력` 네 탭으로 분리했다. 실제 TRADING Decision과 승인, scheduler 소유 `TRADING_ADVISORY`, 수동 Agent/Mock DIAGNOSTIC이 기본 화면에서 서로 섞이지 않는다.
 - Decision과 Agent run은 최신순 요약 행으로 표시하고 처음 12개만 렌더링한다. `더 보기`는 12개씩 확장하며 전체 reason, DAG stage, provider 호출과 구조화 응답은 선택한 요약 행 바로 아래의 단일 인라인 상세 영역에서만 렌더링한다.
 - `TRADING_ADVISORY`는 Console에서 `자동 포지션 분석`으로 표시하되 상세에는 원본 목적, `position-agent-fusion-v1`, fusion state/reason/결합 판단 ID를 유지한다. `ESCALATED`는 주문 성공이 아님을 탭 안내에 고정했다.
-- 관련 component 시험 4개와 TypeScript·production build가 통과했다. 전체 component 16개 중 기존 운영 휴장 비동기 시험 1개만 실패하고 이번 변경 관련 15개는 통과했다. Ubuntu Console에는 `1ba7554`를 배포했으며 Compose health, 내부 root/healthz, 외부 HTTPS root/healthz가 모두 정상이다. 인증 후 실제 데이터의 탭·상세 시각 확인은 사용자 브라우저 검증 대상으로 남긴다.
+- 관련 component 시험 4개와 TypeScript·production build가 통과했다. 전체 component 16개 중 기존 운영 휴장 비동기 시험 1개만 실패하고 이번 변경 관련 15개는 통과했다. Ubuntu Console에는 `186b25a`까지 배포했으며 Compose health와 내부 root/healthz가 정상이다. 2026-08-22 인증된 실제 데이터에서 운영 Decision과 자동 포지션 Agent run 상세가 선택한 요약 행의 바로 다음 `ARTICLE.decision-detail.inline`으로 열리는 것을 확인했다.
 
 ### 2026-08-17 외부 Agent POSITION 판단 안전 결합 1차
 
