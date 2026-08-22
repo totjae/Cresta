@@ -1,5 +1,14 @@
 # Cresta 테스트 계획
 
+### T-KIW-REJECTION-DIAGNOSTIC — 키움 주문 거절 원인 보존 (2026-08-18)
+
+- `T-KIW-REJ-001`: HTTP 200의 `return_code != 0` 주문 응답이 `KIWOOM_ORDER_REJECTED`와 정규화한 Broker 코드·메시지를 만들고 HTTP를 재시도하지 않는지 확인한다.
+- `T-KIW-REJ-002`: 주문 거절은 `REJECTED`, 취소 거절은 수량 불변 `RECONCILING`을 유지하면서 해당 OrderEvent에 정제된 코드·사유만 영속하는지 확인한다.
+- `T-KIW-REJ-003`: Bearer token, credential 명칭의 값과 8~12자리 연속 숫자가 메시지·API 응답·이벤트 payload에 남지 않는지 확인한다.
+- `T-KIW-REJ-004`: `/orders/{id}`가 nullable Broker 결과만 반환하고 `payload_json`을 노출하지 않으며 Console 주문 상세가 결과가 있는 거절 이벤트에만 사유를 표시하는지 확인한다.
+
+Evidence: Adapter·주문 송신기·주문 API 집중시험 51개, backend 전체 364개와 Ruff가 통과했다. Console 집중 component 시험 3개, TypeScript와 production build가 통과했다. Frontend 전체 component 16개 중 기존 운영 휴장 비동기 시험 1개만 실패하고 15개가 통과했다. DB migration은 없으며 실제 키움 모의투자 업무 거절 코드·사유의 Ubuntu 수신·표시 검증은 배포 후 장중 인수시험으로 남긴다.
+
 ### T-AI-CONSOLE-IA — AI 판단 이력 정보구조 개편 (2026-08-18)
 
 - `T-AI-CONSOLE-IA-001`: AI 판단 화면의 기본 탭이 `운영 판단`이고 `자동 포지션 분석`, `수동 진단`, `전체 이력`을 키보드와 포인터로 전환할 수 있는지 확인한다.
@@ -105,7 +114,7 @@ Evidence: 구현 시점 backend 전체 회귀 325개 통과(신규 20), Ruff lin
 - `T-STOP-SELL-003`: `EXTERNAL` position은 자동 매도되지 않고 `EXIT_PENDING`(`POSITION_MANAGED_QUANTITY_POSITIVE`)으로 차단되며, `MIXED` position은 관리수량만 주문하는지 확인한다.
 - `T-PROV-001`: Position이 기본 `CRESTA_MANAGED`이고 `EXTERNAL` 태깅이 가능한지 확인한다.
 
-Evidence: 구현 시점 backend 전체 회귀 305개 통과(신규 16), Ruff lint 통과, migration `20260813_0034` upgrade→downgrade→upgrade 왕복 통과, Frontend TypeScript·14개 component 시험·production build 통과. 2026-08-13 장중 모의투자에서 승인 BUY가 `PENDING→APPROVED`, 주문이 `CREATED→VALIDATING→SUBMITTING→REJECTED`로 전이해 사용자 승인부터 Broker 송신까지 연결됨을 확인했다. 현재 주문 이벤트는 키움의 안전한 업무 거절 코드·사유를 보존하지 않으므로 거절 원인은 미확인이다. 최초 시험에서 확인된 stream 최신 snapshot과 판단 snapshot 간 승인 경쟁 조건은 `T-APR-SNAPSHOT` 구현으로 수정했으며 Ubuntu 장중 재검증은 대기 중이다. FIXED_STOP은 현재 매수호가가 손절가보다 높아 미발화가 정상임을 확인했지만, 실제 가격 도달 후 SELL 주문 송신·체결은 미검증이다. SHADOW 회귀는 `SHADOW_RECORDED`와 Approval·CREATED 주문 0건을 확인했다.
+Evidence: 구현 시점 backend 전체 회귀 305개 통과(신규 16), Ruff lint 통과, migration `20260813_0034` upgrade→downgrade→upgrade 왕복 통과, Frontend TypeScript·14개 component 시험·production build 통과. 2026-08-13 장중 모의투자에서 승인 BUY가 `PENDING→APPROVED`, 주문이 `CREATED→VALIDATING→SUBMITTING→REJECTED`로 전이해 사용자 승인부터 Broker 송신까지 연결됨을 확인했다. 당시 주문 이벤트에는 키움의 안전한 업무 거절 코드·사유가 없어 원인은 미확인이었다. 이 관측성 공백은 후속 `T-KIW-REJECTION-DIAGNOSTIC` 구현으로 보완했으며 당시 과거 이벤트를 추정해 소급 작성하지 않는다. 최초 시험에서 확인된 stream 최신 snapshot과 판단 snapshot 간 승인 경쟁 조건은 `T-APR-SNAPSHOT` 구현으로 수정했으며 Ubuntu 장중 재검증은 대기 중이다. FIXED_STOP은 현재 매수호가가 손절가보다 높아 미발화가 정상임을 확인했지만, 실제 가격 도달 후 SELL 주문 송신·체결은 미검증이다. SHADOW 회귀는 `SHADOW_RECORDED`와 Approval·CREATED 주문 0건을 확인했다.
 
 ### T-DECISION-SELL — 판단 기반 부분·전량매도 연결 (2026-08-15)
 

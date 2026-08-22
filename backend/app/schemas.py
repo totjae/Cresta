@@ -297,6 +297,8 @@ class OrderEventResponse(StrictModel):
     id: str
     event_type: str
     source: str
+    broker_result_code: str | None = None
+    broker_result_message: str | None = None
     occurred_at: datetime
 
 

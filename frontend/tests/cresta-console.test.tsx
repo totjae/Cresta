@@ -210,6 +210,7 @@ describe("CrestaConsole authentication", () => {
       if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-4", login_id: "admin", expires_at: "2026-08-01T09:00:00Z", csrf_token: "csrf-paper" });
       if (path === "/api/v1/system/health") return jsonResponse(healthResponse);
       if (path === "/api/v1/orders") return jsonResponse({ schema_version: "1.0", request_id: "orders-1", items: [{ id: "order-1", order_group_id: "group-1", parent_order_id: null, symbol: "005930", market: "KRX", side: "BUY", order_type: "LIMIT", limit_price: "269000.0000", requested_quantity: 2, filled_quantity: 1, cancelled_quantity: 0, remaining_quantity: 1, status: "PARTIALLY_FILLED", environment: "MOCK", client_order_id: "client-1", broker_order_id: "1234567", replacement_sequence: 0, unfilled_policy: "CANCEL", fill_timeout_seconds: 10, max_reprice_attempts: 0, reprice_attempts: 0, next_action_at: "2026-08-14T00:01:10Z", trading_date: "2026-08-14", version: 2, created_at: "2026-08-14T00:01:00Z", updated_at: "2026-08-14T00:01:01Z" }] });
+      if (path === "/api/v1/orders/order-1") return jsonResponse({ schema_version: "1.0", request_id: "order-detail-1", id: "order-1", order_group_id: "group-1", parent_order_id: null, symbol: "005930", market: "KRX", side: "BUY", order_type: "LIMIT", limit_price: "269000.0000", requested_quantity: 2, filled_quantity: 1, cancelled_quantity: 0, remaining_quantity: 1, status: "REJECTED", environment: "MOCK", client_order_id: "client-1", broker_order_id: null, replacement_sequence: 0, unfilled_policy: "CANCEL", fill_timeout_seconds: 10, max_reprice_attempts: 0, reprice_attempts: 0, next_action_at: null, trading_date: "2026-08-14", version: 3, created_at: "2026-08-14T00:01:00Z", updated_at: "2026-08-14T00:01:02Z", fills: [], events: [{ id: "event-1", event_type: "ORDER_REJECTED", source: "KIWOOM", broker_result_code: "8030", broker_result_message: "투자구분 불일치", occurred_at: "2026-08-14T00:01:02Z" }] });
       if (path === "/api/v1/positions") return jsonResponse({ schema_version: "1.0", request_id: "positions-1", items: [{ id: "position-1", account_alias: "KIWOOM_MOCK_PRIMARY", environment: "MOCK", market: "KRX", symbol: "005930", quantity: 1, available_quantity: 1, average_price: "269000.0000", managed_quantity: 0, managed_average_price: "0.0000", external_quantity: 1, state: "OPEN", origin: "EXTERNAL", version: 1, created_at: "2026-08-14T00:00:00Z", updated_at: "2026-08-14T00:01:00Z" }] });
       return jsonResponse({}, 404);
     });
@@ -223,6 +224,10 @@ describe("CrestaConsole authentication", () => {
     expect(screen.getByText("2 / 1 / 0 / 1")).toBeInTheDocument();
     expect(screen.getByText("운영 화면에서 주문·체결을 생성하지 않습니다.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /주문 생성/ })).not.toBeInTheDocument();
+    const orderRow = screen.getByText("269,000원").closest("tr");
+    expect(orderRow).not.toBeNull();
+    await user.click(orderRow!);
+    expect(await screen.findByText("Broker 거절 8030 · 투자구분 불일치")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /보유 포지션/ }));
     expect(await screen.findByText("005930")).toBeInTheDocument();
@@ -625,7 +630,10 @@ describe("Mock AI decisions", () => {
     expect(screen.queryByText("FOURTH_REASON")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /더 보기.*1건 남음/ }));
     expect(await screen.findAllByRole("button", { name: /005930.*운영 판단.*HOLD/ })).toHaveLength(13);
-    await user.click(screen.getAllByRole("button", { name: /005930.*운영 판단.*HOLD/ })[0]);
+    const selectedRow = screen.getAllByRole("button", { name: /005930.*운영 판단.*HOLD/ })[0];
+    await user.click(selectedRow);
+    const detail = await screen.findByRole("article", { name: /005930 판단 상세/ });
+    expect(selectedRow.nextElementSibling).toBe(detail);
     expect(await screen.findByText(/FOURTH_REASON/)).toBeInTheDocument();
   });
 });
@@ -700,7 +708,9 @@ describe("Agent Worker v2", () => {
     expect(screen.getByRole("tab", { name: "운영 판단" })).toHaveAttribute("aria-selected", "true");
     await user.click(screen.getByRole("tab", { name: "자동 포지션 분석" }));
     expect(await screen.findByText("1건 · 모델 SHADOW")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /005930.*자동 포지션 분석.*WAIT/ }));
+    const advisoryRow = screen.getByRole("button", { name: /005930.*자동 포지션 분석.*WAIT/ });
+    await user.click(advisoryRow);
+    expect(advisoryRow.nextElementSibling).toBe(await screen.findByRole("article", { name: /005930 Agent run 상세/ }));
     expect(await screen.findByText("SHADOW 모델 · 서버 결합 ESCALATED")).toBeInTheDocument();
     expect(await screen.findByText("position-agent-fusion-v1")).toBeInTheDocument();
     expect(await screen.findByText("LLM_EXIT_RISK_HIGH")).toBeInTheDocument();

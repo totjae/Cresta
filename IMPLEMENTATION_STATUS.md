@@ -1,9 +1,16 @@
 # Cresta 구현 상태
 
+### 2026-08-18 키움 주문 거절 진단 정보 보존
+
+- 키움 주문·취소 API가 HTTP 200과 업무 `return_code != 0`으로 명시적 거절을 반환하면 Adapter가 정규화된 결과 코드와 안전하게 정제된 사유를 전달하고, 주문 송신기가 기존 append-only `order_events.payload_json`에 두 필드만 보존한다. 응답 원문·계좌번호·토큰·자격증명은 저장하지 않는다.
+- 신규 주문 거절은 기존대로 `REJECTED`, 취소 거절은 수량을 바꾸지 않고 `RECONCILING`과 닫힌 거래 gate를 유지한다. 진단 metadata는 상태 전이·재송신 판단을 바꾸지 않으며 응답 유실과 통신 오류에는 Broker 결과를 추정하지 않는다.
+- 인증된 주문 상세 API는 nullable `broker_result_code`·`broker_result_message`만 다시 정제해 반환하고 Console은 결과가 존재하는 거절 이벤트 아래에만 표시한다. 기존 이벤트 JSON을 활용하므로 DB migration은 없다.
+- Adapter·주문 송신기·주문 API 집중시험 51개, backend 전체 364개, Ruff, Console 집중시험 3개, TypeScript와 production build가 통과했다. Frontend 전체 16개 중 기존 운영 휴장 비동기 시험 1개만 실패하고 15개가 통과했다. 실제 키움 모의투자 거절 응답의 Ubuntu 영속·Console 표시는 배포 후 장중 검증 대상으로 남긴다.
+
 ### 2026-08-18 AI 판단 Console 정보구조 개편
 
 - AI 판단 화면을 `운영 판단`, `자동 포지션 분석`, `수동 진단`, `전체 이력` 네 탭으로 분리했다. 실제 TRADING Decision과 승인, scheduler 소유 `TRADING_ADVISORY`, 수동 Agent/Mock DIAGNOSTIC이 기본 화면에서 서로 섞이지 않는다.
-- Decision과 Agent run은 최신순 요약 행으로 표시하고 처음 12개만 렌더링한다. `더 보기`는 12개씩 확장하며 전체 reason, DAG stage, provider 호출과 구조화 응답은 사용자가 선택한 단일 상세 영역에서만 렌더링한다.
+- Decision과 Agent run은 최신순 요약 행으로 표시하고 처음 12개만 렌더링한다. `더 보기`는 12개씩 확장하며 전체 reason, DAG stage, provider 호출과 구조화 응답은 선택한 요약 행 바로 아래의 단일 인라인 상세 영역에서만 렌더링한다.
 - `TRADING_ADVISORY`는 Console에서 `자동 포지션 분석`으로 표시하되 상세에는 원본 목적, `position-agent-fusion-v1`, fusion state/reason/결합 판단 ID를 유지한다. `ESCALATED`는 주문 성공이 아님을 탭 안내에 고정했다.
 - 관련 component 시험 4개와 TypeScript·production build가 통과했다. 전체 component 16개 중 기존 운영 휴장 비동기 시험 1개만 실패하고 이번 변경 관련 15개는 통과했다. Ubuntu Console에는 `1ba7554`를 배포했으며 Compose health, 내부 root/healthz, 외부 HTTPS root/healthz가 모두 정상이다. 인증 후 실제 데이터의 탭·상세 시각 확인은 사용자 브라우저 검증 대상으로 남긴다.
 
@@ -64,7 +71,7 @@
 ### 2026-08-13 장중 인수시험 근거 정리와 Risk Guard 테스트 결정론 보강
 
 - Ubuntu 모의투자 장중 시험 결과를 구현 완료로 과장하지 않고 `통과/부분 통과/미검증`으로 재분류했다. 전체 BUY Guard 위험 주입과 SHADOW 회귀는 통과했고, 승인형 BUY는 키움 업무 거절까지 도달했으며, 실제 FIXED_STOP 발화·SELL 송신·체결은 미검증으로 기록했다.
-- 키움 BUY 거절 원인은 현재 안전한 업무 오류 코드·사유가 영속되지 않아 미확인으로 정정했다. 호가단위 문제는 관측 근거가 확보되기 전까지 원인으로 확정하지 않는다.
+- 당시 키움 BUY 거절 원인은 안전한 업무 오류 코드·사유가 영속되지 않아 미확인으로 정정했다. 후속 2026-08-18 진단 metadata 구현 이후 발생하는 명시적 거절부터 안전한 코드·사유를 보존하며, 과거 원인을 추정하지 않는다.
 - Risk Guard 통합시험 8개가 고정 fixture 시각을 만들고도 실행 함수에는 시스템 현재 시각을 사용하던 문제를 수정했다. 모든 호출에 동일한 `NOW`를 주입해 만료·stale 부수 차단이 목표 규칙 시험을 거짓 양성으로 만들지 않게 했다.
 - 현재 backend 전체 325개 시험과 Ruff가 통과했고, 승인·주문 생성·Risk Guard·고정손절 집중시험 37개도 통과했다.
 
@@ -84,7 +91,7 @@
 - FIXED_STOP SELL 자동: 손절 trigger가 `SHADOW_RECORDED`에서 `FULFILLED`로 전환되며 매도 `TradingOrder(CREATED)`를 만든다. `execution_policy.fixed_stop_loss` 기본값이 `AUTOMATIC`이므로 `APPROVAL_ONLY`에서도 승인 없이 자동 발화한다. 현행 대상과 수량은 origin 문자열이 아니라 `managed_quantity`로 제한하며 외부 보유분은 자동 주문하지 않는다.
 - 가격 산정은 이 milestone에서 간소화했다: BUY는 MARKETABLE_LIMIT(매도 1호가), 수량은 `entry_order_amount / 가격` 정수다. 호가단위 보정은 후속이며, 전체 Risk Guard(일일손실·spread·연결위험·전체 노출)는 후속 milestone #2에서 구현됐다.
 - 승인 API: `GET/POST /api/v1/approvals` (목록·상세·승인·거절, `require_csrf` + `Idempotency-Key`, TOTP 재인증 없음). Console DecisionsPage에 승인 카드·confirm-modal 추가.
-- 구현 시점 backend 전체 회귀 305개 통과(신규 16: order creation 4, approvals 7, stop trigger SELL 3, position provenance 2), Ruff lint 통과, migration `20260813_0034` upgrade→downgrade→upgrade 왕복 통과. Frontend TypeScript·14개 component 시험·production build 통과. 2026-08-13 Ubuntu 모의투자에서 `Approval(PENDING→APPROVED)`·BUY `CREATED→VALIDATING→SUBMITTING→REJECTED`까지 확인했다. 키움의 정확한 업무 거절 코드·사유는 현재 영속되지 않으므로 호가단위 문제로 확정하지 않는다. 실제 FIXED_STOP 가격 도달 후 SELL 송신·체결은 미검증이다. 당시 확인한 stream 최신 snapshot과 판단 snapshot 간 경쟁 조건은 2026-08-14 최신 snapshot 재검사 분리로 수정했다.
+- 구현 시점 backend 전체 회귀 305개 통과(신규 16: order creation 4, approvals 7, stop trigger SELL 3, position provenance 2), Ruff lint 통과, migration `20260813_0034` upgrade→downgrade→upgrade 왕복 통과. Frontend TypeScript·14개 component 시험·production build 통과. 2026-08-13 Ubuntu 모의투자에서 `Approval(PENDING→APPROVED)`·BUY `CREATED→VALIDATING→SUBMITTING→REJECTED`까지 확인했다. 당시에는 키움의 정확한 업무 거절 코드·사유가 영속되지 않았으므로 호가단위 문제로 확정하지 않았다. 이 공백은 2026-08-18 후속 구현으로 보완했지만 과거 이벤트는 소급 추정하지 않는다. 실제 FIXED_STOP 가격 도달 후 SELL 송신·체결은 미검증이다. 당시 확인한 stream 최신 snapshot과 판단 snapshot 간 경쟁 조건은 2026-08-14 최신 snapshot 재검사 분리로 수정했다.
 
 ### 2026-08-12 고정 손절 trigger SHADOW 구현
 

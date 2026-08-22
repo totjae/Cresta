@@ -356,3 +356,7 @@ market_snapshots(symbol, market, observed_at desc)
 - Migration `20260812_0030`은 거래시장 평가에 거래일 상태·캘린더 근거·정책 버전을 추가한다.
 - Migration `20260812_0031`은 운영 휴장 이력과 평가별 적용 override 참조를 추가한다. downgrade는 평가 참조와 override 원장을 제거하되 기존 venue 평가의 기본 캘린더 근거는 보존한다.
 - 현재 schema head는 `20260817_0038`이다.
+
+### 2026-08-18 키움 주문 거절 진단 metadata
+
+- `DB-156`: 키움 명시적 주문·취소 거절은 기존 append-only `order_events.payload_json`에 `broker_result_code`와 `broker_result_message`만 저장한다. 원문 응답 전체와 인증·계좌 정보는 저장하지 않으며 schema migration 없이 기존 이벤트와 호환한다.

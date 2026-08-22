@@ -364,7 +364,14 @@ export type OrderSummary = {
 };
 
 export type OrderDetail = OrderSummary & {
-  events: Array<{ id: string; event_type: string; source: string; occurred_at: string }>;
+  events: Array<{
+    id: string;
+    event_type: string;
+    source: string;
+    broker_result_code: string | null;
+    broker_result_message: string | null;
+    occurred_at: string;
+  }>;
   fills: Array<{ id: string; quantity: number; price: string; fee: string; tax: string; filled_at: string }>;
 };
 

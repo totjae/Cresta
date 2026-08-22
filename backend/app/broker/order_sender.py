@@ -248,7 +248,20 @@ def cancel_next_expired_buy_once(
             gate_reason="ORDER_CANCEL_OUTCOME_UNKNOWN",
             occurred_at=observed_at,
         )
-    except (KiwoomOrderRejectedError, KiwoomAdapterError):
+    except KiwoomOrderRejectedError as exc:
+        return _finish_cancel(
+            db,
+            identity,
+            order.id,
+            quantity=quantity,
+            status="RECONCILING",
+            event_type="ORDER_CANCEL_REJECTED",
+            gate_reason="ORDER_CANCEL_REJECTED",
+            occurred_at=observed_at,
+            broker_result_code=exc.broker_result_code,
+            broker_result_message=exc.broker_result_message,
+        )
+    except KiwoomAdapterError:
         return _finish_cancel(
             db,
             identity,
@@ -303,7 +316,7 @@ def _send_locked_order(
 
     try:
         acknowledgement = client.place_order(request)
-    except KiwoomOrderRejectedError:
+    except KiwoomOrderRejectedError as exc:
         return _finish_send(
             db,
             identity,
@@ -311,6 +324,8 @@ def _send_locked_order(
             status="REJECTED",
             event_type="ORDER_REJECTED",
             occurred_at=observed_at,
+            broker_result_code=exc.broker_result_code,
+            broker_result_message=exc.broker_result_message,
         )
     except KiwoomOrderOutcomeUnknownError:
         return _finish_send(
@@ -353,6 +368,8 @@ def _finish_send(
     occurred_at: datetime,
     broker_order_id: str | None = None,
     gate_reason: str | None = None,
+    broker_result_code: str | None = None,
+    broker_result_message: str | None = None,
 ) -> KiwoomSendResult:
     if not lease_is_current(db, identity):
         db.rollback()
@@ -372,11 +389,19 @@ def _finish_send(
     _transition(db, order, status, occurred_at=occurred_at)
     if status == "ACKNOWLEDGED" and order.unfilled_policy == "CANCEL":
         order.next_action_at = occurred_at + timedelta(seconds=order.fill_timeout_seconds)
+    event_payload: dict[str, object] = {
+        "broker_order_id_present": broker_order_id is not None,
+        "status": status,
+    }
+    if broker_result_code is not None:
+        event_payload["broker_result_code"] = broker_result_code
+    if broker_result_message is not None:
+        event_payload["broker_result_message"] = broker_result_message
     _event(
         db,
         order,
         event_type,
-        {"broker_order_id_present": broker_order_id is not None, "status": status},
+        event_payload,
         occurred_at=occurred_at,
     )
     if gate_reason is not None:
@@ -397,6 +422,8 @@ def _finish_cancel(
     occurred_at: datetime,
     gate_reason: str | None = None,
     cancel_broker_order_id: str | None = None,
+    broker_result_code: str | None = None,
+    broker_result_message: str | None = None,
 ) -> KiwoomCancelResult:
     if not lease_is_current(db, identity):
         db.rollback()
@@ -414,15 +441,20 @@ def _finish_cancel(
         return KiwoomCancelResult(order.id, order.status, quantity, True)
     if status != "CANCEL_PENDING":
         _transition(db, order, status, occurred_at=occurred_at)
+    event_payload: dict[str, object] = {
+        "cancel_broker_order_id_present": cancel_broker_order_id is not None,
+        "requested_quantity": quantity,
+        "status": status,
+    }
+    if broker_result_code is not None:
+        event_payload["broker_result_code"] = broker_result_code
+    if broker_result_message is not None:
+        event_payload["broker_result_message"] = broker_result_message
     _event(
         db,
         order,
         event_type,
-        {
-            "cancel_broker_order_id_present": cancel_broker_order_id is not None,
-            "requested_quantity": quantity,
-            "status": status,
-        },
+        event_payload,
         occurred_at=occurred_at,
     )
     if gate_reason is not None:

@@ -13,6 +13,10 @@ from typing import Any, Protocol
 
 import httpx
 
+from app.broker.result_details import (
+    normalize_broker_result_code,
+    sanitize_broker_result_message,
+)
 from app.config import Settings
 from app.watch import SUPPORTED_TRADING_STATUSES, QuoteEvent
 
@@ -43,6 +47,18 @@ class KiwoomAdapterError(Exception):
 
 class KiwoomOrderRejectedError(KiwoomAdapterError):
     """The broker explicitly rejected an order request before acknowledgement."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        broker_result_code: str | None = None,
+        broker_result_message: str | None = None,
+    ) -> None:
+        super().__init__(code, message, retryable=False)
+        self.broker_result_code = broker_result_code
+        self.broker_result_message = broker_result_message
 
 
 class KiwoomOrderOutcomeUnknownError(KiwoomAdapterError):
@@ -485,8 +501,13 @@ class KiwoomMockClient:
                 "Kiwoom order outcome is unknown because the response is invalid",
             ) from exc
         if payload.get("return_code") != 0:
+            broker_result_code = normalize_broker_result_code(payload.get("return_code"))
+            broker_result_message = sanitize_broker_result_message(payload.get("return_msg"))
             raise KiwoomOrderRejectedError(
-                "KIWOOM_ORDER_REJECTED", "Kiwoom explicitly rejected the order"
+                "KIWOOM_ORDER_REJECTED",
+                broker_result_message or "Kiwoom explicitly rejected the order",
+                broker_result_code=broker_result_code,
+                broker_result_message=broker_result_message,
             )
         return payload
 

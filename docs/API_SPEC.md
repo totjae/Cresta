@@ -151,6 +151,7 @@ PATCH는 활성 설정을 직접 수정하지 않고 초안 version을 생성한
 | API-081 | 시스템 상태는 `STARTING`, `RECONCILING`, `READY`, `DEGRADED`, `HALTED` 거래 게이트와 차단 사유·version을 그대로 제공한다. |
 | API-082 | 주문 목록은 수량 불변조건을 구성하는 주문·체결·취소·잔량과 `UNKNOWN`·`RECONCILING` 상태를 생략하지 않는다. |
 | API-083 | 주문 상세는 체결과 상태 이벤트를 시간순으로 제공하고 원주문·정정 관계 식별자를 유지한다. |
+| API-158 | 주문 상세 이벤트는 정제된 `broker_result_code`와 `broker_result_message`를 nullable 필드로 제공한다. API는 `payload_json`과 Broker 원문, 계좌번호, credential 또는 authorization 값을 반환하지 않는다. |
 | API-084 | 포지션 목록은 수량 0의 종료 포지션을 `state`로 구분하며 평균단가·version·기준시각을 제공한다. |
 | API-085 | 운영 Web API에는 Paper 체결·게이트를 임의 생성하거나 변경하는 endpoint를 제공하지 않는다. 단, API-094~098의 제한된 키움 MOCK 연결 시험은 예외다. |
 | API-086 | `kiwoom_broker_status`는 기능 비활성 또는 secret 미준비 시 `NOT_CONFIGURED`, secret 파일 준비 시 `CONFIGURED`를 반환한다. 실제 인증과 연결 확인 전에는 `CONNECTED`를 반환하지 않는다. |

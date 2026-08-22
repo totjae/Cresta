@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -179,7 +180,12 @@ def test_explicit_broker_rejection_becomes_rejected(db: Session) -> None:
     identity = ready_worker(db)
     order = persisted_order(db)
     client = FakeOrderClient(
-        KiwoomOrderRejectedError("KIWOOM_ORDER_REJECTED", "rejected")
+        KiwoomOrderRejectedError(
+            "KIWOOM_ORDER_REJECTED",
+            "투자구분 불일치",
+            broker_result_code="8030",
+            broker_result_message="투자구분 불일치",
+        )
     )
 
     result = send_new_order_once(db, client, identity, order.id)
@@ -189,6 +195,19 @@ def test_explicit_broker_rejection_becomes_rejected(db: Session) -> None:
     gate = db.get(TradingGate, ACCOUNT_ALIAS)
     assert gate is not None
     assert gate.status == "READY"
+    rejected_event = db.scalar(
+        select(OrderEvent).where(
+            OrderEvent.order_id == order.id,
+            OrderEvent.event_type == "ORDER_REJECTED",
+        )
+    )
+    assert rejected_event is not None
+    assert json.loads(rejected_event.payload_json) == {
+        "broker_order_id_present": False,
+        "broker_result_code": "8030",
+        "broker_result_message": "투자구분 불일치",
+        "status": "REJECTED",
+    }
 
 
 def test_sender_requires_current_ready_worker_before_state_change(db: Session) -> None:
@@ -374,7 +393,12 @@ def test_explicit_cancel_rejection_preserves_quantities_and_requires_reconciliat
     order.next_action_at = now
     db.commit()
     client = FakeOrderClient(
-        KiwoomOrderRejectedError("KIWOOM_ORDER_REJECTED", "cancel rejected")
+        KiwoomOrderRejectedError(
+            "KIWOOM_ORDER_REJECTED",
+            "취소 가능 수량 없음",
+            broker_result_code="8001",
+            broker_result_message="취소 가능 수량 없음",
+        )
     )
 
     result = cancel_next_expired_buy_once(db, client, identity, now=now)
@@ -390,6 +414,15 @@ def test_explicit_cancel_rejection_preserves_quantities_and_requires_reconciliat
     gate = db.get(TradingGate, ACCOUNT_ALIAS)
     assert gate is not None
     assert (gate.status, gate.reason) == ("RECONCILING", "ORDER_CANCEL_REJECTED")
+    rejected_event = db.scalar(
+        select(OrderEvent).where(
+            OrderEvent.order_id == order.id,
+            OrderEvent.event_type == "ORDER_CANCEL_REJECTED",
+        )
+    )
+    assert rejected_event is not None
+    assert json.loads(rejected_event.payload_json)["broker_result_code"] == "8001"
+    assert json.loads(rejected_event.payload_json)["broker_result_message"] == "취소 가능 수량 없음"
 
 
 def test_sell_and_nonexpired_buy_are_not_auto_cancelled(db: Session) -> None:

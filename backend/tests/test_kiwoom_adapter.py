@@ -569,7 +569,19 @@ def test_ambiguous_order_response_is_not_retried(
 
 def test_explicit_order_rejection_is_distinct_and_not_retried(tmp_path: Path) -> None:
     http = FakeHttpClient(
-        [token_response("token"), FakeResponse(200, {"return_code": 8030, "return_msg": "secret"})]
+        [
+            token_response("token"),
+            FakeResponse(
+                200,
+                {
+                    "return_code": 8030,
+                    "return_msg": (
+                        "입력 값 오류입니다[8030:투자구분 불일치] "
+                        "계좌 1234567890 authorization=Bearer top-secret-token"
+                    ),
+                },
+            ),
+        ]
     )
     client = KiwoomMockClient(configured_settings(tmp_path), http_client=http)
 
@@ -579,7 +591,11 @@ def test_explicit_order_rejection_is_distinct_and_not_retried(tmp_path: Path) ->
         )
 
     assert rejected.value.code == "KIWOOM_ORDER_REJECTED"
-    assert "secret" not in rejected.value.message
+    assert rejected.value.broker_result_code == "8030"
+    assert "투자구분 불일치" in rejected.value.broker_result_message
+    assert "1234567890" not in rejected.value.broker_result_message
+    assert "top-secret-token" not in rejected.value.broker_result_message
+    assert "top-secret-token" not in rejected.value.message
     assert len(http.calls) == 2
 
 

@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import AuthContext, get_auth_context
+from app.broker.result_details import (
+    normalize_broker_result_code,
+    sanitize_broker_result_message,
+)
 from app.db import get_db
 from app.errors import ResourceNotFoundError
 from app.models import Fill, OrderEvent, TradingOrder
@@ -17,6 +23,31 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/orders", tags=["orders"])
+
+
+def _broker_result(event: OrderEvent) -> tuple[str | None, str | None]:
+    try:
+        payload = json.loads(event.payload_json)
+    except (TypeError, ValueError):
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    return (
+        normalize_broker_result_code(payload.get("broker_result_code")),
+        sanitize_broker_result_message(payload.get("broker_result_message")),
+    )
+
+
+def _event_response(event: OrderEvent) -> OrderEventResponse:
+    broker_result_code, broker_result_message = _broker_result(event)
+    return OrderEventResponse(
+        id=event.id,
+        event_type=event.event_type,
+        source=event.source,
+        broker_result_code=broker_result_code,
+        broker_result_message=broker_result_message,
+        occurred_at=event.occurred_at,
+    )
 
 
 def _summary(order: TradingOrder) -> OrderSummary:
@@ -78,15 +109,7 @@ def get_order(
     return OrderDetailResponse(
         **_summary(order).model_dump(),
         request_id=request.state.request_id,
-        events=[
-            OrderEventResponse(
-                id=event.id,
-                event_type=event.event_type,
-                source=event.source,
-                occurred_at=event.occurred_at,
-            )
-            for event in events
-        ],
+        events=[_event_response(event) for event in events],
         fills=[
             FillResponse(
                 id=fill.id,

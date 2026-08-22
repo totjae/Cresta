@@ -105,6 +105,7 @@ SUBMITTING 또는 CANCEL_PENDING 또는 REPLACE_PENDING
 | STM-027 | 신규매수 미체결 timeout은 Broker 접수 시 계산한 `next_action_at`으로 영속화한다. 재시작 후에도 같은 시각을 사용하고 취소 요청을 다시 보내지 않는다. |
 | STM-028 | 취소 API의 정상 접수는 원주문 체결 완료가 아니다. 원주문은 `CANCEL_PENDING`을 유지하고 WebSocket 또는 계좌 조회가 실제 취소 잔량을 확인한 뒤에만 `CANCELLED`가 된다. |
 | STM-029 | 취소 API의 명시적 업무 거절 또는 응답 불명확 결과는 자동 재요청하지 않는다. 각각 `RECONCILING` 또는 `UNKNOWN`으로 보존하고 Broker 조회를 통해서만 다음 상태를 확정한다. |
+| STM-036 | 명시적 업무 거절의 상태 전이는 기존 `REJECTED` 또는 `RECONCILING` 의미를 바꾸지 않는다. 정규화한 Broker 결과는 해당 terminal·대조필요 이벤트의 진단 metadata일 뿐 자동 재전송·상태 복구·주문 성공의 근거로 사용하지 않는다. |
 
 ### 3.5 키움 API 매핑
 
