@@ -397,6 +397,7 @@ LOADING | EMPTY | READY | STALE | DEGRADED | RECONCILING | HALTED | ERROR
 | UI-151 | 각 이력 목록은 최신순으로 정렬하고 처음 12개만 표시한다. 추가 이력은 명시적인 `더 보기` 동작으로 12개씩 확장하며 탭 전환이나 polling이 이미 펼친 상세를 임의로 다른 항목으로 변경하지 않는다. |
 | UI-152 | `전체 이력`은 운영 Decision과 Agent run을 별도 요약 목록으로 유지한다. 승인 카드는 `운영 판단`에서만 표시하고 Agent run 목록 뒤에 중복 배치하지 않는다. |
 | UI-153 | 주문 상세의 명시적 키움 거절 이벤트는 `Broker 거절 코드 · 안전한 사유`를 상태 이벤트 아래에 표시한다. 결과가 없는 이벤트에는 빈 사유를 만들지 않고 `UNKNOWN`·전송 오류를 키움 업무 거절로 표현하지 않는다. |
+| UI-154 | Console 상단의 Broker·Gate 표시는 인증된 `/system/broker`의 `KIWOOM_MOCK_PRIMARY` worker 상태와 gate 상태를 함께 사용한다. legacy Paper gate를 키움 상태로 표시하지 않으며 조회 실패는 `UNKNOWN`, 미설정은 `NOT_CONFIGURED`로 구분한다. |
 
 ### 6.3 감시 종목 화면 1차 구현 계약
 

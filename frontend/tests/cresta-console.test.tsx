@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -91,6 +91,50 @@ describe("CrestaConsole authentication", () => {
       totp_code: "123456",
     });
     expect(storageWrite).not.toHaveBeenCalled();
+  });
+
+  it("shows the authoritative Kiwoom worker gate in the top bar", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-header", login_id: "admin", expires_at: "2026-08-22T09:00:00Z", csrf_token: "csrf-header" });
+      if (path === "/api/v1/system/health") return jsonResponse({ ...healthResponse, kiwoom_broker_status: "CONNECTED" });
+      if (path === "/api/v1/system/broker") return jsonResponse({
+        schema_version: "1.0", request_id: "broker-header", environment: "MOCK",
+        account_alias: "KIWOOM_MOCK_PRIMARY", state: "READY", gate_status: "READY",
+        gate_reason: "WORKER_HEALTHY", fencing_token: 9, lease_valid: true,
+        websocket_connected: true, subscriptions_ready: true,
+        last_heartbeat_at: "2026-08-22T01:00:00Z", last_reconciliation_at: "2026-08-22T01:00:00Z",
+        last_reconciliation_run_id: "run-header", last_error_code: null,
+      });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CrestaConsole />);
+
+    const gate = await screen.findByText("키움 Gate");
+    await waitFor(() => expect(within(gate.closest(".market-state")!).getByText("READY")).toBeInTheDocument());
+    expect(screen.queryByText("Paper Gate")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/system/broker")).toBe(true);
+  });
+
+  it.each([
+    ["NOT_CONFIGURED", 200, "NOT_CONFIGURED"],
+    ["CONNECTED", 503, "UNKNOWN"],
+  ])("keeps the Kiwoom gate explicit when broker status is %s", async (kiwoomStatus, brokerHttpStatus, expectedGate) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/session") return jsonResponse({ request_id: "req-header-fallback", login_id: "admin", expires_at: "2026-08-22T09:00:00Z", csrf_token: "csrf-header-fallback" });
+      if (path === "/api/v1/system/health") return jsonResponse({ ...healthResponse, kiwoom_broker_status: kiwoomStatus });
+      if (path === "/api/v1/system/broker") return jsonResponse({}, brokerHttpStatus);
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CrestaConsole />);
+
+    const gate = await screen.findByText("키움 Gate");
+    await waitFor(() => expect(within(gate.closest(".market-state")!).getByText(expectedGate)).toBeInTheDocument());
+    expect(screen.queryByText("Paper Gate")).not.toBeInTheDocument();
+    expect(within(gate.closest(".market-state")!).queryByText("STARTING")).not.toBeInTheDocument();
   });
 
   it("restores an active session and logs out with the in-memory CSRF token", async () => {

@@ -85,7 +85,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid #82b4ff; outline-
 .market-state { min-width: 0; gap: 7px; color: #9ca9bd; font-size: 11px; white-space: nowrap; }
 .market-state b { color: #d7dfed; font-size: 10px; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #68768d; }
+.status-dot.ready { background: var(--green); box-shadow: 0 0 8px #42dfa088; }
 .status-dot.amber { background: var(--amber); box-shadow: 0 0 8px #f4bd5f88; }
+.status-dot.danger { background: var(--red); box-shadow: 0 0 8px #ff8f9388; }
 .top-divider { height: 18px; width: 1px; background: #344159; }
 .top-actions { gap: 10px; }
 .top-actions button { min-height: 35px; border: 1px solid #31405a; border-radius: 6px; background: #121e32; }

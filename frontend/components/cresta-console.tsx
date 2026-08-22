@@ -227,6 +227,8 @@ function ConsoleShell({
   const [menuOpen, setMenuOpen] = useState(false);
   const [page, setPage] = useState<ConsolePage>("dashboard");
   const [health, setHealth] = useState<SystemHealth | null>(null);
+  const [broker, setBroker] = useState<BrokerStatus | null>(null);
+  const [brokerLoadFailed, setBrokerLoadFailed] = useState(false);
   const [healthError, setHealthError] = useState("");
 
   const loadHealth = useCallback(async (signal?: AbortSignal) => {
@@ -246,12 +248,35 @@ function ConsoleShell({
     return () => controller.abort();
   }, [loadHealth]);
 
+  useEffect(() => {
+    if (!health || health.kiwoom_broker_status === "NOT_CONFIGURED") {
+      setBroker(null);
+      setBrokerLoadFailed(false);
+      return;
+    }
+    const controller = new AbortController();
+    setBrokerLoadFailed(false);
+    void systemApi.broker(controller.signal)
+      .then((value) => setBroker(value))
+      .catch((reason) => {
+        if (reason instanceof DOMException && reason.name === "AbortError") return;
+        setBroker(null);
+        setBrokerLoadFailed(true);
+        if (reason instanceof ApiError && reason.status === 401) onSessionExpired();
+      });
+    return () => controller.abort();
+  }, [health, onSessionExpired]);
+
   function selectPage(nextPage: ConsolePage) {
     setPage(nextPage);
     setMenuOpen(false);
   }
 
-  const gateStatus = health?.trading_gate?.status ?? "NOT INITIALIZED";
+  const brokerStatus = broker?.state ?? health?.kiwoom_broker_status ?? "확인 중";
+  const gateStatus = broker?.gate_status
+    ?? (health?.kiwoom_broker_status === "NOT_CONFIGURED" ? "NOT_CONFIGURED" : brokerLoadFailed ? "UNKNOWN" : "확인 중");
+  const brokerTone = brokerStatus === "READY" ? "ready" : brokerStatus === "DEGRADED" ? "danger" : "amber";
+  const gateTone = gateStatus === "READY" ? "ready" : ["DEGRADED", "HALTED", "UNKNOWN"].includes(gateStatus) ? "danger" : gateStatus === "NOT_CONFIGURED" ? "muted" : "amber";
   return (
     <div className="console-shell">
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
@@ -275,7 +300,7 @@ function ConsoleShell({
 
       <main className="console-main">
         <header className="topbar">
-          <div className="topbar-left"><button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="메뉴 열기"><Menu /></button><div className="market-state"><span className="status-dot amber" /><span className="market-label">키움 모의투자</span><b>{health?.kiwoom_broker_status ?? "확인 중"}</b></div><div className="top-divider" /><div className="market-state"><span className="status-dot muted" /><span className="market-label">Paper Gate</span><b>{gateStatus}</b></div></div>
+          <div className="topbar-left"><button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="메뉴 열기"><Menu /></button><div className="market-state"><span className={`status-dot ${brokerTone}`} /><span className="market-label">키움 모의투자</span><b>{brokerStatus}</b></div><div className="top-divider" /><div className="market-state"><span className={`status-dot ${gateTone}`} /><span className="market-label">키움 Gate</span><b>{gateStatus}</b></div></div>
           <div className="top-actions"><span className="mock-badge">MOCK</span><button aria-label="알림" disabled><Bell size={19} /></button><button className="logout-button" onClick={onLogout} disabled={logoutBusy}><LogOut size={17} /> {logoutBusy ? "종료 중" : "로그아웃"}</button></div>
         </header>
 

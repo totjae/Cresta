@@ -1,5 +1,12 @@
 # Cresta 테스트 계획
 
+### T-CONSOLE-KIWOOM-STATUS — 상단 키움 상태 일치 (2026-08-22)
+
+- `T-CONSOLE-KIW-STATUS-001`: `/system/health`가 키움 연결을 알리고 `/system/broker`가 worker·gate `READY`를 반환하면 Console 상단이 `키움 모의투자 READY`와 `키움 Gate READY`를 표시하는지 확인한다.
+- `T-CONSOLE-KIW-STATUS-002`: 상단에 legacy `Paper Gate`를 키움 상태로 표시하지 않고 Broker 조회 실패는 `UNKNOWN`, 미설정은 `NOT_CONFIGURED`로 구분하는지 확인한다.
+
+Evidence: 상태 READY·NOT_CONFIGURED·UNKNOWN과 인증·Broker 회귀를 묶은 집중 component 시험 5개, TypeScript와 production build가 통과했다. Console 전체 19개 중 이번 변경 관련 18개가 통과하고 기존 운영 휴장 비동기 시험 1개만 실패했다.
+
 ### T-KIW-REJECTION-DIAGNOSTIC — 키움 주문 거절 원인 보존 (2026-08-18)
 
 - `T-KIW-REJ-001`: HTTP 200의 `return_code != 0` 주문 응답이 `KIWOOM_ORDER_REJECTED`와 정규화한 Broker 코드·메시지를 만들고 HTTP를 재시도하지 않는지 확인한다.

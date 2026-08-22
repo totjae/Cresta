@@ -1,5 +1,11 @@
 # Cresta 구현 상태
 
+### 2026-08-22 Console 상단 키움 상태 일치
+
+- Console 상단의 `Paper Gate` 표시를 제거하고 시스템 상태 화면과 동일한 인증 Broker endpoint에서 `KIWOOM_MOCK_PRIMARY` worker·gate 상태를 조회하도록 통일했다. 연결된 환경에서 legacy Paper `STARTING`이 키움 gate 상태처럼 보이던 불일치를 제거했다.
+- Broker 조회 실패는 `UNKNOWN`, 키움 미설정은 `NOT_CONFIGURED`로 구분하며 READY·대기·위험 상태에 맞는 상태점을 표시한다.
+- 상태 READY·NOT_CONFIGURED·UNKNOWN과 인증·Broker 회귀를 묶은 집중 component 시험 5개, TypeScript와 production build가 통과했다. Console 전체 19개 중 이번 변경 관련 18개가 통과하고 기존 운영 휴장 비동기 시험 1개만 실패했다.
+
 ### 2026-08-18 키움 주문 거절 진단 정보 보존
 
 - 키움 주문·취소 API가 HTTP 200과 업무 `return_code != 0`으로 명시적 거절을 반환하면 Adapter가 정규화된 결과 코드와 안전하게 정제된 사유를 전달하고, 주문 송신기가 기존 append-only `order_events.payload_json`에 두 필드만 보존한다. 응답 원문·계좌번호·토큰·자격증명은 저장하지 않는다.
