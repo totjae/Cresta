@@ -199,6 +199,7 @@ configuration_change:
 | CFG-082 | 위험 설정이 활성화되지 않은 상태에서 조회용 시스템 안전 기본값은 제공할 수 있지만 `entry_order_amount` 기본값은 제공하지 않는다. 사용자가 값을 포함한 위험 설정을 활성화하기 전에는 신규매수를 차단한다. |
 | CFG-083 | 판단 실행과 Guard 평가는 사용한 risk policy version ID와 각 최종값의 출처를 저장한다. |
 | CFG-084 | 실행 단계 `SHADOW | APPROVAL_ONLY | MOCK_AUTOMATIC`은 별도 시스템 gate이며 일반 실행 권한보다 우선한다. 단계 확대는 TOTP 재인증, 변경 사유와 요구 시험 근거를 요구한다. |
+| CFG-085 | 행동별 `AUTOMATIC` 설정은 현재 ExecutionStage가 해당 행동의 승인 없는 실행을 허용할 때만 효력이 있다. `FIXED_STOP`을 포함한 Guard trigger의 단계별 실행 의미는 `DECISION_EXECUTION_SPEC.md` EXE-211~213을 따른다. |
 
 ### 6.3 에이전트·모델 route 설정 계약
 
@@ -215,6 +216,207 @@ configuration_change:
 | CFG-098 | 역할별 현재 활성 배정은 하나만 허용한다. 새 배정 활성화는 기존 배정을 `SUPERSEDED`로 보존하고 실행 중 run은 시작할 때 고정한 이전 version을 계속 사용한다. |
 | CFG-099 | `temperature`, `top_p`, `max_output_tokens`, `reasoning_effort`, `seed`는 선택 모델이 검증한 capability와 범위 안에서만 설정한다. 미지원 파라미터는 UI에서 비활성화하고 API에서도 거부한다. |
 | CFG-100 | 중복 `VALIDATED` route가 존재하면 자동 선택하지 않고 현재 배정 미확정으로 표시한다. 사용자가 하나를 선택해 활성화하기 전까지 해당 역할의 운영 호출은 차단한다. |
+
+### 6.4 v7 ENTRY Activation Gate 계약
+
+`V7_ENTRY_ACTIVATION`은 별도 실행 mode가 아니라 system-owned
+`ConfigurationVersion`이다. 첫 배포의 identity는 `scope=SYSTEM`,
+`target_id=MOCK`, `category=V7_ENTRY_ACTIVATION`이고 payload schema는
+`activation-gate-v1`이다. `ACTIVE`는 선택 가능한 설정 version이라는 뜻이고 payload의
+`gate_state=OPEN`은 해당 version이 Finalizer admission을 허가한다는 뜻이므로 두 상태를
+합치지 않는다.
+
+`activation-gate-v1`의 exact top-level field는 다음 아홉 개뿐이며 모두 required다.
+unknown field와 implicit default를 거부한다.
+
+```yaml
+schema_version: activation-gate-v1
+gate_state: OPEN | CLOSED
+target: MOCK
+version_snapshot:
+  dag_version: agent-dag-v7
+  decision_context_schema_version: decision-context-v1
+  decision_agent_result_schema_version: decision-agent-result-v1
+  arbiter_result_schema_version: entry-consensus-v1
+  consensus_policy_version: consensus-policy-v1
+  policy_profiles: []
+  routes: []
+version_snapshot_hash: <64 lowercase hex>
+safety_evidence: []
+validation_policy_version: activation-validation-policy-v1
+validated_at: <UTC timestamp>
+valid_until: <UTC timestamp>
+```
+
+`version_snapshot`도 위 일곱 field만 허용한다. `policy_profiles`는 정확히 세 항목이며
+`CONSERVATIVE`, `BALANCED`, `AGGRESSIVE` 순서다. item exact field는
+`configuration_version_id`, `category`, `sequence`, `agent_type`, `payload_hash`이고 category와
+agent type은 각각 `V7_ENTRY_POLICY_CONSERVATIVE/CONSERVATIVE`,
+`V7_ENTRY_POLICY_BALANCED/BALANCED`, `V7_ENTRY_POLICY_AGGRESSIVE/AGGRESSIVE`로 일대일이다.
+`sequence`는 1 이상의 integer, hash는 64자리 lowercase hex다.
+
+`routes`는 `TECHNICAL_SCOUT`, `NEWS_DISCLOSURE_SCOUT`, `MARKET_SECTOR_SCOUT`,
+`POSITION_RISK_SCOUT`, `CONSERVATIVE_DECISION`, `BALANCED_DECISION`,
+`AGGRESSIVE_DECISION` 순서의 정확히 일곱 항목이다. item exact field는 `role`, `route_id`,
+`route_version`, `route_version_hash`, `model_id`, `model_version`,
+`fallback_model_id`, `fallback_model_version`,
+`prompt_profile_id`, `prompt_version`, `prompt_content_hash`다. `route_id`와 `model_id`는
+UUID string, `route_version`과 `model_version`은 1 이상의 integer,
+`prompt_version`은 non-empty string, `route_version_hash`는 64자리 lowercase hex다.
+fallback을 쓰지 않는 route는 `fallback_model_id`와 `fallback_model_version`이 모두 null이고,
+쓰는 route는 각각 UUID string과 1 이상의 integer다.
+`prompt_profile_id`와 `prompt_content_hash`는 둘 다 non-null 또는 둘 다 JSON null이다.
+non-null `prompt_profile_id`는 UUID string이고 `prompt_content_hash`는 64자리 lowercase hex다.
+Scout route는 profile이 없을 때 이 두 field만 null일 수 있고 `prompt_version`은 유지한다.
+Decision role에서는 세 prompt field가 모두 non-null이어야 한다. 부분 provenance와 대표
+model/prompt 합성은 금지한다.
+
+`safety_evidence` item은 다음 exact field를 모두 가진다.
+
+```yaml
+test_id: <non-empty string>
+requirement_ids: [<non-empty string>]
+result: PASSED
+code_revision: <non-empty build/revision identity>
+test_plan_version: <non-empty string>
+spec_version: <non-empty string>
+executed_at: <UTC timestamp>
+valid_until: <UTC timestamp> | null
+freshness_contract: <non-empty string> | null
+evidence_ref: <non-empty string>
+evidence_hash: <64 lowercase hex>
+```
+
+`requirement_ids`는 중복 없는 문자열 오름차순이며 비어 있을 수 없다. `valid_until`과
+`freshness_contract`는 둘 중 정확히 하나만 non-null이어야 한다. `result`는 `PASSED`만
+허용하고 boolean `passed`, 누락 시 pass, `FAILED` evidence의 OPEN payload 포함을 모두
+금지한다. `safety_evidence`는 `test_id` 오름차순이고 중복 test ID가 없어야 하며
+`AI_DECISION_SPEC.md` 7.11.1의 activation acceptance set을 빠짐없이 포함한다. 각 evidence는
+payload 검증 시 identity/version 대상 일치, evidence hash, 실행시각과 명시된
+validity/freshness를 모두 통과해야 한다. `evidence_hash`는 `evidence_ref`가 가리키는
+불변 시험 report artifact bytes의 SHA-256이다. `freshness_contract`는
+`activation-validation-policy-v1`에 등록된 versioned contract ID여야 하며 unknown ID는
+invalid다. direct `valid_until`은 DB-authoritative time과 비교하고, contract ID 경로는
+해당 validation policy가 `executed_at`과 현재 시간을 평가한다.
+
+Canonical JSON은 UTF-8, `ensure_ascii=false`, key 사전순, 불필요한 공백 없는 separator를
+사용한다. timestamp는 UTC ISO-8601 `+00:00`로 정규화하고 0인 소수 초는 생략한다. null은
+명시적 JSON null로 보존한다. `version_snapshot_hash`는 해당 field를 제외할 필요가 없는
+독립 `version_snapshot` object의 canonical bytes SHA-256이고, ConfigurationVersion
+`payload_hash`는 `version_snapshot_hash`를 포함한 payload 전체 canonical bytes의 SHA-256이다.
+목록은 위 고정 순서를 사용하므로 입력 순서를 자동 의미로 받아들이지 않는다.
+`validated_at < valid_until`이어야 하며 Gate validator의 DB-authoritative time이
+`valid_until` 이상이면 OPEN으로 평가하지 않는다.
+
+Gate outcome precedence는 deterministic하다. DB read/lock failure는 retryable
+infrastructure failure다. ACTIVE ambiguity 또는 selected payload의 schema/canonical/hash
+오류는 `ACTIVATION_GATE_INVALID`다. ACTIVE row 부재 또는 structurally valid payload의
+`gate_state=CLOSED`는 `ACTIVATION_GATE_CLOSED`다. OPEN payload의 target/version/evidence/
+freshness/validity 오류는 `ACTIVATION_GATE_INVALID`다. Finalizer에서 여기까지 유효한 current
+OPEN Gate의 ID/hash가 frozen ID/hash와 다르면 `ACTIVATION_GATE_SUPERSEDED`이고, 같을 때만
+PASS다. 따라서 새 CLOSED version이 frozen Gate와 달라도 CLOSED가 supersession보다 먼저다.
+
+| ID | 요구사항 |
+| --- | --- |
+| CFG-104 | `activation-gate-v1`은 위 exact field, enum, nullability, ordering과 canonical hash 규칙을 적용하고 unknown/missing/default field를 거부한다. |
+| CFG-105 | Gate state는 `OPEN | CLOSED`, target은 현재 `MOCK`만 허용하며 Gate state를 Decision action 또는 ExecutionStage mode로 변환하지 않는다. |
+| CFG-106 | safety evidence는 required acceptance set 전체의 identity/version, PASSED, hash와 freshness를 검증하며 boolean pass 또는 누락·malformed·stale evidence를 OPEN으로 해석하지 않는다. |
+| CFG-107 | TRADING admission은 같은 transaction snapshot에서 정확히 한 `ACTIVE + OPEN` Gate를 선택하고 그 ConfigurationVersion ID와 payload hash를 AgentRun에 고정한다. 부재·중복·CLOSED·invalid는 fail-closed 한다. |
+| CFG-108 | Finalizer는 frozen historical Policy와 달리 Gate를 live safety control로 취급해 현재 ACTIVE ID/hash가 frozen Gate와 같고 계속 OPEN·유효한지 write boundary에서 재검증한다. supersession 또는 closure 시 기존 run을 새 Gate로 승격하지 않는다. |
+| CFG-109 | Gate validation policy와 payload는 사용자 임의 설정이 아니며 system-owned control plane만 생성·검증·활성화한다. LIVE target은 이 schema version에서 지원하지 않는다. |
+| CFG-110 | ACTIVE lifecycle 변경과 payload hash는 기존 ConfigurationVersion 불변·원자 활성화·감사 계약을 재사용하고 기존 payload를 수정해 OPEN/CLOSED를 바꾸지 않는다. |
+| CFG-111 | Activation Gate는 immutable Decision 생성 허가만 제어하며 `SHADOW | APPROVAL_ONLY | MOCK_AUTOMATIC` 또는 행동별 execution mode를 포함하거나 대체하지 않는다. |
+
+### 6.5 v7 ENTRY ExecutionStage control-plane 계약
+
+Sourced ENTRY execution의 authoritative current stage는 기존 `ConfigurationVersion`을
+재사용하는 system-owned control-plane이다. identity는 `scope=SYSTEM`, `target_id=MOCK`,
+`category=V7_ENTRY_EXECUTION_STAGE`이고 payload schema는 `execution-stage-control-v1`이다.
+process `Settings.execution_stage`는 legacy/bootstrap 호환값일 뿐 sourced authority가 아니다.
+
+Payload는 다음 exact 일곱 field만 가지며 모두 required다.
+
+```yaml
+schema_version: execution-stage-control-v1
+stage: SHADOW | APPROVAL_ONLY | MOCK_AUTOMATIC
+target: MOCK
+validation_policy_version: execution-stage-validation-policy-v1
+safety_evidence: []
+validated_at: <UTC timestamp>
+valid_until: <UTC timestamp>
+```
+
+Unknown/missing/default field, non-MOCK target, `validated_at >= valid_until`, DB-authoritative
+time 기준 expired payload를 거부한다. canonical JSON/timestamp/null/hash 규칙은 CFG-104의
+공통 canonicalization 규칙을 사용하되 Activation Gate의 version snapshot이나 acceptance
+set을 복사하지 않는다. ConfigurationVersion `payload_hash`는 위 전체 payload canonical
+bytes의 SHA-256 lowercase hex다.
+
+`safety_evidence` item의 exact field는 `test_id`, `requirement_ids`, `result`,
+`code_revision`, `test_plan_version`, `executed_at`, `valid_until`, `freshness_contract`,
+`evidence_ref`, `evidence_hash`다. `result=PASSED`, non-empty immutable build/revision/report
+identity와 64 lowercase hex evidence hash를 요구한다. `requirement_ids`는 중복 없는 문자열
+오름차순이고, `valid_until`과 registered `freshness_contract` 중 정확히 하나만 non-null이다.
+목록은 test_id 오름차순이며 boolean shortcut, unknown freshness contract와 stale/malformed
+evidence를 거부한다.
+
+Stage별 required acceptance set은 다음과 같다.
+
+| stage | required evidence |
+| --- | --- |
+| SHADOW | 빈 목록 허용. strict payload·ACTIVE exact-one·expiry 검증은 생략하지 않는다. |
+| APPROVAL_ONLY | `T-V2-EXE-AUTH-001`, `T-V2-EXE-AUTH-002`, `T-V2-EXE-AUTH-003`, `T-V2-EXE-AUTH-004`, `T-V2-EXE-AUTH-005`, `T-V2-EXE-AUTH-006`, `T-V2-EXE-AUTH-007`, `T-V2-EXE-AUTH-008`, `T-V2-EXE-AUTH-011`, `T-V2-EXE-AUTH-012`, `T-V2-EXE-AUTH-015`, `T-V2-EXE-AUTH-016` |
+| MOCK_AUTOMATIC | `T-V2-EXE-AUTH-001`, `T-V2-EXE-AUTH-002`, `T-V2-EXE-AUTH-003`, `T-V2-EXE-AUTH-004`, `T-V2-EXE-AUTH-005`, `T-V2-EXE-AUTH-006`, `T-V2-EXE-AUTH-007`, `T-V2-EXE-AUTH-008`, `T-V2-EXE-AUTH-009`, `T-V2-EXE-AUTH-010`, `T-V2-EXE-AUTH-011`, `T-V2-EXE-AUTH-012`, `T-V2-EXE-AUTH-013`, `T-V2-EXE-AUTH-014`, `T-V2-EXE-AUTH-015`, `T-V2-EXE-AUTH-016` |
+
+Stage authority는 `SHADOW < APPROVAL_ONLY < MOCK_AUTOMATIC`이다. DecisionExecution 생성 시
+selected version ID/hash/stage를 freeze하지만 current ACTIVE stage는 Approval 생성·승인,
+Order 생성과 broker pre-send마다 다시 읽는다. effective authority는 frozen/current 중 더
+낮은 값이다. ACTIVE version ID가 바뀌어도 새 payload가 strict valid이면 authority level로
+비교하고, current stage의 부재·복수 ACTIVE·malformed·expired·evidence invalid는
+`EXECUTION_STAGE_UNAVAILABLE`로 fail-closed한다. 더 permissive한 current version은 기존
+execution을 자동 승격하지 않는다.
+
+| ID | 요구사항 |
+| --- | --- |
+| CFG-112 | sourced ENTRY current stage identity는 `SYSTEM / MOCK / V7_ENTRY_EXECUTION_STAGE` ConfigurationVersion exact-one ACTIVE이며 `execution-stage-control-v1` 외 payload와 Settings 기반 authority를 거부한다. |
+| CFG-113 | stage payload는 위 exact 일곱 field, 세 stage, MOCK target, UTC validity와 canonical hash를 사용하고 unknown/missing/default/expired 값을 거부한다. |
+| CFG-114 | stage safety evidence는 위 exact item shape와 stage별 required acceptance set을 사용한다. boolean pass, stale evidence, unknown freshness contract와 incomplete set은 authority를 부여하지 않는다. |
+| CFG-115 | stage authority 순서는 `SHADOW < APPROVAL_ONLY < MOCK_AUTOMATIC`이며 execution은 selected version ID/hash/stage를 freeze하고 current와 frozen의 minimum만 사용한다. |
+| CFG-116 | current stage supersession은 ID 변경만으로 기존 execution을 cancel하지 않지만 more-permissive stage로 자동 승격하지 않는다. same/lower valid stage는 current safety authority로 즉시 적용한다. |
+| CFG-117 | current stage 부재·ACTIVE ambiguity·schema/hash/evidence/validity 오류는 `EXECUTION_STAGE_UNAVAILABLE`로 fail-closed하며 APPROVAL_ONLY/MOCK_AUTOMATIC default를 합성하지 않는다. |
+| CFG-118 | action policy도 selected version ID와 effective mode를 freeze하고 current mode가 더 restrictive하면 `DISABLED < MANUAL_APPROVAL < AUTOMATIC` 순서의 minimum을 적용한다. current 완화는 기존 execution을 확대하지 않는다. |
+| CFG-119 | Risk Policy는 initial version을 freeze하고 later authority boundary에서 frozen/current 정책을 모두 평가한다. current 완화는 수량·한도·권한을 확대하지 않고 어느 한쪽의 block도 우회하지 않는다. |
+| CFG-120 | LIVE stage/target은 이 schema에 없고 MOCK_AUTOMATIC activation은 full required evidence, 변경 사유, version conflict 검사와 적용되는 재인증 정책을 모두 통과해야 한다. |
+
+### 6.6 금융 authority freshness 설정 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| CFG-121 | versioned `USER_DEFAULT / RISK_POLICY` payload의 canonical financial freshness field는 integer `account_funds_stale_seconds`와 `order_capacity_stale_seconds`다. boolean·negative·0·null·unlimited 값은 허용하지 않는다. |
+| CFG-122 | `account_funds_stale_seconds`의 canonical default는 30초이고 허용범위는 1..300 inclusive다. `order_capacity_stale_seconds`의 canonical default는 10초이고 허용범위는 1..60 inclusive다. |
+| CFG-123 | 신규 field가 없는 기존 valid Risk Policy payload는 canonical read/validation 시 각각 30과 10을 적용한다. missing을 infinite·0 또는 `quote_stale_seconds`로 해석하지 않으며 세 TTL은 독립이다. |
+| CFG-124 | 기존 configuration integer parser가 exact integer representation만 명시적으로 정규화하는 경우를 제외하고 float는 거부한다. 범위 밖 값을 clamp하거나 저장된 payload를 묵시적으로 수정하지 않는다. |
+| CFG-125 | execution이 freeze한 Risk Policy와 current authoritative Risk Policy의 각 금융 TTL을 모두 검증하고 effective 값은 field별 minimum이다. current looser value는 authority를 확대하지 않고 current stricter value는 즉시 적용한다. |
+| CFG-126 | current authoritative Risk Policy의 schema/field/range가 invalid하거나 exact-one ACTIVE selection이 실패하면 financial authority를 fail-closed한다. DB/transient lookup failure는 retryable infrastructure failure로 분류한다. |
+
+### 6.7 sourced ENTRY handoff runtime activation
+
+| ID | 요구사항 |
+| --- | --- |
+| CFG-127 | process setting `CRESTA_V7_SOURCED_HANDOFF_ENABLED`는 sourced handoff worker lifecycle만 제어하는 non-secret boolean이며 기본값은 `false`다. DB ConfigurationVersion이나 migration으로 만들지 않는다. |
+| CFG-128 | false 또는 unset이면 worker는 sweep 없이 정상 종료한다. true일 때만 committed eligible sourced ENTRY Decision을 기존 reconciliation helper로 polling한다. |
+| CFG-129 | boolean은 Pydantic Settings의 strict configuration parsing을 사용한다. malformed 값은 startup configuration failure이며 true로 추정하거나 fallback하지 않는다. |
+| CFG-130 | 이 flag는 Activation Gate, ExecutionStage, Execution/Risk Policy, TradingGate, PAUSE_ENTRY, Approval, BrokerLease 또는 LIVE authority를 대체·완화하지 않는다. 활성화 자체로 Stage/Gate/Policy/Order를 seed하지 않는다. |
+| CFG-131 | 별도 high-frequency setting을 추가하지 않고 기존 `CRESTA_AGENT_WORKER_POLL_SECONDS`(기본 1초, 1..10초)를 handoff cadence로 재사용한다. cadence는 authority semantic이 아니다. |
+
+### 6.8 Phase 11A deployment configuration boundary
+
+| ID | 요구사항 |
+| --- | --- |
+| CFG-132 | deploy `.env.example`은 `Settings`의 non-secret/defaulted runtime key와 secret file 경로를 분류해 유지한다. password, token, API key, account secret과 완성된 credential URL은 포함하지 않는다. |
+| CFG-133 | Compose 기본값은 `CRESTA_ENVIRONMENT=MOCK`, `CRESTA_LIVE_TRADING_ENABLED=false`, `CRESTA_V7_SOURCED_HANDOFF_ENABLED=false`다. startup은 Activation Gate, ExecutionStage 또는 trading policy를 생성·seed하지 않는다. |
+| CFG-134 | PostgreSQL password, TOTP encryption key, Kiwoom MOCK credential과 external provider key는 Docker secret/read-only file로만 주입한다. direct secret environment field는 example과 Compose에 두지 않는다. |
+| CFG-135 | migration one-shot도 동일 `Settings.validate_safety()`와 password-file URL resolution을 사용하므로 malformed safety config와 non-MOCK/LIVE endpoint는 migration 실패로 runtime startup을 차단한다. |
 
 ### 개발 단계 설정 인증 정책
 

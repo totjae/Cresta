@@ -72,9 +72,10 @@ def persisted_order(
     status: str = "CREATED",
     created_at: datetime | None = None,
     side: str = "BUY",
-    action: str = "USER_APPROVED",
+    action: str = "MOCK_CONNECTION_TEST",
     unfilled_policy: str = "NONE",
     fill_timeout_seconds: int = 0,
+    quantity: int = 1,
 ) -> TradingOrder:
     intent = OrderIntent(
         account_alias=account_alias,
@@ -83,7 +84,10 @@ def persisted_order(
         market="KRX",
         side=side,
         action=action,
-        requested_quantity=2,
+        requested_quantity=quantity,
+        source_type="BROKER_DIAGNOSTIC",
+        source_id=idempotency_key,
+        authority_key=f"diagnostic:{idempotency_key}",
         correlation_id="corr-order-send",
     )
     db.add(intent)
@@ -98,8 +102,8 @@ def persisted_order(
         side=side,
         order_type="LIMIT",
         limit_price=Decimal(70000),
-        requested_quantity=2,
-        remaining_quantity=2,
+        requested_quantity=quantity,
+        remaining_quantity=quantity,
         status=status,
         idempotency_key=idempotency_key,
         request_hash="a" * 64,
@@ -287,7 +291,7 @@ def test_entry_buy_ack_schedules_cancel_and_only_cancels_after_timeout(db: Sessi
     identity = ready_worker(db)
     order = persisted_order(
         db,
-        action="BUY",
+        action="MOCK_CONNECTION_TEST",
         unfilled_policy="CANCEL",
         fill_timeout_seconds=10,
     )
@@ -304,7 +308,7 @@ def test_entry_buy_ack_schedules_cancel_and_only_cancels_after_timeout(db: Sessi
     ) is None
 
     client.outcome = KiwoomOrderAcknowledgement(
-        "7654321", "KRX", original_order_id="1234567", affected_quantity=2
+        "7654321", "KRX", original_order_id="1234567", affected_quantity=1
     )
     cancelled = cancel_next_expired_buy_once(
         db, client, identity, now=now + timedelta(seconds=10)
@@ -312,9 +316,9 @@ def test_entry_buy_ack_schedules_cancel_and_only_cancels_after_timeout(db: Sessi
 
     assert cancelled is not None
     assert cancelled.status == "CANCEL_PENDING"
-    assert cancelled.requested_quantity == 2
+    assert cancelled.requested_quantity == 1
     assert len(client.cancel_requests) == 1
-    assert client.cancel_requests[0].quantity == 2
+    assert client.cancel_requests[0].quantity == 1
     assert cancel_next_expired_buy_once(
         db, client, identity, now=now + timedelta(seconds=20)
     ) is None
@@ -326,9 +330,10 @@ def test_partial_entry_buy_cancels_only_actual_remainder(db: Session) -> None:
     now = datetime.now(UTC)
     order = persisted_order(
         db,
-        action="BUY",
+        action="MOCK_CONNECTION_TEST",
         unfilled_policy="CANCEL",
         fill_timeout_seconds=10,
+        quantity=2,
     )
     order.broker_order_id = "1234567"
     order.status = "PARTIALLY_FILLED"
@@ -355,7 +360,12 @@ def test_partial_entry_buy_cancels_only_actual_remainder(db: Session) -> None:
 def test_unknown_cancel_closes_gate_and_is_never_resent(db: Session) -> None:
     identity = ready_worker(db)
     now = datetime.now(UTC)
-    order = persisted_order(db, action="BUY", unfilled_policy="CANCEL")
+    order = persisted_order(
+        db,
+        action="MOCK_CONNECTION_TEST",
+        unfilled_policy="CANCEL",
+        quantity=2,
+    )
     order.broker_order_id = "1234567"
     order.status = "OPEN"
     order.next_action_at = now
@@ -385,7 +395,12 @@ def test_explicit_cancel_rejection_preserves_quantities_and_requires_reconciliat
 ) -> None:
     identity = ready_worker(db)
     now = datetime.now(UTC)
-    order = persisted_order(db, action="BUY", unfilled_policy="CANCEL")
+    order = persisted_order(
+        db,
+        action="MOCK_CONNECTION_TEST",
+        unfilled_policy="CANCEL",
+        quantity=2,
+    )
     order.broker_order_id = "1234567"
     order.status = "PARTIALLY_FILLED"
     order.filled_quantity = 1
@@ -440,7 +455,7 @@ def test_sell_and_nonexpired_buy_are_not_auto_cancelled(db: Session) -> None:
     buy = persisted_order(
         db,
         idempotency_key="future-buy",
-        action="BUY",
+        action="MOCK_CONNECTION_TEST",
         unfilled_policy="CANCEL",
     )
     buy.broker_order_id = "2345678"

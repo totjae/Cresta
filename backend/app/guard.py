@@ -49,7 +49,7 @@ def is_cresta_managed(position: Position | None) -> bool:
 def persist_guard_evaluation(
     db: Session,
     *,
-    execution_id: str,
+    execution_id: str | None,
     subject_type: str,
     subject_id: str,
     rules: list[dict[str, object]],
@@ -61,10 +61,12 @@ def persist_guard_evaluation(
     valid_until: datetime | None,
     now: datetime,
     phase: str = "PRE_ORDER",
+    stop_trigger_id: str | None = None,
 ) -> GuardEvaluation:
     blocked = [item for item in rules if item["result"] == "BLOCKED"]
     guard = GuardEvaluation(
         execution_id=execution_id,
+        stop_trigger_id=stop_trigger_id,
         phase=phase,
         subject_type=subject_type,
         subject_id=subject_id,

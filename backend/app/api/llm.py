@@ -553,6 +553,9 @@ def get_role_assignments(
         "MARKET_SECTOR_SCOUT",
         "POSITION_RISK_SCOUT",
         "CORE",
+        "CONSERVATIVE_DECISION",
+        "BALANCED_DECISION",
+        "AGGRESSIVE_DECISION",
     )
     items: list[LlmRoleAssignmentItem] = []
     for role in roles:

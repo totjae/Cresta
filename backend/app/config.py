@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     analysis_scheduler_lease_seconds: int = Field(default=30, ge=15, le=120)
     agent_worker_poll_seconds: int = Field(default=1, ge=1, le=10)
     agent_worker_lease_seconds: int = Field(default=30, ge=10, le=120)
+    v7_sourced_handoff_enabled: bool = False
     dart_enabled: bool = False
     dart_api_key_file: str | None = None
     dart_base_url: str = "https://opendart.fss.or.kr"

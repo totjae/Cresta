@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.broker.kiwoom import (
+    AccountFundsSnapshotData,
     AccountVerification,
     BrokerAccountSnapshot,
     BrokerFillSummary,
@@ -16,6 +17,7 @@ from app.broker.kiwoom import (
     KiwoomAdapterError,
 )
 from app.models import (
+    AccountFundsSnapshot,
     Fill,
     OrderEvent,
     OrderIntent,
@@ -45,10 +47,37 @@ class SnapshotClient:
     def get_account_snapshot(self) -> BrokerAccountSnapshot:
         return self.snapshot
 
+    def get_account_funds(self, *, query_type: str) -> AccountFundsSnapshotData:
+        assert query_type == "3"
+        return AccountFundsSnapshotData(
+            broker="KIWOOM",
+            account_alias="KIWOOM_MOCK_PRIMARY",
+            environment="MOCK",
+            source_api_id="kt00001",
+            query_type=query_type,
+            deposit=1_000_000,
+            generic_orderable_amount=900_000,
+            withdrawable_amount=800_000,
+            d1_estimated_deposit=None,
+            d1_buy_settlement_amount=None,
+            d1_sell_settlement_amount=None,
+            d1_withdrawable_amount=None,
+            d2_estimated_deposit=None,
+            d2_buy_settlement_amount=None,
+            d2_sell_settlement_amount=None,
+            d2_withdrawable_amount=None,
+            received_at=NOW,
+        )
+
 
 class FailingClient:
     def verify_account(self) -> AccountVerification:
         raise KiwoomAdapterError("KIWOOM_TIMEOUT", "secret-detail", retryable=True)
+
+
+class FundsFailingClient(SnapshotClient):
+    def get_account_funds(self, *, query_type: str) -> AccountFundsSnapshotData:
+        raise KiwoomAdapterError("KIWOOM_TIMEOUT", "financial read timed out", retryable=True)
 
 
 def empty_snapshot() -> BrokerAccountSnapshot:
@@ -69,6 +98,30 @@ def test_clean_snapshot_stays_reconciling_until_permanent_worker(db: Session) ->
     gate = db.get(TradingGate, ACCOUNT_ALIAS)
     assert gate is not None
     assert gate.status == "RECONCILING"
+    assert result.funds_refresh_status == "SUCCEEDED"
+    assert db.scalar(select(AccountFundsSnapshot)) is not None
+
+
+def test_funds_failure_preserves_prior_evidence_and_account_projection(db: Session) -> None:
+    prior = AccountFundsSnapshot(
+        broker="KIWOOM",
+        account_alias=ACCOUNT_ALIAS,
+        environment="MOCK",
+        source_api_id="kt00001",
+        query_type="3",
+        deposit=123,
+        received_at=NOW - timedelta(minutes=1),
+    )
+    db.add(prior)
+    db.commit()
+
+    result = run_kiwoom_reconciliation(db, FundsFailingClient(empty_snapshot()))
+
+    assert result.state == "SUCCEEDED"
+    assert result.funds_refresh_status == "FAILED:KIWOOM_TIMEOUT"
+    rows = db.scalars(select(AccountFundsSnapshot)).all()
+    assert [row.id for row in rows] == [prior.id]
+    assert rows[0].deposit == 123
 
 
 def test_external_order_and_position_are_projected_from_broker(db: Session) -> None:

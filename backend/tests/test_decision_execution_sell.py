@@ -272,12 +272,12 @@ def test_partial_sell_below_one_share_is_guard_blocked(
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
 
 
-def test_full_sell_automatic_creates_sell_for_managed_quantity_only(
+def test_full_sell_automatic_in_approval_only_fails_closed(
     db: Session, admin: User, settings: Settings
 ) -> None:
     _activate_execution_policy(db, admin, full_sell="AUTOMATIC")
     snapshot = _seed_market(db)
-    position = _seed_position(db, quantity=10, available_quantity=8, managed_quantity=6)
+    _seed_position(db, quantity=10, available_quantity=8, managed_quantity=6)
     decision = _decision(db, snapshot, action="FULL_SELL")
 
     execution = route_trading_decision(
@@ -289,13 +289,9 @@ def test_full_sell_automatic_creates_sell_for_managed_quantity_only(
         now=NOW,
     )
 
-    assert execution is not None and execution.state == "ORDER_CREATED"
-    order = db.scalar(select(TradingOrder))
-    assert order is not None
-    assert order.side == "SELL"
-    assert order.requested_quantity == position.managed_quantity == 6
-    assert order.limit_price == Decimal(70000)
-    assert order.unfilled_policy == "NONE"
+    assert execution is not None and execution.state == "FAILED_SAFE"
+    assert execution.result_code == "AUTOMATIC_NOT_ALLOWED_IN_APPROVAL_ONLY"
+    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
 
 
 def test_external_only_position_is_never_sold(

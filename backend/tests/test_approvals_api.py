@@ -366,7 +366,9 @@ def test_approve_invalidates_when_latest_price_exceeds_deviation(
     assert guard is not None and guard.snapshot_id == latest.id
 
 
-def test_approve_is_idempotent_on_same_key(db: Session, admin: User, settings: Settings) -> None:
+def test_approve_retry_with_stale_version_conflicts_without_duplicate(
+    db: Session, admin: User, settings: Settings
+) -> None:
     decision = _seed_full(db, admin, settings)
     execution = route_trading_decision(
         db, decision=decision, user=admin, correlation_id="approval-correlation", settings=settings
@@ -375,11 +377,13 @@ def test_approve_is_idempotent_on_same_key(db: Session, admin: User, settings: S
         db, approval_id=execution.approval_id, user=admin, settings=settings,
         correlation_id="approve-1", idempotency_key="approve-key-0002",
     )
-    second = approve_service(
-        db, approval_id=execution.approval_id, user=admin, settings=settings,
-        correlation_id="approve-2", idempotency_key="approve-key-0002",
-    )
-    assert second.id == first.id and second.state == "APPROVED"
+    with pytest.raises(ApprovalError) as exc_info:
+        approve_service(
+            db, approval_id=execution.approval_id, user=admin, settings=settings,
+            correlation_id="approve-2", idempotency_key="approve-key-0002",
+        )
+    assert exc_info.value.code == "APPROVAL_VERSION_CONFLICT"
+    assert first.state == "APPROVED"
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 1
 
 
@@ -439,7 +443,7 @@ def test_approve_expired_approval_rejected(
     assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
 
 
-def test_buy_automatic_in_approval_only_creates_order_directly(
+def test_buy_automatic_in_approval_only_fails_closed_without_order(
     db: Session, admin: User, settings: Settings
 ) -> None:
     decision = _seed_full(db, admin, settings, buy_mode="AUTOMATIC")
@@ -447,8 +451,9 @@ def test_buy_automatic_in_approval_only_creates_order_directly(
         db, decision=decision, user=admin, correlation_id="auto-correlation", settings=settings
     )
     assert execution is not None
-    assert execution.state == "ORDER_CREATED"
-    assert execution.order_intent_id is not None
+    assert execution.state == "FAILED_SAFE"
+    assert execution.result_code == "AUTOMATIC_NOT_ALLOWED_IN_APPROVAL_ONLY"
+    assert execution.order_intent_id is None
     assert execution.approval_id is None
-    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 1
+    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
     assert db.scalar(select(func.count()).select_from(Approval)) == 0

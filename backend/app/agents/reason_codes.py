@@ -10,6 +10,59 @@ from app.agents.contracts import (
 
 REASON_CODE_POLICY_VERSION = "reason-code-policy-v1"
 
+DECISION_AGENT_MODEL_REASON_CODES = (
+    "CONTEXT_SUPPORTS_ENTRY",
+    "CONTEXT_DOES_NOT_SUPPORT_ENTRY",
+    "ENTRY_CRITERIA_NOT_MET",
+    "RISK_EXCEEDS_POLICY",
+    "UNCERTAINTY_EXCEEDS_POLICY",
+    "EVIDENCE_SUPPORTS_ENTRY",
+    "EVIDENCE_OPPOSES_ENTRY",
+    "EVIDENCE_MIXED",
+    "EVIDENCE_INSUFFICIENT",
+    "SCOUT_SIGNALS_SUPPORTIVE",
+    "SCOUT_SIGNALS_ADVERSE",
+    "SCOUT_SIGNALS_CONFLICTED",
+    "MOMENTUM_WITHIN_POLICY",
+    "MOMENTUM_DETERIORATION_EXCEEDS_POLICY",
+    "DRAWDOWN_WITHIN_POLICY",
+    "DRAWDOWN_EXCEEDS_POLICY",
+)
+DECISION_AGENT_SERVER_FAILURE_REASON_CODES = (
+    "DECISION_AGENT_PROVIDER_TIMEOUT",
+    "DECISION_AGENT_PROVIDER_ERROR",
+    "DECISION_AGENT_OUTPUT_SCHEMA_INVALID",
+    "DECISION_AGENT_REASON_NOT_ALLOWED",
+    "DECISION_AGENT_EVIDENCE_NOT_ALLOWED",
+    "DECISION_AGENT_INPUT_PROVENANCE_INVALID",
+    "DECISION_AGENT_CONTEXT_EXPIRED",
+    "DECISION_AGENT_POLICY_PROVENANCE_INVALID",
+    "DECISION_AGENT_ROUTE_PROVENANCE_INVALID",
+    "DECISION_AGENT_CLAIM_OUTCOME_UNKNOWN",
+)
+DECISION_AGENT_ROLES = (
+    "CONSERVATIVE_DECISION",
+    "BALANCED_DECISION",
+    "AGGRESSIVE_DECISION",
+)
+
+ARBITER_REASON_CODES = (
+    "ARBITER_MANDATORY_UNKNOWN",
+    "ARBITER_MULTIPLE_REJECT",
+    "ARBITER_SINGLE_REJECT",
+    "ARBITER_ALL_BUY",
+    "ARBITER_BALANCED_PLUS_ONE_BUY",
+    "ARBITER_DEFAULT_WAIT",
+)
+ARBITER_PATTERN_REASONS = {
+    "MANDATORY_UNKNOWN": ("UNKNOWN", "ARBITER_MANDATORY_UNKNOWN"),
+    "MULTIPLE_REJECT": ("REJECT", "ARBITER_MULTIPLE_REJECT"),
+    "SINGLE_REJECT": ("WAIT", "ARBITER_SINGLE_REJECT"),
+    "ALL_BUY": ("BUY", "ARBITER_ALL_BUY"),
+    "BALANCED_PLUS_ONE_BUY": ("BUY", "ARBITER_BALANCED_PLUS_ONE_BUY"),
+    "DEFAULT_WAIT": ("WAIT", "ARBITER_DEFAULT_WAIT"),
+}
+
 COMMON_SCOUT_REASON_CODES = (
     "DATA_SUFFICIENT",
     "INPUT_DATA_MISSING",
@@ -112,6 +165,7 @@ ROLE_REASON_CODES: dict[str, tuple[str, ...]] = {
         "ENTRY_CONDITIONS_INCOMPLETE",
         "RISK_REWARD_UNFAVORABLE",
     ),
+    **{role: DECISION_AGENT_MODEL_REASON_CODES for role in DECISION_AGENT_ROLES},
 }
 
 
@@ -132,7 +186,12 @@ def reason_code_context(role: str) -> dict[str, object]:
 def output_schema_for_role(
     role: str, *, core_schema_version: str = "agent-core-v1"
 ) -> dict[str, object]:
-    base_schema = (
+    if role in DECISION_AGENT_ROLES:
+        from app.agents.contracts import DecisionAgentModelOutput
+
+        base_schema = DecisionAgentModelOutput.model_json_schema()
+    else:
+        base_schema = (
         (
             AgentCoreModelOutputV2.model_json_schema()
             if core_schema_version == "agent-core-v2"
@@ -140,7 +199,7 @@ def output_schema_for_role(
         )
         if role == "CORE"
         else AgentScoutModelOutput.model_json_schema()
-    )
+        )
     schema = deepcopy(base_schema)
     reason_codes = schema["properties"]["reason_codes"]
     reason_codes["items"] = {

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import AuthContext, get_auth_context, require_csrf
+from app.api.execution_stage import get_execution_stage_evidence_loader
 from app.approvals import (
     approve as approve_service,
 )
@@ -22,11 +23,13 @@ from app.approvals import (
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import ResourceNotFoundError
+from app.execution_stage import EvidenceLoader
 from app.models import Approval, Decision
 from app.schemas import (
-    ApprovalActionRequest,
     ApprovalActionResponse,
+    ApprovalApproveRequest,
     ApprovalListResponse,
+    ApprovalRejectRequest,
     ApprovalResponse,
 )
 
@@ -58,6 +61,7 @@ def _to_response(request_id: str, approval: Approval, db: Session) -> ApprovalRe
         quantity=int(scope.get("quantity") or 0),
         order_id=approval.order_id,
         result_code=approval.result_code,
+        version=approval.version,
         expires_at=approval.expires_at,
         created_at=approval.created_at,
         updated_at=approval.updated_at,
@@ -113,11 +117,12 @@ def get_approval(
 @router.post("/{approval_id}/approve", response_model=ApprovalActionResponse)
 def approve_approval(
     approval_id: str,
-    payload: ApprovalActionRequest,
+    payload: ApprovalApproveRequest,
     request: Request,
     context: AuthContext = Depends(require_csrf),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    stage_evidence_loader: EvidenceLoader = Depends(get_execution_stage_evidence_loader),
 ) -> ApprovalActionResponse:
     approval = approve_service(
         db,
@@ -126,6 +131,9 @@ def approve_approval(
         settings=settings,
         correlation_id=request.state.request_id,
         idempotency_key=payload.idempotency_key,
+        expected_version=payload.expected_version,
+        reauth_proof=payload.reauth_proof,
+        stage_evidence_loader=stage_evidence_loader,
     )
     return ApprovalActionResponse(
         request_id=request.state.request_id,
@@ -139,7 +147,7 @@ def approve_approval(
 @router.post("/{approval_id}/reject", response_model=ApprovalActionResponse)
 def reject_approval(
     approval_id: str,
-    payload: ApprovalActionRequest,
+    payload: ApprovalRejectRequest,
     request: Request,
     context: AuthContext = Depends(require_csrf),
     db: Session = Depends(get_db),
@@ -149,6 +157,7 @@ def reject_approval(
         approval_id=approval_id,
         user=context.user,
         correlation_id=request.state.request_id,
+        expected_version=payload.expected_version,
     )
     return ApprovalActionResponse(
         request_id=request.state.request_id,

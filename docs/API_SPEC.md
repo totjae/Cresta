@@ -315,6 +315,11 @@ WebSocket `/api/v1/stream`은 `quote.updated`, `decision.created`, `decision.exe
 | API-124 | `approval.requested`, `approval.updated`, `decision.execution_updated`, `risk.evaluated` 이벤트는 REST resource ID·version을 포함하고 주문 이벤트와 구분한다. |
 | API-125 | `/system/health`는 scheduler의 `NOT_STARTED | RUNNING | IDLE | DEGRADED | STALE | STOPPED`, lease 유효 여부, 최근 heartbeat·tick·완료 시각, 다음 예정 시각과 최근 집계만 반환한다. owner ID와 fencing token은 반환하지 않는다. |
 | API-126 | 판단 목록·상세는 `decision_input_id`, 입력 schema·hash, 연결된 indicator snapshot ID와 calculator version을 반환한다. canonical 입력 JSON과 사용자 소유권 metadata는 이 API에서 직접 반환하지 않는다. |
+| API-127 | approve/reject는 URL의 Approval이 현재 session user 소유인지 확인하고 payload의 `expected_version`을 PENDING row와 CAS한다. owner mismatch는 존재 여부를 노출하지 않는 NOT_FOUND, version/state mismatch는 `APPROVAL_STATE_CONFLICT`이며 Order는 0이다. |
+| API-128 | approve payload는 `reauth_proof`를 요구하고 서버는 `APPROVE_ORDER`와 `<approval_id>:<expected_version>`에 결합된 proof를 Order 생성 transaction에서 한 번 소비한다. reject는 proof 없이 owner·CSRF·Idempotency-Key·expected_version을 요구한다. |
+| API-129 | Decision execution은 public execute endpoint를 제공하지 않는다. sourced handoff와 recovery는 server-owned reconciliation만 수행하고 API request로 stage/action/source authority를 override하지 못한다. |
+
+승인 목록·상세 응답은 클라이언트가 다음 mutation의 CAS 값을 얻을 수 있도록 정수 `version`을 반드시 포함한다. approve body의 `expected_version`과 `reauth_proof`, reject body의 `expected_version`은 optional default가 없는 필수 필드다. `reauth_proof`는 proof ID 문자열이며 승인 성공 전에는 소비된 것으로 응답하지 않는다.
 
 ### 8.5 다중 에이전트·LLM Provider API 계약
 

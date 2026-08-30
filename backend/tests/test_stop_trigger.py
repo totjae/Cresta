@@ -3,12 +3,15 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.execution_authority import ActionMode, ExecutionStage
 from app.models import (
     Approval,
+    ConfigurationVersion,
     Decision,
     DecisionExecution,
     GuardEvaluation,
@@ -29,13 +32,21 @@ from app.risk_events import (
 )
 from app.stop_trigger import (
     ACCOUNT_ALIAS,
+    FixedStopActionAuthority,
     compute_stop_price,
     recover_exit_pending,
     run_fixed_stop_triggers,
     should_trigger,
 )
+from tests.test_phase_10c2_sourced_execution import _activate_mode, _activate_shadow
 
 NOW = datetime(2026, 8, 12, 1, 30, tzinfo=UTC)  # 10:30 KST, DUAL_CONTINUOUS
+
+
+@pytest.fixture(autouse=True)
+def _authoritative_shadow_stage(db: Session, admin) -> None:
+    _activate_shadow(db, admin, NOW)
+    _activate_mode(db, admin, "MANUAL_APPROVAL")
 
 
 def _set_gate(db: Session, status: str = "READY") -> None:
@@ -185,7 +196,7 @@ def test_fires_shadow_recorded_when_guard_passes(db: Session, settings: Settings
     trigger = db.scalar(select(StopTrigger))
     assert trigger is not None
     assert trigger.state == "SHADOW_RECORDED"
-    assert trigger.result_code is None
+    assert trigger.result_code == "SHADOW_ONLY"
     assert trigger.stop_price == Decimal("49000.0000")
     assert trigger.trigger_price == Decimal(49000)
     guard = db.scalar(select(GuardEvaluation))
@@ -234,7 +245,7 @@ def test_exit_pending_recovers_to_shadow_recorded(db: Session, settings: Setting
     event = db.get(RiskEvent, event_id)
     assert event is not None
     assert event.state == "RESOLVED"
-    assert event.resolution == "BROKER_RECOVERED"
+    assert event.resolution == "SHADOW_ONLY"
     _assert_no_orders(db)
 
 
@@ -425,11 +436,31 @@ def _assert_no_orders_not_injected(db: Session) -> None:
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
 
 
-def test_approval_only_auto_sell_creates_fulfilled_trigger_and_order(
-    db: Session, settings: Settings
+def test_approval_only_auto_sell_is_exit_pending_with_no_order(
+    db: Session, settings: Settings, monkeypatch
 ) -> None:
-    """In APPROVAL_ONLY, a firing trigger with a fresh KRX bid creates a SELL order."""
+    """APPROVAL_ONLY never creates a synthetic Approval or automatic SELL."""
     settings.execution_stage = "APPROVAL_ONLY"
+    stage_version = db.scalar(
+        select(ConfigurationVersion).where(
+            ConfigurationVersion.category == "V7_ENTRY_EXECUTION_STAGE"
+        )
+    )
+    execution_version = db.scalar(
+        select(ConfigurationVersion).where(
+            ConfigurationVersion.category == "EXECUTION_POLICY"
+        )
+    )
+    assert stage_version is not None and execution_version is not None
+    monkeypatch.setattr(
+        "app.stop_trigger._fixed_stop_action_authority",
+        lambda *a, **k: FixedStopActionAuthority(
+            ExecutionStage.APPROVAL_ONLY,
+            stage_version,
+            execution_version,
+            ActionMode.AUTOMATIC,
+        ),
+    )
     _set_gate(db, "READY")
     position = _position(db, average_price=Decimal(50000), quantity=10)
     # Bid at 49000 <= stop price 49000 -> trigger fires.
@@ -438,14 +469,10 @@ def test_approval_only_auto_sell_creates_fulfilled_trigger_and_order(
     assert count == 1
     trigger = db.scalar(select(StopTrigger).where(StopTrigger.position_id == position.id))
     assert trigger is not None
-    assert trigger.state == "FULFILLED"
-    assert trigger.result_code == "ORDER_CREATED"
-    order = db.scalar(select(TradingOrder).where(TradingOrder.side == "SELL"))
-    assert order is not None
-    assert order.status == "CREATED"
-    assert order.requested_quantity == 10
-    intent = db.get(OrderIntent, order.intent_id)
-    assert intent is not None and intent.action == "FIXED_STOP"
+    assert trigger.state == "EXIT_PENDING"
+    assert trigger.result_code == "AUTOMATIC_NOT_ALLOWED_IN_APPROVAL_ONLY"
+    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0
+    assert db.scalar(select(func.count()).select_from(OrderIntent)) == 0
     assert db.scalar(select(func.count()).select_from(Decision)) == 0
     assert db.scalar(select(func.count()).select_from(Approval)) == 0
 
@@ -482,7 +509,7 @@ def test_external_position_not_auto_sold(db: Session, settings: Settings) -> Non
     _assert_no_orders(db)
 
 
-def test_mixed_position_auto_sell_uses_only_managed_quantity(
+def test_mixed_position_shadow_preserves_managed_quantity_without_order(
     db: Session, settings: Settings
 ) -> None:
     settings.execution_stage = "APPROVAL_ONLY"
@@ -500,7 +527,5 @@ def test_mixed_position_auto_sell_uses_only_managed_quantity(
     trigger = db.scalar(select(StopTrigger).where(StopTrigger.position_id == position.id))
     assert trigger is not None
     assert trigger.stop_price == Decimal("49000.0000")
-    assert trigger.state == "FULFILLED"
-    order = db.scalar(select(TradingOrder).where(TradingOrder.side == "SELL"))
-    assert order is not None
-    assert order.requested_quantity == 3
+    assert trigger.state == "SHADOW_RECORDED"
+    assert db.scalar(select(func.count()).select_from(TradingOrder)) == 0

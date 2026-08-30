@@ -54,8 +54,8 @@
 | Web UI 명세 | [docs/WEB_UI_SPEC.md](docs/WEB_UI_SPEC.md) | 콘셉트 적용 기준, 화면 구조, 설정·승인·비상정지와 접근성 |
 | 인증 및 보안 명세 | [docs/SECURITY_SPEC.md](docs/SECURITY_SPEC.md) | ID·비밀번호·TOTP 로그인, 세션, 재인증, 비밀 저장과 감사 |
 | 시장데이터 명세 | [docs/MARKET_DATA_SPEC.md](docs/MARKET_DATA_SPEC.md) | KRX·NXT 시세 정규화, 최신성, 분봉·지표와 Watch 동작 |
-| AI 판단 계약 | [docs/AI_DECISION_SPEC.md](docs/AI_DECISION_SPEC.md) | Scout·Core 입력·출력, 호출·실패·검증과 재현 기준 |
-| 다중 에이전트 오케스트레이션 명세 | [docs/MULTI_AGENT_ORCHESTRATION_SPEC.md](docs/MULTI_AGENT_ORCHESTRATION_SPEC.md) | Intel·Verify·복수 Scout·Core의 DAG, 증거 계약, 실패 격리와 SHADOW 활성화 기준 |
+| AI 판단 계약 | [docs/AI_DECISION_SPEC.md](docs/AI_DECISION_SPEC.md) | Scout·기존 Core·v2 Decision Agent·Arbiter의 입력·출력, 호출·실패·검증·재현 기준 |
+| 다중 에이전트 오케스트레이션 명세 | [docs/MULTI_AGENT_ORCHESTRATION_SPEC.md](docs/MULTI_AGENT_ORCHESTRATION_SPEC.md) | Intel·Verify·복수 Scout·기존 v1~v6 Core와 v7 Decision Agent/Arbiter DAG, 증거 계약, 실패 격리 |
 | LLM Provider 및 Gateway 명세 | [docs/LLM_PROVIDER_GATEWAY_SPEC.md](docs/LLM_PROVIDER_GATEWAY_SPEC.md) | 공식 API·Gateway·Ollama Adapter, 모델 기능, route, 비밀·비용·fallback 정책 |
 | 판단 실행·승인 명세 | [docs/DECISION_EXECUTION_SPEC.md](docs/DECISION_EXECUTION_SPEC.md) | AI·Guard 신호의 실행 권한 분기, Guard 재검사, 승인과 주문 생성 경계 |
 | 데이터베이스 명세 | [docs/DATABASE_SPEC.md](docs/DATABASE_SPEC.md) | 테이블, 제약조건, 트랜잭션, migration, 보존과 Redis 경계 |
@@ -65,6 +65,8 @@
 | API 명세 | [docs/API_SPEC.md](docs/API_SPEC.md) | HTTP API, 멱등성·동시성·오류와 실시간 이벤트 계약 |
 | 구현 상태 | [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | 영역별 계획·구현·검증·보류 상태 |
 | 테스트 계획 | [TEST_PLAN.md](TEST_PLAN.md) | 요구사항 ID별 시험, 시험 환경과 실행 결과 |
+| Cresta v2 리팩터링 계획 | [docs/refactoring/CRESTA_V2_REFACTORING_PLAN.md](docs/refactoring/CRESTA_V2_REFACTORING_PLAN.md) | Cresta v2 목표 구조, 아키텍처 불변조건, 단계별 전환 계획과 작업 범위 |
+| Cresta v2 Phase 0 분석 | [docs/refactoring/CRESTA_V2_PHASE_0_ANALYSIS.md](docs/refactoring/CRESTA_V2_PHASE_0_ANALYSIS.md) | 리팩터링 착수 시점의 기존 코드 역설계 결과를 보존한 비규범적 분석 스냅샷 |
 
 ## 3. 개발하면서 작성할 상세 문서
 
@@ -87,7 +89,7 @@
 | UI 화면·사용자 동작 | `WEB_UI_SPEC.md`, 관련 기능 명세, `TEST_PLAN.md` |
 | 인증·권한·비밀·감사 | `SECURITY_SPEC.md`, `SYSTEM_DESIGN.md`, `TEST_PLAN.md` |
 | 시세·호가·분봉·지표 | `MARKET_DATA_SPEC.md`, `SYSTEM_DESIGN.md`, `TEST_PLAN.md` |
-| Scout·Core 입력·출력·모델 | `AI_DECISION_SPEC.md`, `SYSTEM_DESIGN.md`, `TEST_PLAN.md` |
+| Scout·Core(legacy)·Decision Agent·Arbiter 입력·출력·모델 | `AI_DECISION_SPEC.md`, `SYSTEM_DESIGN.md`, `TEST_PLAN.md` |
 | 에이전트 역할·DAG·증거·병렬 실행 | `MULTI_AGENT_ORCHESTRATION_SPEC.md`, `AI_DECISION_SPEC.md`, `SYSTEM_DESIGN.md`, `DATABASE_SPEC.md`, `TEST_PLAN.md` |
 | LLM provider·gateway·model·route·비용 | `LLM_PROVIDER_GATEWAY_SPEC.md`, `SECURITY_SPEC.md`, `CONFIGURATION_SPEC.md`, `DATABASE_SPEC.md`, `API_SPEC.md`, `WEB_UI_SPEC.md`, `TEST_PLAN.md` |
 | 판단 실행, Guard 분기, 승인·주문 연결 | `DECISION_EXECUTION_SPEC.md`, `GUARD_RISK_SPEC.md`, `ORDER_EXECUTION_SPEC.md`, `ORDER_STATE_MACHINE_SPEC.md`, `API_SPEC.md`, `DATABASE_SPEC.md`, `WEB_UI_SPEC.md`, `TEST_PLAN.md` |

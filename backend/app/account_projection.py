@@ -196,6 +196,8 @@ def _import_open_order(
         side=broker.side,
         action="BROKER_IMPORTED",
         requested_quantity=broker.requested_quantity,
+        source_type="BROKER_IMPORTED",
+        source_id=broker.broker_order_id,
         correlation_id=correlation_id,
     )
     db.add(intent)

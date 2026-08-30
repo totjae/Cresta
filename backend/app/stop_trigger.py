@@ -1,20 +1,32 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.execution_authority import ActionMode, ExecutionStage, order_authority_key
+from app.execution_policy import policy_payload
+from app.execution_stage import (
+    EvidenceLoader,
+    ExecutionStageValidationPolicy,
+    StageResolutionStatus,
+    resolve_current_execution_stage,
+)
 from app.models import (
+    ConfigurationVersion,
     GuardEvaluation,
     MarketSnapshot,
     MarketStreamState,
     Position,
+    RiskEvent,
     StopTrigger,
     TradingGate,
     TradingOrder,
@@ -24,7 +36,7 @@ from app.risk_events import (
     create_risk_event,
     resolve_risk_event,
 )
-from app.risk_policy import active_risk_policy, risk_policy_payload
+from app.risk_policy import SAFE_DEFAULT_POLICY, risk_policy_payload
 from app.schemas import RiskPolicyPayload
 from app.venue_selection import classify_session
 
@@ -67,18 +79,94 @@ TRADABLE_SESSIONS = {
     "KRX_ONLY",
     "DUAL_CONTINUOUS",
 }
-# Fixed-stop loss execution mode default is AUTOMATIC (app.execution_policy
-# SAFE_DEFAULT_POLICY.fixed_stop_loss). The stop trigger is account-scoped and
-# has no user context to resolve a per-user execution policy version, so in the
-# APPROVAL_ONLY stage it auto-sells when the hard sell Guard passes; a DISABLED
-# policy would require a later user-aware wiring step.
-FIXED_STOP_AUTO_SELL_STAGES = {"APPROVAL_ONLY", "MOCK_AUTOMATIC"}
+CONFIG_SCOPE = "USER_DEFAULT"
+EXECUTION_POLICY_CATEGORY = "EXECUTION_POLICY"
+RISK_POLICY_CATEGORY = "RISK_POLICY"
 
 
 class StopTriggerError(Exception):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+@dataclass(frozen=True)
+class FixedStopActionAuthority:
+    stage: ExecutionStage
+    stage_version: ConfigurationVersion
+    execution_policy_version: ConfigurationVersion
+    mode: ActionMode
+
+
+def _exact_active_configuration(
+    db: Session, category: str
+) -> ConfigurationVersion | None:
+    versions = list(
+        db.scalars(
+            select(ConfigurationVersion)
+            .where(
+                ConfigurationVersion.scope == CONFIG_SCOPE,
+                ConfigurationVersion.category == category,
+                ConfigurationVersion.state == "ACTIVE",
+            )
+            .order_by(ConfigurationVersion.sequence.desc(), ConfigurationVersion.id)
+            .limit(2)
+        )
+    )
+    return versions[0] if len(versions) == 1 else None
+
+
+def _fixed_stop_action_authority(
+    db: Session,
+    *,
+    now: datetime,
+    evidence_loader: EvidenceLoader | None,
+    validation_policy: ExecutionStageValidationPolicy | None,
+) -> FixedStopActionAuthority | None:
+    resolution = resolve_current_execution_stage(
+        db,
+        now=now,
+        evidence_loader=evidence_loader,
+        policy=validation_policy,
+    )
+    if resolution.status is StageResolutionStatus.DB_RETRYABLE_FAILURE:
+        raise StopTriggerError("EXECUTION_STAGE_DB_RETRYABLE_FAILURE")
+    if (
+        resolution.status is not StageResolutionStatus.PASS
+        or resolution.payload is None
+        or resolution.version is None
+        or resolution.payload.target != "MOCK"
+    ):
+        return None
+    version = _exact_active_configuration(db, EXECUTION_POLICY_CATEGORY)
+    if version is None:
+        return None
+    try:
+        mode = ActionMode(policy_payload(version).fixed_stop_loss)
+    except (ValidationError, ValueError, TypeError):
+        return None
+    return FixedStopActionAuthority(
+        stage=resolution.payload.stage,
+        stage_version=resolution.version,
+        execution_policy_version=version,
+        mode=mode,
+    )
+
+
+def _strict_mock_authority(
+    db: Session, settings: Settings, trigger: StopTrigger
+) -> bool:
+    gate = db.get(TradingGate, trigger.account_alias)
+    return (
+        trigger.account_alias == ACCOUNT_ALIAS
+        and gate is not None
+        and gate.environment == "MOCK"
+        and settings.environment.upper() == "MOCK"
+        and not settings.live_trading_enabled
+        and settings.kiwoom_rest_base_url.rstrip("/") == "https://mockapi.kiwoom.com"
+        and settings.kiwoom_ws_base_url.rstrip("/")
+        == "wss://mockapi.kiwoom.com:10000"
+    )
 
 
 @dataclass(frozen=True)
@@ -287,7 +375,8 @@ def _persist_guard_evaluation(
 ) -> GuardEvaluation:
     blocked = [item for item in rules if item["result"] == "BLOCKED"]
     guard = GuardEvaluation(
-        execution_id=trigger.id,
+        execution_id=None,
+        stop_trigger_id=trigger.id,
         phase="PRE_ORDER",
         subject_type="STOP_TRIGGER",
         subject_id=trigger.id,
@@ -306,7 +395,133 @@ def _persist_guard_evaluation(
     return guard
 
 
-def _existing_active_trigger(
+def _set_exit_pending(
+    db: Session,
+    *,
+    trigger: StopTrigger,
+    position: Position,
+    snapshot: MarketSnapshot | None,
+    code: str,
+    now: datetime,
+) -> None:
+    event = db.get(RiskEvent, trigger.risk_event_id) if trigger.risk_event_id else None
+    if event is None or event.state != "ACTIVE":
+        event = create_risk_event(
+            db,
+            scope=RISK_EVENT_SCOPE_FIXED_STOP,
+            rule_code=code,
+            severity="HIGH",
+            account_alias=trigger.account_alias,
+            symbol=trigger.symbol,
+            input_record={
+                "position_id": position.id,
+                "position_version": position.version,
+                "trigger_id": trigger.id,
+                "rule_code": code,
+                "evaluated_at": _utc(now).isoformat(),
+            },
+            correlation_id=trigger.correlation_id,
+            input_snapshot_id=snapshot.id if snapshot else None,
+            now=now,
+        )
+        trigger.risk_event_id = event.id
+    trigger.state = "EXIT_PENDING"
+    trigger.result_code = code
+
+
+def _apply_fixed_stop_authority(
+    db: Session,
+    *,
+    trigger: StopTrigger,
+    position: Position,
+    snapshot: MarketSnapshot | None,
+    guard: GuardEvaluation,
+    stop_price: Decimal,
+    settings: Settings,
+    now: datetime,
+    stage_evidence_loader: EvidenceLoader | None,
+    stage_validation_policy: ExecutionStageValidationPolicy | None,
+) -> None:
+    authority = _fixed_stop_action_authority(
+        db,
+        now=now,
+        evidence_loader=stage_evidence_loader,
+        validation_policy=stage_validation_policy,
+    )
+    if authority is None:
+        _set_exit_pending(
+            db,
+            trigger=trigger,
+            position=position,
+            snapshot=snapshot,
+            code="FIXED_STOP_ACTION_AUTHORITY_UNAVAILABLE",
+            now=now,
+        )
+        return
+    if authority.stage is ExecutionStage.SHADOW:
+        if trigger.risk_event_id:
+            resolve_risk_event(db, trigger.risk_event_id, resolution="SHADOW_ONLY", now=now)
+        trigger.state = "SHADOW_RECORDED"
+        trigger.result_code = "SHADOW_ONLY"
+        return
+    if authority.stage is ExecutionStage.APPROVAL_ONLY:
+        _set_exit_pending(
+            db,
+            trigger=trigger,
+            position=position,
+            snapshot=snapshot,
+            code="AUTOMATIC_NOT_ALLOWED_IN_APPROVAL_ONLY",
+            now=now,
+        )
+        return
+    if authority.mode is not ActionMode.AUTOMATIC:
+        _set_exit_pending(
+            db,
+            trigger=trigger,
+            position=position,
+            snapshot=snapshot,
+            code=(
+                "ACTION_DISABLED"
+                if authority.mode is ActionMode.DISABLED
+                else "FIXED_STOP_MANUAL_AUTHORITY_UNAVAILABLE"
+            ),
+            now=now,
+        )
+        return
+    if not _strict_mock_authority(db, settings, trigger):
+        _set_exit_pending(
+            db,
+            trigger=trigger,
+            position=position,
+            snapshot=snapshot,
+            code="STRICT_MOCK_AUTHORITY_REQUIRED",
+            now=now,
+        )
+        return
+    if trigger.risk_policy_version_id is None:
+        _set_exit_pending(
+            db,
+            trigger=trigger,
+            position=position,
+            snapshot=snapshot,
+            code="RISK_POLICY_UNAVAILABLE",
+            now=now,
+        )
+        return
+    _emit_fixed_stop_order(
+        db,
+        trigger=trigger,
+        position=position,
+        snapshot=snapshot,
+        guard=guard,
+        stop_price=stop_price,
+        correlation_id=trigger.correlation_id,
+        now=now,
+        authority=authority,
+    )
+
+
+def _existing_trigger(
     db: Session,
     *,
     position_id: str,
@@ -318,7 +533,6 @@ def _existing_active_trigger(
             StopTrigger.position_id == position_id,
             StopTrigger.position_version == position_version,
             StopTrigger.risk_policy_version_id == risk_policy_version_id,
-            StopTrigger.state.in_(("PENDING", "SHADOW_RECORDED", "EXIT_PENDING")),
         )
     )
 
@@ -364,14 +578,19 @@ def _evaluate_position(
     settings: Settings,
     now: datetime,
     correlation_id: str,
+    stage_evidence_loader: EvidenceLoader | None,
+    stage_validation_policy: ExecutionStageValidationPolicy | None,
 ) -> None:
     """Evaluate one open position for a fixed stop trigger.
 
-    Persists a ``StopTrigger`` + ``GuardEvaluation`` (+ ``RiskEvent`` on block)
-    but never creates an ``OrderIntent``/``TradingOrder``/``Decision``/``Approval``.
+    Persists the typed trigger/Guard evidence. Only validated MOCK_AUTOMATIC plus
+    explicit AUTOMATIC fixed-stop authority may add a CREATED MOCK SELL order;
+    Decision, DecisionExecution and Approval are never synthesized.
     """
-    risk_config = active_risk_policy(db, ACCOUNT_ALIAS)
-    risk_policy = risk_policy_payload(risk_config)
+    risk_config = _exact_active_configuration(db, RISK_POLICY_CATEGORY)
+    risk_policy = (
+        risk_policy_payload(risk_config) if risk_config is not None else SAFE_DEFAULT_POLICY
+    )
     risk_policy_version_id = risk_config.id if risk_config else None
 
     snapshot = _latest_krx_snapshot(db, position.symbol)
@@ -397,7 +616,7 @@ def _evaluate_position(
         now=now,
     )
 
-    existing = _existing_active_trigger(
+    existing = _existing_trigger(
         db,
         position_id=position.id,
         position_version=position.version,
@@ -405,6 +624,8 @@ def _evaluate_position(
     )
 
     if existing is not None:
+        if existing.state == "FULFILLED":
+            return
         # Re-evaluate in place; never create a duplicate trigger.
         _re_evaluate_trigger(
             db,
@@ -416,6 +637,8 @@ def _evaluate_position(
             risk_policy_version_id=risk_policy_version_id,
             stop_price=stop_price,
             now=now,
+            stage_evidence_loader=stage_evidence_loader,
+            stage_validation_policy=stage_validation_policy,
         )
         return
 
@@ -484,31 +707,20 @@ def _evaluate_position(
         trigger.state = "EXIT_PENDING"
         trigger.result_code = rule_code
     else:
-        if _should_auto_sell(settings, snapshot):
-            _emit_fixed_stop_order(
-                db,
-                trigger=trigger,
-                position=position,
-                snapshot=snapshot,
-                stop_price=stop_price,
-                correlation_id=correlation_id,
-                now=now,
-            )
-        else:
-            trigger.state = "SHADOW_RECORDED"
-            trigger.result_code = None
+        _apply_fixed_stop_authority(
+            db,
+            trigger=trigger,
+            position=position,
+            snapshot=snapshot,
+            guard=guard,
+            stop_price=stop_price,
+            settings=settings,
+            now=now,
+            stage_evidence_loader=stage_evidence_loader,
+            stage_validation_policy=stage_validation_policy,
+        )
     trigger.updated_at = now
     db.flush()
-
-
-def _should_auto_sell(settings: Settings, snapshot: MarketSnapshot | None) -> bool:
-    """True when the fixed-stop trigger may create a real SELL order.
-
-    Requires a non-SHADOW stage and an executable bid price to sell into. The
-    execution-policy ``fixed_stop_loss`` mode is AUTOMATIC by default; a user
-    setting it to DISABLED will be honored once user-aware wiring is added.
-    """
-    return settings.execution_stage in FIXED_STOP_AUTO_SELL_STAGES and snapshot is not None
 
 
 def _emit_fixed_stop_order(
@@ -517,9 +729,11 @@ def _emit_fixed_stop_order(
     trigger: StopTrigger,
     position: Position,
     snapshot: MarketSnapshot | None,
+    guard: GuardEvaluation,
     stop_price: Decimal,
     correlation_id: str,
     now: datetime,
+    authority: FixedStopActionAuthority,
 ) -> None:
     """Create the CREATED SELL order for a firing fixed-stop trigger.
 
@@ -528,14 +742,38 @@ def _emit_fixed_stop_order(
     On success the trigger becomes FULFILLED and its risk event is resolved. If
     order creation fails the trigger stays EXIT_PENDING so the next tick retries.
     """
-    from app.order_creation import OrderCreationError, OrderRequest, create_order
+    from app.order_creation import (
+        OrderAuthority,
+        OrderCreationError,
+        OrderRequest,
+        create_order,
+    )
 
     if snapshot is None or snapshot.best_bid_price is None or snapshot.best_bid_price <= 0:
         trigger.state = "EXIT_PENDING"
         trigger.result_code = "NO_FRESH_EXECUTABLE_KRX_QUOTE"
         return
     price = snapshot.best_bid_price
-    quantity = _managed_quantity(position)
+    quantity = _sell_quantity_available(
+        db,
+        trigger.account_alias,
+        trigger.symbol,
+        _managed_quantity(position),
+        position.available_quantity,
+    )
+    if quantity <= 0:
+        _set_exit_pending(
+            db,
+            trigger=trigger,
+            position=position,
+            snapshot=snapshot,
+            code="SELL_QUANTITY_AVAILABLE",
+            now=now,
+        )
+        return
+    authority_key = order_authority_key(
+        source_type="STOP_TRIGGER", source_id=trigger.id, approval_id=None
+    )
     request = OrderRequest(
         symbol=position.symbol,
         market="KRX",
@@ -544,7 +782,7 @@ def _emit_fixed_stop_order(
         order_type="LIMIT",
         limit_price=price,
         quantity=quantity,
-        idempotency_key=f"fixed-stop:{trigger.id}",
+        idempotency_key=authority_key,
         request_payload={
             "environment": "MOCK",
             "symbol": position.symbol,
@@ -558,7 +796,7 @@ def _emit_fixed_stop_order(
             "position_id": position.id,
             "position_version": position.version,
             "stop_price": str(stop_price),
-            "idempotency_key": f"fixed-stop:{trigger.id}",
+            "authority_key": authority_key,
         },
         correlation_id=correlation_id,
     )
@@ -574,6 +812,19 @@ def _emit_fixed_stop_order(
             request=request,
             audit_action="FIXED_STOP_SELL_ORDER_CREATED",
             now=now,
+            authority=OrderAuthority(
+                source_type="STOP_TRIGGER",
+                source_id=trigger.id,
+                decision_execution_id=None,
+                stop_trigger_id=trigger.id,
+                guard_evaluation_id=guard.id,
+                approval_id=None,
+                execution_policy_version_id=authority.execution_policy_version.id,
+                risk_policy_version_id=trigger.risk_policy_version_id,
+                execution_stage_version_id=authority.stage_version.id,
+                execution_stage_payload_hash=authority.stage_version.payload_hash,
+                authority_key=authority_key,
+            ),
         )
     except OrderCreationError as exc:
         trigger.state = "EXIT_PENDING"
@@ -596,6 +847,8 @@ def _re_evaluate_trigger(
     risk_policy_version_id: str | None,
     stop_price: Decimal,
     now: datetime,
+    stage_evidence_loader: EvidenceLoader | None,
+    stage_validation_policy: ExecutionStageValidationPolicy | None,
 ) -> None:
     """Re-evaluate an existing active trigger with the latest state.
 
@@ -654,21 +907,18 @@ def _re_evaluate_trigger(
         trigger.state = "EXIT_PENDING"
         trigger.result_code = rule_code
     else:
-        if trigger.risk_event_id:
-            resolve_risk_event(db, trigger.risk_event_id, resolution="BROKER_RECOVERED", now=now)
-        if _should_auto_sell(settings, snapshot):
-            _emit_fixed_stop_order(
-                db,
-                trigger=trigger,
-                position=position,
-                snapshot=snapshot,
-                stop_price=stop_price,
-                correlation_id=trigger.correlation_id,
-                now=now,
-            )
-        else:
-            trigger.state = "SHADOW_RECORDED"
-            trigger.result_code = None
+        _apply_fixed_stop_authority(
+            db,
+            trigger=trigger,
+            position=position,
+            snapshot=snapshot,
+            guard=guard,
+            stop_price=stop_price,
+            settings=settings,
+            now=now,
+            stage_evidence_loader=stage_evidence_loader,
+            stage_validation_policy=stage_validation_policy,
+        )
     trigger.updated_at = now
     db.flush()
 
@@ -680,6 +930,9 @@ def run_fixed_stop_triggers(
     now: datetime | None = None,
     correlation_id: str | None = None,
     account_alias: str = ACCOUNT_ALIAS,
+    stage_evidence_loader: EvidenceLoader | None = None,
+    stage_validation_policy: ExecutionStageValidationPolicy | None = None,
+    before_commit: Callable[[], None] | None = None,
 ) -> int:
     """Evaluate all open positions for the fixed stop trigger.
 
@@ -687,8 +940,9 @@ def run_fixed_stop_triggers(
     responsible for lease ownership; this function evaluates every open position
     so that availability blocks (BROKER_NOT_READY, RECONCILING, stale data) are
     recorded as ``EXIT_PENDING`` rather than silently skipped — a stop signal must
-    persist across data gaps and broker outages (GRD-085, EXE-053). Never creates
-    orders, approvals, intents, or decisions.
+    persist across data gaps and broker outages (GRD-085, EXE-053). A CREATED
+    MOCK SELL is possible only through the Phase 10E authority matrix; this
+    function never submits to Broker or creates Approval/Decision resources.
     """
     positions = list(
         db.scalars(
@@ -703,15 +957,23 @@ def run_fixed_stop_triggers(
         return 0
 
     evaluated_at = now or datetime.now(UTC)
-    for position in positions:
-        _evaluate_position(
-            db,
-            position=position,
-            settings=settings,
-            now=evaluated_at,
-            correlation_id=correlation_id or f"stop-{evaluated_at.isoformat()}",
-        )
-    db.commit()
+    try:
+        for position in positions:
+            _evaluate_position(
+                db,
+                position=position,
+                settings=settings,
+                now=evaluated_at,
+                correlation_id=correlation_id or f"stop-{evaluated_at.isoformat()}",
+                stage_evidence_loader=stage_evidence_loader,
+                stage_validation_policy=stage_validation_policy,
+            )
+        if before_commit is not None:
+            before_commit()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return len(positions)
 
 
@@ -721,6 +983,9 @@ def recover_exit_pending(
     settings: Settings,
     now: datetime | None = None,
     account_alias: str = ACCOUNT_ALIAS,
+    stage_evidence_loader: EvidenceLoader | None = None,
+    stage_validation_policy: ExecutionStageValidationPolicy | None = None,
+    before_commit: Callable[[], None] | None = None,
 ) -> int:
     """Re-evaluate ``EXIT_PENDING`` triggers after broker/market recovery.
 
@@ -743,36 +1008,46 @@ def recover_exit_pending(
         return 0
 
     evaluated_at = now or datetime.now(UTC)
-    risk_config = active_risk_policy(db, account_alias)
-    risk_policy = risk_policy_payload(risk_config)
+    risk_config = _exact_active_configuration(db, RISK_POLICY_CATEGORY)
+    risk_policy = (
+        risk_policy_payload(risk_config) if risk_config is not None else SAFE_DEFAULT_POLICY
+    )
     risk_policy_version_id = risk_config.id if risk_config else None
 
-    for trigger in triggers:
-        position = db.get(Position, trigger.position_id)
-        if position is None or position.state != "OPEN" or position.quantity <= 0:
-            _supersede(trigger)
-            if trigger.risk_event_id:
-                resolve_risk_event(
-                    db,
-                    trigger.risk_event_id,
-                    resolution="POSITION_CLOSED",
-                    now=evaluated_at,
-                )
-            continue
-        snapshot = _latest_krx_snapshot(db, trigger.symbol)
-        stop_price = compute_stop_price(
-            _managed_average_price(position), risk_policy.fixed_stop_loss_pct
-        )
-        _re_evaluate_trigger(
-            db,
-            trigger=trigger,
-            position=position,
-            snapshot=snapshot,
-            settings=settings,
-            risk_policy=risk_policy,
-            risk_policy_version_id=risk_policy_version_id,
-            stop_price=stop_price,
-            now=evaluated_at,
-        )
-    db.commit()
+    try:
+        for trigger in triggers:
+            position = db.get(Position, trigger.position_id)
+            if position is None or position.state != "OPEN" or position.quantity <= 0:
+                _supersede(trigger)
+                if trigger.risk_event_id:
+                    resolve_risk_event(
+                        db,
+                        trigger.risk_event_id,
+                        resolution="POSITION_CLOSED",
+                        now=evaluated_at,
+                    )
+                continue
+            snapshot = _latest_krx_snapshot(db, trigger.symbol)
+            stop_price = compute_stop_price(
+                _managed_average_price(position), risk_policy.fixed_stop_loss_pct
+            )
+            _re_evaluate_trigger(
+                db,
+                trigger=trigger,
+                position=position,
+                snapshot=snapshot,
+                settings=settings,
+                risk_policy=risk_policy,
+                risk_policy_version_id=risk_policy_version_id,
+                stop_price=stop_price,
+                now=evaluated_at,
+                stage_evidence_loader=stage_evidence_loader,
+                stage_validation_policy=stage_validation_policy,
+            )
+        if before_commit is not None:
+            before_commit()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return len(triggers)

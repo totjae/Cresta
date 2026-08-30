@@ -41,7 +41,7 @@ from app.schemas import RiskPolicyPayload
 from app.venue_selection import classify_session
 
 ACCOUNT_ALIAS = "KIWOOM_MOCK_PRIMARY"
-NO_ACTIONS = {"WAIT", "REJECT", "RISK_BLOCK", "HOLD"}
+NO_ACTIONS = {"WAIT", "REJECT", "UNKNOWN", "RISK_BLOCK", "HOLD"}
 SUPPORTED_ACTIONS = {"BUY", "PARTIAL_SELL", "FULL_SELL", "FIXED_STOP"}
 SELL_ACTIONS = {"PARTIAL_SELL", "FULL_SELL"}
 ACTIVE_ORDER_STATES = {
@@ -105,7 +105,7 @@ def _rule(code: str, passed: bool) -> dict[str, object]:
     return {"code": code, "result": "PASSED" if passed else "BLOCKED"}
 
 
-def _buy_guard_rules(
+def buy_pre_order_guard_rules(
     db: Session,
     decision: Decision,
     user: User,
@@ -185,6 +185,11 @@ def _buy_guard_rules(
         _rule("BROKER_CONNECTION_OK", connection_ok),
         _rule("NO_ACTIVE_DAILY_LOSS_EVENT", not active_daily_loss_events),
     ]
+
+
+# Compatibility alias for the existing Approval revalidation path. New callers
+# use the public name; legacy semantics remain unchanged.
+_buy_guard_rules = buy_pre_order_guard_rules
 
 
 def _sell_ratio(decision: Decision) -> Decimal | None:
@@ -422,7 +427,7 @@ def route_trading_decision(
             rules = [_rule("ACTION_NOT_IMPLEMENTED", False)]
         elif action == "BUY":
             decision_snapshot = db.get(MarketSnapshot, decision.input_snapshot_id)
-            rules = _buy_guard_rules(
+            rules = buy_pre_order_guard_rules(
                 db,
                 decision,
                 user,
@@ -489,7 +494,14 @@ def route_trading_decision(
                     now=current,
                 )
                 execution.approval_id = approval.id
-                # create_approval commits and sets execution.state APPROVAL_PENDING.
+                # Caller owns the transaction; create_approval only flushes.
+            elif (
+                mode == "AUTOMATIC"
+                and settings.execution_stage == "APPROVAL_ONLY"
+                and action in {"BUY", *SELL_ACTIONS}
+            ):
+                execution.state = "FAILED_SAFE"
+                execution.result_code = "AUTOMATIC_NOT_ALLOWED_IN_APPROVAL_ONLY"
             elif mode == "AUTOMATIC" and action == "BUY":
                 execution = _create_buy_order(
                     db,

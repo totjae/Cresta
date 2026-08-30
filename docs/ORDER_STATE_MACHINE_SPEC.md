@@ -30,7 +30,7 @@ CREATED | VALIDATING | SUBMITTING | ACKNOWLEDGED | OPEN
 PARTIALLY_FILLED | FILLED
 CANCEL_PENDING | CANCELLED
 REPLACE_PENDING | REPLACED
-REJECTED | UNKNOWN | RECONCILING
+REJECTED | INVALIDATED | UNKNOWN | RECONCILING
 ```
 
 | ID | 요구사항 |
@@ -58,6 +58,7 @@ CREATED
 ```
 
 - `CREATED`: 내부 주문 의도와 멱등성 키 생성
+- `INVALIDATED`: Broker에 한 번도 제출되지 않은 CREATED 주문의 authority가 만료·downgrade·emergency·provenance failure로 회수된 terminal 상태. Broker 취소를 뜻하는 CANCELLED와 구분한다.
 - `VALIDATING`: Guard가 잔고, 한도, 가격, 시세와 중복 주문 검사
 - `SUBMITTING`: 키움 요청 전송을 시작했으나 결과가 확정되지 않음
 - `ACKNOWLEDGED`: 키움 주문번호 확인
@@ -106,6 +107,12 @@ SUBMITTING 또는 CANCEL_PENDING 또는 REPLACE_PENDING
 | STM-028 | 취소 API의 정상 접수는 원주문 체결 완료가 아니다. 원주문은 `CANCEL_PENDING`을 유지하고 WebSocket 또는 계좌 조회가 실제 취소 잔량을 확인한 뒤에만 `CANCELLED`가 된다. |
 | STM-029 | 취소 API의 명시적 업무 거절 또는 응답 불명확 결과는 자동 재요청하지 않는다. 각각 `RECONCILING` 또는 `UNKNOWN`으로 보존하고 Broker 조회를 통해서만 다음 상태를 확정한다. |
 | STM-036 | 명시적 업무 거절의 상태 전이는 기존 `REJECTED` 또는 `RECONCILING` 의미를 바꾸지 않는다. 정규화한 Broker 결과는 해당 terminal·대조필요 이벤트의 진단 metadata일 뿐 자동 재전송·상태 복구·주문 성공의 근거로 사용하지 않는다. |
+| STM-037 | `INVALIDATED`는 외부 submit 전 `CREATED → INVALIDATED`에서만 허용하며 requested=remaining, filled=cancelled=0을 유지한다. 이후 CREATED/SUBMITTING으로 되살리거나 Broker에 전송하지 않는다. |
+| STM-038 | authority revocation은 `ORDER_AUTHORITY_REVOKED_BEFORE_SEND` event와 exact result code를 상태 전이와 같은 transaction에 저장한다. `CANCELLED` 또는 Broker `REJECTED`로 표현하지 않는다. |
+| STM-039 | `SUBMITTING` commit 이후에는 Decision expiry나 stage downgrade만으로 INVALIDATED로 전이하지 않고 existing UNKNOWN/reconciliation/cancel/fill lifecycle을 따른다. |
+| STM-040 | pre-send 회수 event의 `source_key`는 Order별 결정론적 identity를 사용해 재시도에서 중복 event를 만들지 않으며 payload에는 canonical result code만 보존한다. |
+| STM-041 | STOP_TRIGGER source Order가 `CREATED → INVALIDATED`되면 trigger는 실제 청산 완료를 뜻하는 상태로 남지 않고 기존 `EXIT_PENDING` 위험 상태와 ACTIVE RiskEvent를 유지한다. Order quantity와 Intent authority evidence는 변경하지 않는다. |
+| STM-042 | authority PASS와 `SUBMITTING` commit이 끝난 뒤 발생한 stage·mode·Decision·emergency 변화는 `INVALIDATED` 전이를 허용하지 않는다. 외부 side effect 가능성을 기존 결과·UNKNOWN·reconciliation lifecycle이 인수한다. |
 
 ### 3.5 키움 API 매핑
 

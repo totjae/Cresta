@@ -6,12 +6,17 @@ import uuid
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.activation_gate import ActivationGateError
 from app.agents.runtime import AgentRuntimeError
+from app.api.activation import router as activation_router
 from app.api.agent_runs import router as agent_runs_router
 from app.api.approvals import router as approvals_router
 from app.api.auth import router as auth_router
 from app.api.decisions import router as decisions_router
+from app.api.execution_stage import router as execution_stage_router
 from app.api.llm import router as llm_router
 from app.api.orders import router as orders_router
 from app.api.positions import router as positions_router
@@ -26,9 +31,11 @@ from app.approvals import ApprovalError
 from app.auth.service import AuthenticationError, CsrfError, ReauthProofError
 from app.broker.mock_order_test import MockOrderTestError
 from app.calendar_overrides import CalendarOverrideError
+from app.db import engine
 from app.emergency_stop import EmergencyStopError
 from app.errors import ResourceNotFoundError
 from app.execution_policy import ExecutionPolicyError
+from app.execution_stage import ExecutionStageError
 from app.ids import uuid7
 from app.llm.profiles import LlmProfileError
 from app.llm.prompts import LlmPromptError
@@ -37,6 +44,7 @@ from app.risk_policy import RiskPolicyError
 from app.watchlist import WatchlistError
 
 logger = logging.getLogger("cresta.api")
+EXPECTED_MIGRATION_HEAD = "20260829_0044"
 
 
 def create_app() -> FastAPI:
@@ -122,6 +130,38 @@ def create_app() -> FastAPI:
                     "message": "실행 권한 설정을 처리할 수 없습니다.",
                     "correlation_id": request.state.request_id,
                     "retryable": False,
+                }
+            },
+        )
+
+    @application.exception_handler(ActivationGateError)
+    async def activation_gate_error(
+        request: Request, exc: ActivationGateError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": "v7 ENTRY Activation Gate 설정을 처리할 수 없습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": False,
+                }
+            },
+        )
+
+    @application.exception_handler(ExecutionStageError)
+    async def execution_stage_error(
+        request: Request, exc: ExecutionStageError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": "실행 단계 설정을 안전하게 처리할 수 없습니다.",
+                    "correlation_id": request.state.request_id,
+                    "retryable": exc.code == "EXECUTION_STAGE_DB_RETRYABLE_FAILURE",
                 }
             },
         )
@@ -303,9 +343,34 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @application.get("/readyz", include_in_schema=False)
+    def readiness() -> JSONResponse:
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+                current = connection.scalar(text("SELECT version_num FROM alembic_version"))
+        except SQLAlchemyError:
+            logger.warning("API readiness failed code=DATABASE_UNAVAILABLE_OR_UNMIGRATED")
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "code": "DATABASE_UNAVAILABLE_OR_UNMIGRATED"},
+            )
+        if current != EXPECTED_MIGRATION_HEAD:
+            logger.warning("API readiness failed code=MIGRATION_HEAD_MISMATCH")
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "code": "MIGRATION_HEAD_MISMATCH"},
+            )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "ready", "migration_head": EXPECTED_MIGRATION_HEAD},
+        )
+
     application.include_router(auth_router, prefix="/api/v1")
+    application.include_router(activation_router, prefix="/api/v1")
     application.include_router(approvals_router, prefix="/api/v1")
     application.include_router(decisions_router, prefix="/api/v1")
+    application.include_router(execution_stage_router, prefix="/api/v1")
     application.include_router(llm_router, prefix="/api/v1")
     application.include_router(agent_runs_router, prefix="/api/v1")
     application.include_router(orders_router, prefix="/api/v1")

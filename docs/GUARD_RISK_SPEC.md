@@ -56,6 +56,8 @@ risk_limits:
 
 금액 상한은 사용자 설정 상한이며 실제 주문은 예수금·계좌·종목 한도 중 가장 작은 값으로 제한한다. 상한 변경은 코드와 명세 변경 및 회귀시험을 요구한다.
 
+Phase 10D.1B 금융 foundation은 `kt00001` 계좌 자금과 exact request-bound `kt00010` capacity를 별도 append-only evidence로 저장한다. 향후 BUY Guard는 `kt00010`의 `ord_alowa`와 100% margin amount/quantity를 요청 notional/quantity와 비교해야 하며, `entr`나 account-wide `ord_alow_amt`를 exact capacity의 fallback으로 사용하지 않는다. 이번 단계는 Guard 평가 동작을 변경하지 않는다.
+
 | ID | 요구사항 |
 | --- | --- |
 | GRD-010 | 종목당 최대 투자금, 전체 최대 투자금과 1회 최대 주문금액을 설정할 수 있어야 한다. |
@@ -230,7 +232,7 @@ PARTIAL_SELL | FULL_SELL | FIXED_STOP
 
 | ID | 요구사항 |
 | --- | --- |
-| GRD-080 | Guard는 `APPROVAL_CREATION`, `PRE_ORDER`, `BROKER_SEND` 단계에 필요한 검사를 구분하고 각 평가를 불변 record로 저장한다. |
+| GRD-080 | Guard exact phase는 `PRE_ORDER | APPROVAL_REVALIDATION | BROKER_SEND`이며 각 authority boundary의 평가를 별도 불변 record로 저장한다. Approval 생성 전 initial 평가와 automatic Order 생성 직전 평가는 `PRE_ORDER`다. |
 | GRD-081 | `PASSED`는 blocking rule 결과가 하나도 없을 때만 가능하며 예외·timeout·알 수 없는 상태는 통과로 간주하지 않는다. |
 | GRD-082 | 신규매수 검사는 현재 포지션과 미체결 매수의 예약금액, 외부 포지션, 예수금, 당일 신규진입 횟수를 같은 기준시각으로 합산한다. |
 | GRD-083 | 매도·손절에는 신규매수 한도 초과를 차단 사유로 사용하지 않지만 실제 수량, 활성·불명 주문과 Broker 송신 가능성은 검사한다. |
@@ -239,6 +241,8 @@ PARTIAL_SELL | FULL_SELL | FIXED_STOP
 | GRD-086 | Guard 결과에는 안정된 reason code, severity, halt scope, 사용한 snapshot·position·실행권한·위험설정 version과 유효시간을 기록한다. |
 | GRD-087 | 첫 구현 미지원 trigger와 행동은 `ACTION_NOT_IMPLEMENTED`로 차단하며 다른 청산·보유 행동으로 자동 변환하지 않는다. |
 | GRD-088 | 자동 또는 승인형 `BUY` 기능 gate는 신규진입 Guard, 고정손절 trigger, `PAUSE_ENTRY` 비상정지와 관련 장애시험이 모두 준비되기 전 열지 않는다. |
+
+Guard trigger의 위험 우선순위는 주문 권한을 뜻하지 않는다. `FIXED_STOP`을 포함한 모든 trigger의 ExecutionStage 적용과 승인·자동 주문 경계는 `DECISION_EXECUTION_SPEC.md` EXE-211~213을 source of truth로 따른다.
 
 ### 3.10 Guard 위험 설정 1차 API·UI 경계
 
@@ -251,6 +255,35 @@ PARTIAL_SELL | FULL_SELL | FIXED_STOP
 | GRD-094 | 첫 UI는 사용자 기본 위험 설정만 편집한다. 종목별 override·현재 포지션 영향 미리보기·장중 위험 완화 재인증은 별도 후속 단계 전까지 제공하지 않으며 이를 활성화된 기능으로 표시하지 않는다. |
 | GRD-095 | 자동 SELL은 `managed_quantity > 0`인 수량만 대상으로 하며 `min(managed_quantity, available_quantity)`를 넘지 않는다. `MIXED` position의 외부 수량은 자동 매도하지 않고, 손절 기준가격은 Broker 전체 평균이 아니라 `managed_average_price`를 사용한다. |
 | GRD-096 | 판단 기반 부분·전량매도는 `managed_quantity`와 Broker `available_quantity` 중 작은 값에서 활성·불명 SELL 예약수량을 뺀 범위만 허용한다. 외부 보유분, version 불일치, 1주 미만과 최신 정상 매수호가 부재는 fail-closed한다. |
+| GRD-097 | v7 Activation Gate는 Decision Finalization 안전 control일 뿐 Guard 평가 결과가 아니다. Gate OPEN이나 finalized BUY가 Guard PASS를 합성·재사용할 수 없고, WAIT·REJECT·UNKNOWN은 Guard의 BUY-like flow에 진입하지 않는다. |
+| GRD-098 | sourced BUY Guard는 Phase 9 full persisted lineage validator를 통과한 authoritative DecisionExecution만 입력으로 받는다. source invalid는 `SOURCE_AUTHORITY_INVALID`이며 Guard PASS를 만들지 않는다. |
+| GRD-099 | BUY PRE_ORDER는 Decision validity, 거래 session/status, current 정상 snapshot과 quote freshness, PAUSE_ENTRY, authoritative buying power, sizing/max notional, position·symbol·total exposure, 보유·일일진입·손실 한도, spread, Broker gate/worker와 재동기화 상태를 검사한다. |
+| GRD-100 | 같은 account/symbol에 활성 BUY/SELL 또는 `SUBMITTING | UNKNOWN | RECONCILING` 주문이 있으면 신규 BUY authority를 차단한다. 불명 outcome은 새 주문으로 추측 복구하지 않는다. |
+| GRD-101 | 필수 account/position/market/config/source input이 missing·stale·unknown·conflicted이거나 DB read가 실패하면 전체 결과는 BLOCKED 또는 FAILED_SAFE이고 automatic fallback은 없다. |
+| GRD-102 | BUY requested notional이 current authoritative buying power를 초과하면 차단한다. confidence, risk score 또는 LLM/Arbiter 출력은 buying power·수량·가격을 대체하거나 완화하지 않는다. |
+| GRD-103 | initial execution은 Risk Policy version을 freeze하고 Approval/Order/BROKER_SEND는 frozen/current policy를 모두 적용한다. current 완화는 frozen 수량·한도·authority를 확대하지 않고 어느 한 policy의 blocking 결과도 우회하지 않는다. |
+| GRD-104 | PAUSE_ENTRY는 BUY의 PRE_ORDER, APPROVAL_REVALIDATION, Order creation과 BROKER_SEND에서 live check한다. ACTIVE이면 `EMERGENCY_STOP_ACTIVE`로 차단하되 risk-reduction SELL/FIXED_STOP에는 entry-only 정지를 적용하지 않는다. |
+| GRD-105 | GuardEvaluation의 subject는 `DECISION_EXECUTION` 또는 `STOP_TRIGGER`를 명시한다. Decision subject만 실제 DecisionExecution FK를 사용하고 StopTrigger ID를 execution FK에 저장하지 않는다. |
+| GRD-106 | Guard BLOCK은 immutable Decision action을 변경하지 않는다. DecisionExecution은 `GUARD_BLOCKED`와 첫 deterministic rule code를 기록하고 GuardEvaluation은 전체 ordered rule 결과와 provenance를 보존한다. |
+
+### 3.11 금융 authority freshness 계약
+
+| ID | 요구사항 |
+| --- | --- |
+| GRD-107 | `AccountFundsSnapshot`과 `OrderCapacitySnapshot` freshness는 versioned Risk Policy의 독립 authority다. exact field·default·range는 CFG-121~123을 따르며 `quote_stale_seconds`를 대체값으로 사용하지 않는다. |
+| GRD-108 | 각 금융 evidence의 effective TTL은 `min(frozen Risk Policy TTL, current authoritative Risk Policy TTL)`이다. current 완화는 frozen authority를 확대하지 않고 current 강화는 즉시 적용한다. |
+| GRD-109 | 금융 snapshot은 `0 <= authoritative_server_now - received_at <= effective TTL`일 때만 freshness candidate다. 경계값은 fresh이고 `received_at > now`는 age를 0으로 보정하지 않고 unusable로 차단한다. |
+| GRD-110 | `received_at`은 Phase 10D.1B의 successful Broker response 수신·정규화 server UTC 시각이다. Broker market timestamp로 대체하지 않으며 fresh row라도 필수 금융값 NULL은 BLOCK, authoritative zero는 실제 0으로 평가한다. |
+| GRD-111 | account funds가 missing/stale이면 PRE_ORDER 또는 APPROVAL_REVALIDATION의 DB Guard transaction 밖에서 server-owned `kt00001` refresh를 시도할 수 있다. 성공 row를 저장한 뒤 짧은 transaction에서 authoritative row를 다시 선택하며 실패 시 PASS를 만들지 않는다. |
+| GRD-112 | capacity가 missing/stale이면 DB authority transaction 밖에서 intended order의 exact context로 `query_and_persist_order_capacity(...)`를 수행한 뒤 transaction 안에서 persisted exact row를 다시 선택한다. account/environment/symbol/side/price/nullable optional context가 하나라도 다르면 fresh row도 fallback evidence가 아니다. |
+| GRD-113 | APPROVAL_REVALIDATION은 PRE_ORDER의 금융 snapshot을 blind reuse하지 않는다. 승인 시점의 current intended order context에 대해 funds와 capacity freshness, 필수값과 권위 금액을 새로 refresh/reselect·평가한다. |
+| GRD-114 | current authoritative Risk Policy가 absent/ambiguous/malformed이거나 financial TTL이 invalid이면 frozen policy만으로 진행하지 않고 fail-closed한다. DB/transient lookup failure는 semantic stale/block과 구분한 retryable infrastructure failure다. |
+| GRD-115 | Guard rule result와 audit은 frozen/current Risk Policy version, 양 configured TTL, effective TTL, snapshot ID/`received_at`, evaluation time과 calculated age를 기존 immutable evidence 표현으로 재구성할 수 있어야 한다. 이 계약은 새 전용 DB column을 요구하지 않는다. |
+| GRD-116 | financial freshness는 buying-power 의미를 바꾸지 않는다. account cash·generic funds는 exact `kt00010` cash-only/100%-margin capacity를 대신하지 않고 margin leverage를 허용하지 않는다. |
+| GRD-117 | `BROKER_SEND`는 PRE_ORDER/APPROVAL_REVALIDATION row를 mutate하거나 PASS로 재사용하지 않고 source별 current evidence를 새 immutable GuardEvaluation으로 append한다. |
+| GRD-118 | BUY `BROKER_SEND`는 exact Order price/quantity에 결합된 persisted funds/capacity와 frozen/current Risk Policy TTL·한도를 평가하고 worker transaction 안에서 `kt00001`/`kt00010` network refresh를 호출하지 않는다. |
+| GRD-119 | STOP_TRIGGER `BROKER_SEND`는 현재 exact position identity/version, managed·available 수량과 다른 active/UNKNOWN/RECONCILING SELL 예약을 평가하되 검사 중인 자기 Order는 예약수량에서 제외한다. 기존 quantity가 허용량을 넘으면 mutate하지 않고 회수한다. |
+| GRD-120 | semantic BLOCK과 DB/transient failure를 구분한다. 전자는 Guard와 unsent revocation을 같은 transaction에 남기고 후자는 Guard·상태 변경을 모두 rollback해 `CREATED` retry 상태를 보존한다. |
 
 ## 4. 오류·예외 또는 경계 조건
 

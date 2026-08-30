@@ -17,7 +17,21 @@ PROMPT_ROLES = {
     "MARKET_SECTOR_SCOUT",
     "POSITION_RISK_SCOUT",
     "CORE",
+    "CONSERVATIVE_DECISION",
+    "BALANCED_DECISION",
+    "AGGRESSIVE_DECISION",
 }
+DECISION_AGENT_PROMPT_ROLES = {
+    "CONSERVATIVE_DECISION",
+    "BALANCED_DECISION",
+    "AGGRESSIVE_DECISION",
+}
+DECISION_THRESHOLD_PATTERN = re.compile(
+    r"(?:minimum[_ ]confidence|minimum[_ ]entry[_ ]score|risk[_ ]tolerance(?:[_ ]score)?|"
+    r"uncertainty[_ ]tolerance(?:[_ ]ratio)?|momentum[_ ]deterioration[_ ]tolerance(?:[_ ]pct)?|"
+    r"drawdown[_ ]tolerance(?:[_ ]pct)?)\s*(?::|=|is|of)?\s*\d",
+    re.IGNORECASE,
+)
 FORBIDDEN_PATTERNS = (
     r"\bapi[ _-]?key\b",
     r"\bcredential(?:s)?\b",
@@ -141,6 +155,8 @@ def validate_prompt(
     lowered = prompt.system_prompt.casefold()
     if any(re.search(pattern, lowered, re.IGNORECASE) for pattern in FORBIDDEN_PATTERNS):
         raise LlmPromptError("PROMPT_UNSAFE_INSTRUCTION")
+    if prompt.role in DECISION_AGENT_PROMPT_ROLES and DECISION_THRESHOLD_PATTERN.search(lowered):
+        raise LlmPromptError("PROMPT_POLICY_THRESHOLD_FORBIDDEN")
     prompt.state = "VALIDATED"
     prompt.validated_at = datetime.now(UTC)
     prompt.version += 1

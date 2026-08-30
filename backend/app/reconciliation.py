@@ -9,8 +9,14 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.account_authority import append_account_funds_snapshot
 from app.account_projection import apply_broker_account_projection
-from app.broker.kiwoom import BrokerAccountSnapshot, KiwoomAdapterError, KiwoomMockClient
+from app.broker.kiwoom import (
+    AccountFundsSnapshotData,
+    BrokerAccountSnapshot,
+    KiwoomAdapterError,
+    KiwoomMockClient,
+)
 from app.ids import uuid7
 from app.models import (
     Position,
@@ -31,7 +37,7 @@ BROKER_VISIBLE_ORDER_STATES = {
     "UNKNOWN",
     "RECONCILING",
 }
-BROKER_REQUEST_IDS = ["ka00001", "ka10075", "ka10076", "kt00018"]
+BROKER_REQUEST_IDS = ["ka00001", "ka10075", "ka10076", "kt00018", "kt00001"]
 RECONCILIATION_TRIGGERS = {
     "MANUAL_BOOTSTRAP",
     "WORKER_STARTUP",
@@ -63,6 +69,7 @@ class ReconciliationResult:
     position_count: int
     mismatch_count: int
     critical_mismatch_count: int
+    funds_refresh_status: str
 
 
 class ReconciliationProjectionError(KiwoomAdapterError):
@@ -107,12 +114,21 @@ def run_kiwoom_reconciliation(
     try:
         client.verify_account()
         snapshot = client.get_account_snapshot()
+        funds_data: AccountFundsSnapshotData | None = None
+        funds_refresh_status = "SUCCEEDED"
+        try:
+            funds_data = client.get_account_funds(query_type="3")
+        except KiwoomAdapterError as exc:
+            funds_refresh_status = f"FAILED:{exc.code}"
         projection = apply_broker_account_projection(
             db,
             snapshot,
             run_id=run.id,
             correlation_id=run.correlation_id,
         )
+        funds_snapshot_id = None
+        if funds_data is not None:
+            funds_snapshot_id = append_account_funds_snapshot(db, funds_data).id
         mismatches = compare_snapshot(db, snapshot)
         _resolve_previous_mismatches(db, run, mismatches, now=datetime.now(UTC))
 
@@ -141,6 +157,8 @@ def run_kiwoom_reconciliation(
                 "fill_count": len(snapshot.fills),
                 "position_count": len(snapshot.positions),
                 "projection": asdict(projection),
+                "account_funds_snapshot_id": funds_snapshot_id,
+                "funds_refresh_status": funds_refresh_status,
             }
         )
         if critical_count:
@@ -168,6 +186,7 @@ def run_kiwoom_reconciliation(
         position_count=len(snapshot.positions),
         mismatch_count=len(mismatches),
         critical_mismatch_count=critical_count,
+        funds_refresh_status=funds_refresh_status,
     )
 
 

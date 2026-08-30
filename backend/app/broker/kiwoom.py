@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -28,6 +29,11 @@ ACCOUNT_API_ID = "ka00001"
 OPEN_ORDERS_API_ID = "ka10075"
 FILLS_API_ID = "ka10076"
 POSITIONS_API_ID = "kt00018"
+ACCOUNT_FUNDS_API_ID = "kt00001"
+ORDER_CAPACITY_API_ID = "kt00010"
+KIWOOM_BROKER = "KIWOOM"
+KIWOOM_ACCOUNT_ALIAS = "KIWOOM_MOCK_PRIMARY"
+KIWOOM_ENVIRONMENT = "MOCK"
 ORDER_PATH = "/api/dostk/ordr"
 BUY_ORDER_API_ID = "kt10000"
 SELL_ORDER_API_ID = "kt10001"
@@ -143,6 +149,72 @@ class BrokerAccountSnapshot:
     fills: tuple[BrokerFillSummary, ...]
     positions: tuple[BrokerPosition, ...]
     observed_at: datetime
+
+
+@dataclass(frozen=True)
+class AccountFundsSnapshotData:
+    broker: str
+    account_alias: str
+    environment: str
+    source_api_id: str
+    query_type: str
+    deposit: int | None
+    generic_orderable_amount: int | None
+    withdrawable_amount: int | None
+    d1_estimated_deposit: int | None
+    d1_buy_settlement_amount: int | None
+    d1_sell_settlement_amount: int | None
+    d1_withdrawable_amount: int | None
+    d2_estimated_deposit: int | None
+    d2_buy_settlement_amount: int | None
+    d2_sell_settlement_amount: int | None
+    d2_withdrawable_amount: int | None
+    received_at: datetime
+
+
+@dataclass(frozen=True)
+class OrderCapacityRequest:
+    symbol: str
+    side: str
+    requested_price: int
+    io_amount: int | None = None
+    requested_quantity: int | None = None
+    expected_buy_price: int | None = None
+
+
+@dataclass(frozen=True)
+class OrderCapacitySnapshotData:
+    broker: str
+    account_alias: str
+    environment: str
+    source_api_id: str
+    symbol: str
+    side: str
+    trade_type: str
+    requested_price: int
+    io_amount: int | None
+    requested_quantity: int | None
+    expected_buy_price: int | None
+    orderable_cash: int | None
+    deposit: int | None
+    withdrawable_amount: int | None
+    next_day_withdrawable_amount: int | None
+    d2_estimated_deposit: int | None
+    margin_20_orderable_amount: int | None
+    margin_20_orderable_quantity: int | None
+    margin_30_orderable_amount: int | None
+    margin_30_orderable_quantity: int | None
+    margin_40_orderable_amount: int | None
+    margin_40_orderable_quantity: int | None
+    margin_50_orderable_amount: int | None
+    margin_50_orderable_quantity: int | None
+    margin_60_orderable_amount: int | None
+    margin_60_orderable_quantity: int | None
+    reduced_margin_60_orderable_amount: int | None
+    reduced_margin_60_orderable_quantity: int | None
+    margin_100_orderable_amount: int | None
+    margin_100_orderable_quantity: int | None
+    received_at: datetime
 
 
 @dataclass(frozen=True)
@@ -410,6 +482,48 @@ class KiwoomMockClient:
             fills=fills,
             positions=positions,
             observed_at=_as_utc(self._clock()),
+        )
+
+    def get_account_funds(self, *, query_type: str) -> AccountFundsSnapshotData:
+        if query_type not in {"2", "3"}:
+            raise KiwoomAdapterError(
+                "KIWOOM_INVALID_FUNDS_QUERY_TYPE", "Funds query type must be 2 or 3"
+            )
+        self.verify_account()
+        payload = self.request(
+            api_id=ACCOUNT_FUNDS_API_ID,
+            path=ACCOUNT_PATH,
+            body={"qry_tp": query_type},
+        )
+        return normalize_account_funds(
+            payload, query_type=query_type, received_at=self._clock()
+        )
+
+    def query_order_capacity(
+        self, request: OrderCapacityRequest
+    ) -> OrderCapacitySnapshotData:
+        _validate_capacity_request(request)
+        self.verify_account()
+        trade_type = "2" if request.side == "BUY" else "1"
+        body = {
+            "stk_cd": request.symbol,
+            "trde_tp": trade_type,
+            "uv": str(request.requested_price),
+        }
+        if request.io_amount is not None:
+            body["io_amt"] = str(request.io_amount)
+        if request.requested_quantity is not None:
+            body["trde_qty"] = str(request.requested_quantity)
+        if request.expected_buy_price is not None:
+            body["exp_buy_unp"] = str(request.expected_buy_price)
+        payload = self.request(
+            api_id=ORDER_CAPACITY_API_ID, path=ACCOUNT_PATH, body=body
+        )
+        return normalize_order_capacity(
+            payload,
+            request=request,
+            trade_type=trade_type,
+            received_at=self._clock(),
         )
 
     def place_order(self, request: KiwoomOrderRequest) -> KiwoomOrderAcknowledgement:
@@ -868,6 +982,128 @@ def _hhmmss(value: Any, field: str) -> str:
     if hour > 23 or minute > 59 or second > 59:
         raise KiwoomAdapterError("KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} must be HHmmss")
     return normalized
+
+
+def normalize_signed_integer(value: Any, field: str) -> int | None:
+    """Normalize an optional official financial integer without inventing zero."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} must be an integer string"
+        )
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if re.fullmatch(r"[+-]?\d+", normalized) is None:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} is not a canonical integer"
+        )
+    return int(normalized)
+
+
+def normalize_account_funds(
+    payload: dict[str, Any], *, query_type: str, received_at: datetime
+) -> AccountFundsSnapshotData:
+    value = lambda field: normalize_signed_integer(payload.get(field), field)
+    return AccountFundsSnapshotData(
+        broker=KIWOOM_BROKER,
+        account_alias=KIWOOM_ACCOUNT_ALIAS,
+        environment=KIWOOM_ENVIRONMENT,
+        source_api_id=ACCOUNT_FUNDS_API_ID,
+        query_type=query_type,
+        deposit=value("entr"),
+        generic_orderable_amount=value("ord_alow_amt"),
+        withdrawable_amount=value("pymn_alow_amt"),
+        d1_estimated_deposit=value("d1_entra"),
+        d1_buy_settlement_amount=value("d1_buy_exct_amt"),
+        d1_sell_settlement_amount=value("d1_sel_exct_amt"),
+        d1_withdrawable_amount=value("d1_pymn_alow_amt"),
+        d2_estimated_deposit=value("d2_entra"),
+        d2_buy_settlement_amount=value("d2_buy_exct_amt"),
+        d2_sell_settlement_amount=value("d2_sel_exct_amt"),
+        d2_withdrawable_amount=value("d2_pymn_alow_amt"),
+        received_at=_as_utc(received_at),
+    )
+
+
+def normalize_order_capacity(
+    payload: dict[str, Any],
+    *,
+    request: OrderCapacityRequest,
+    trade_type: str,
+    received_at: datetime,
+) -> OrderCapacitySnapshotData:
+    value = lambda field: normalize_signed_integer(payload.get(field), field)
+    quantities: dict[str, int | None] = {}
+    for field in (
+        "profa_20ord_alowq",
+        "profa_30ord_alowq",
+        "profa_40ord_alowq",
+        "profa_50ord_alowq",
+        "profa_60ord_alowq",
+        "profa_rdex_60ord_alowq",
+        "profa_100ord_alowq",
+    ):
+        normalized = value(field)
+        if normalized is not None and normalized < 0:
+            raise KiwoomAdapterError(
+                "KIWOOM_INVALID_RESPONSE", f"Kiwoom field {field} cannot be negative"
+            )
+        quantities[field] = normalized
+    return OrderCapacitySnapshotData(
+        broker=KIWOOM_BROKER,
+        account_alias=KIWOOM_ACCOUNT_ALIAS,
+        environment=KIWOOM_ENVIRONMENT,
+        source_api_id=ORDER_CAPACITY_API_ID,
+        symbol=request.symbol,
+        side=request.side,
+        trade_type=trade_type,
+        requested_price=request.requested_price,
+        io_amount=request.io_amount,
+        requested_quantity=request.requested_quantity,
+        expected_buy_price=request.expected_buy_price,
+        orderable_cash=value("ord_alowa"),
+        deposit=value("entr"),
+        withdrawable_amount=value("wthd_alowa"),
+        next_day_withdrawable_amount=value("nxdy_wthd_alowa"),
+        d2_estimated_deposit=value("d2entra"),
+        margin_20_orderable_amount=value("profa_20ord_alow_amt"),
+        margin_20_orderable_quantity=quantities["profa_20ord_alowq"],
+        margin_30_orderable_amount=value("profa_30ord_alow_amt"),
+        margin_30_orderable_quantity=quantities["profa_30ord_alowq"],
+        margin_40_orderable_amount=value("profa_40ord_alow_amt"),
+        margin_40_orderable_quantity=quantities["profa_40ord_alowq"],
+        margin_50_orderable_amount=value("profa_50ord_alow_amt"),
+        margin_50_orderable_quantity=quantities["profa_50ord_alowq"],
+        margin_60_orderable_amount=value("profa_60ord_alow_amt"),
+        margin_60_orderable_quantity=quantities["profa_60ord_alowq"],
+        reduced_margin_60_orderable_amount=value("profa_rdex_60ord_alow_amt"),
+        reduced_margin_60_orderable_quantity=quantities["profa_rdex_60ord_alowq"],
+        margin_100_orderable_amount=value("profa_100ord_alow_amt"),
+        margin_100_orderable_quantity=quantities["profa_100ord_alowq"],
+        received_at=_as_utc(received_at),
+    )
+
+
+def _validate_capacity_request(request: OrderCapacityRequest) -> None:
+    _validate_market_symbol("KRX", request.symbol)
+    if request.side not in {"BUY", "SELL"}:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_ORDER_SIDE", "Capacity side must be BUY or SELL"
+        )
+    if request.requested_price <= 0:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_ORDER_PRICE", "Capacity price must be positive"
+        )
+    if request.requested_quantity is not None and request.requested_quantity <= 0:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_ORDER_QUANTITY", "Capacity quantity must be positive"
+        )
+    if request.expected_buy_price is not None and request.expected_buy_price <= 0:
+        raise KiwoomAdapterError(
+            "KIWOOM_INVALID_ORDER_PRICE", "Expected buy price must be positive"
+        )
 
 
 def _json_object(response: ResponseLike) -> dict[str, Any]:

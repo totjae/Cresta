@@ -12,6 +12,17 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.activation_gate import (
+    ActivationGateError,
+    ActivationValidationPolicy,
+    EvidenceLoader,
+    GateOutcome,
+    GateResolution,
+    build_actual_version_snapshot,
+    canonical_activation_json,
+    select_current_v7_entry_activation_gate,
+    version_snapshot_hash,
+)
 from app.agents.contracts import (
     AgentAssessment,
     AgentAssessmentV2,
@@ -19,6 +30,12 @@ from app.agents.contracts import (
     AgentCoreModelOutputV2,
     AgentScoutModelOutput,
 )
+from app.agents.decision_agents import (
+    DECISION_AGENT_MODEL_OUTPUT_VERSION,
+    DECISION_AGENT_ROLES,
+    V7_LLM_ROUTE_ROLES,
+)
+from app.agents.policy_profiles import PolicyProfileError, select_active_policy_profiles
 from app.agents.reason_codes import (
     REASON_CODE_POLICY_VERSION,
     invalid_reason_codes,
@@ -30,6 +47,7 @@ from app.agents.server_inputs import (
     build_position_snapshot,
 )
 from app.config import get_settings
+from app.decision_inputs import build_v7_scout_input
 from app.llm.contracts import LlmRequest
 from app.llm.discovery import get_template
 from app.llm.parameter_policy import supports_service_tier
@@ -39,6 +57,7 @@ from app.market_context import select_market_context
 from app.models import (
     AgentRun,
     AgentStageRun,
+    AuditLog,
     Decision,
     EvidenceItem,
     IndicatorSnapshot,
@@ -55,8 +74,9 @@ from app.models import (
 from app.position_agent_fusion import FUSION_POLICY_VERSION
 
 DAG_VERSION = "agent-dag-v6"
-V2_DAG_VERSIONS = frozenset({"agent-dag-v4", "agent-dag-v5", DAG_VERSION})
-SERVER_INPUT_DAG_VERSIONS = frozenset({"agent-dag-v5", DAG_VERSION})
+V7_DAG_VERSION = "agent-dag-v7"
+V2_DAG_VERSIONS = frozenset({"agent-dag-v4", "agent-dag-v5", DAG_VERSION, V7_DAG_VERSION})
+SERVER_INPUT_DAG_VERSIONS = frozenset({"agent-dag-v5", DAG_VERSION, V7_DAG_VERSION})
 ASSESSMENT_SCHEMA_VERSION = "agent-assessment-v2"
 CORE_SCHEMA_VERSION = "agent-core-v2"
 SCORE_POLICY_VERSION = "score-policy-v1"
@@ -68,6 +88,7 @@ ROUTE_ROLES = (
     "POSITION_RISK_SCOUT",
     "CORE",
 )
+SCOUT_ROUTE_ROLES = ROUTE_ROLES[:-1]
 MAX_MODEL_OUTPUT_BYTES = 64 * 1024
 SENSITIVE_MODEL_OUTPUT_KEY_PARTS = (
     "api_key",
@@ -108,6 +129,52 @@ STAGES = (
         ),
     ),
 )
+V7_UPSTREAM_STAGES = STAGES[:-1]
+V7_DECISION_STAGES = (
+    ("CONSERVATIVE_DECISION", 70, ("EVIDENCE_CANDIDATE_AUDITOR",)),
+    ("BALANCED_DECISION", 71, ("EVIDENCE_CANDIDATE_AUDITOR",)),
+    ("AGGRESSIVE_DECISION", 72, ("EVIDENCE_CANDIDATE_AUDITOR",)),
+)
+V7_ARBITER_STAGE = (
+    "ENTRY_ARBITER",
+    80,
+    tuple(role for role, _, _ in V7_DECISION_STAGES),
+)
+V7_LOGICAL_STAGES = (*V7_UPSTREAM_STAGES, *V7_DECISION_STAGES, V7_ARBITER_STAGE)
+
+
+def stage_plan(dag_version: str) -> tuple[tuple[str, int, tuple[str, ...]], ...]:
+    return V7_UPSTREAM_STAGES if dag_version == V7_DAG_VERSION else STAGES
+
+
+def route_roles(dag_version: str) -> tuple[str, ...]:
+    return SCOUT_ROUTE_ROLES if dag_version == V7_DAG_VERSION else ROUTE_ROLES
+
+
+def allowed_roles(dag_version: str) -> frozenset[str]:
+    return frozenset(role for role, _, _ in stage_plan(dag_version))
+
+
+def logical_roles(dag_version: str) -> frozenset[str]:
+    plan = V7_LOGICAL_STAGES if dag_version == V7_DAG_VERSION else STAGES
+    return frozenset(role for role, _, _ in plan)
+
+
+def materializable_roles(dag_version: str) -> frozenset[str]:
+    plan = (
+        V7_LOGICAL_STAGES
+        if dag_version == V7_DAG_VERSION
+        else STAGES
+    )
+    return frozenset(role for role, _, _ in plan)
+
+
+def executable_roles(dag_version: str) -> frozenset[str]:
+    return (
+        materializable_roles(dag_version)
+        if dag_version == V7_DAG_VERSION
+        else allowed_roles(dag_version)
+    )
 
 
 class AgentRuntimeError(Exception):
@@ -220,12 +287,16 @@ def _persist_source_candidates(
 
 
 def _load_routes(
-    db: Session, *, owner_id: str, route_ids: dict[str, str]
+    db: Session,
+    *,
+    owner_id: str,
+    route_ids: dict[str, str],
+    required_roles: tuple[str, ...] = ROUTE_ROLES,
 ) -> dict[str, RouteBinding]:
-    if set(route_ids) != set(ROUTE_ROLES):
+    if set(route_ids) != set(required_roles):
         raise AgentRuntimeError("AGENT_ROUTE_SET_INCOMPLETE")
     bindings: dict[str, RouteBinding] = {}
-    for role in ROUTE_ROLES:
+    for role in required_roles:
         route = db.get(LlmRoleRoute, route_ids[role])
         try:
             fallback_ids = json.loads(route.fallback_model_profile_ids_json) if route else []
@@ -239,6 +310,10 @@ def _load_routes(
             or route.execution_stage != "SHADOW"
             or route.fallback_policy not in {"FAIL_STOP", "FAILOVER"}
             or route.max_attempts != 1
+            or (
+                role not in {"NEWS_DISCLOSURE_SCOUT", "MARKET_SECTOR_SCOUT"}
+                and route.web_search_enabled
+            )
             or not isinstance(fallback_ids, list)
             or len(fallback_ids) > 1
             or (route.fallback_policy == "FAIL_STOP" and fallback_ids)
@@ -247,6 +322,8 @@ def _load_routes(
             not in (
                 {"agent-core-v1", "agent-core-v2"}
                 if role == "CORE"
+                else {DECISION_AGENT_MODEL_OUTPUT_VERSION}
+                if role in DECISION_AGENT_ROLES
                 else {"agent-assessment-v1", "agent-assessment-v2"}
             )
         ):
@@ -260,9 +337,7 @@ def _load_routes(
             else None
         )
         prompt = (
-            db.get(LlmPromptProfile, route.prompt_profile_id)
-            if route.prompt_profile_id
-            else None
+            db.get(LlmPromptProfile, route.prompt_profile_id) if route.prompt_profile_id else None
         )
         if (
             model is None
@@ -288,6 +363,9 @@ def _load_routes(
                 )
             )
             or (
+                role in DECISION_AGENT_ROLES and route.prompt_profile_id is None
+            )
+            or (
                 route.prompt_profile_id is not None
                 and (
                     prompt is None
@@ -305,16 +383,96 @@ def _load_routes(
                 provider_registry.resolve(
                     checked_provider.adapter_type,
                     endpoint=checked_provider.endpoint,
-                    credential=(
-                        "route-check" if checked_provider.adapter_type != "MOCK" else None
-                    ),
+                    credential=("route-check" if checked_provider.adapter_type != "MOCK" else None),
                 )
         except AdapterNotImplementedError as exc:
             raise AgentRuntimeError("AGENT_ADAPTER_NOT_ALLOWED") from exc
-        bindings[role] = RouteBinding(
-            route, model, provider, fallback_model, fallback_provider
-        )
+        bindings[role] = RouteBinding(route, model, provider, fallback_model, fallback_provider)
     return bindings
+
+
+def _route_version_snapshot(
+    db: Session,
+    bindings: dict[str, RouteBinding],
+) -> dict[str, object]:
+    snapshot: dict[str, object] = {
+        role: {
+            "route_id": binding.route.id,
+            "route_version": binding.route.version,
+            "route_version_hash": _hash(
+                {
+                    "fallback_model_profile_ids_json": binding.route.fallback_model_profile_ids_json,
+                    "fallback_policy": binding.route.fallback_policy,
+                    "max_attempts": binding.route.max_attempts,
+                    "output_schema_version": binding.route.output_schema_version,
+                    "primary_model_profile_id": binding.route.primary_model_profile_id,
+                    "prompt_profile_id": binding.route.prompt_profile_id,
+                    "prompt_version": binding.route.prompt_version,
+                    "role": binding.route.role,
+                    "version": binding.route.version,
+                }
+            ),
+            "declared_output_schema_version": binding.route.output_schema_version,
+            "effective_output_schema_version": (
+                CORE_SCHEMA_VERSION
+                if role == "CORE"
+                else DECISION_AGENT_MODEL_OUTPUT_VERSION
+                if role in DECISION_AGENT_ROLES
+                else ASSESSMENT_SCHEMA_VERSION
+            ),
+            "model_id": binding.model.id,
+            "model_version": binding.model.version,
+            "failure_policy": binding.route.fallback_policy,
+            "web_search_enabled": binding.route.web_search_enabled,
+            "fallback_model_id": binding.fallback_model.id if binding.fallback_model else None,
+            "fallback_model_version": (
+                binding.fallback_model.version if binding.fallback_model else None
+            ),
+            "prompt_profile_id": binding.route.prompt_profile_id,
+            "prompt_version": binding.route.prompt_version,
+            "prompt_content_hash": (
+                db.get(LlmPromptProfile, binding.route.prompt_profile_id).content_hash
+                if binding.route.prompt_profile_id
+                else None
+            ),
+            "generation_parameters": {
+                "temperature": str(
+                    binding.route.temperature_override
+                    if binding.route.temperature_override is not None
+                    else binding.model.temperature
+                )
+                if (
+                    binding.route.temperature_override is not None
+                    or binding.model.temperature is not None
+                )
+                else None,
+                "top_p": str(
+                    binding.route.top_p_override
+                    if binding.route.top_p_override is not None
+                    else binding.model.top_p
+                )
+                if binding.route.top_p_override is not None or binding.model.top_p is not None
+                else None,
+                "max_output_tokens": binding.route.max_output_tokens_override
+                or binding.model.max_output_tokens,
+                "reasoning_effort": binding.route.reasoning_effort_override
+                or binding.model.reasoning_effort,
+                "seed": binding.route.seed_override
+                if binding.route.seed_override is not None
+                else binding.model.seed,
+                "timeout_ms": binding.route.timeout_ms,
+                "service_tier": binding.route.service_tier,
+            },
+        }
+        for role, binding in sorted(bindings.items())
+    }
+    for value in snapshot.values():
+        if not isinstance(value, dict):
+            raise AgentRuntimeError("AGENT_ROUTE_SNAPSHOT_INVALID")
+        value["route_version_hash"] = _hash(
+            {key: item for key, item in value.items() if key != "route_version_hash"}
+        )
+    return snapshot
 
 
 def _snapshot(db: Session, market: str, symbol: str) -> MarketSnapshot:
@@ -413,8 +571,7 @@ def _invoke_once(
         prompt.owner_id != binding.route.owner_id
         or prompt.role != stage.role
         or prompt.state != "VALIDATED"
-        or hashlib.sha256(prompt.system_prompt.encode("utf-8")).hexdigest()
-        != prompt.content_hash
+        or hashlib.sha256(prompt.system_prompt.encode("utf-8")).hexdigest() != prompt.content_hash
     ):
         raise AgentRuntimeError("AGENT_PROMPT_SNAPSHOT_MISMATCH")
     messages = []
@@ -480,9 +637,7 @@ def _invoke_once(
         if (binding.route.top_p_override is not None or model.top_p is not None)
         else None,
         reasoning_effort=binding.route.reasoning_effort_override or model.reasoning_effort,
-        seed=binding.route.seed_override
-        if binding.route.seed_override is not None
-        else model.seed,
+        seed=binding.route.seed_override if binding.route.seed_override is not None else model.seed,
         tool_policy="ALLOWLIST" if binding.route.web_search_enabled else "NONE",
         allowed_tools=["WEB_SEARCH"] if binding.route.web_search_enabled else [],
     )
@@ -494,9 +649,9 @@ def _invoke_once(
             invocation.completed_at = now
             return None
         try:
-            credential = LlmSecretStore(
-                get_settings().llm_secret_directory
-            ).read(provider.credential_secret_ref)
+            credential = LlmSecretStore(get_settings().llm_secret_directory).read(
+                provider.credential_secret_ref
+            )
         except LlmSecretError:
             invocation.state = "PROVIDER_ERROR"
             invocation.error_code = "AGENT_PROVIDER_CREDENTIAL_UNREADABLE"
@@ -574,8 +729,7 @@ def _invoke_once(
                     invocation.error_code = "LLM_REASON_CODE_NOT_ALLOWED"
                     return None
                 expected_incomplete = sorted(
-                    str(item)
-                    for item in role_input.get("required_incomplete_roles", [])
+                    str(item) for item in role_input.get("required_incomplete_roles", [])
                 )
                 if sorted(output.incomplete_roles) != expected_incomplete:
                     invocation.state = "INVALID_OUTPUT"
@@ -617,9 +771,7 @@ def _invoke_once(
                     invocation.validation_status = "FAILED"
                     invocation.error_code = "LLM_REASON_CODE_NOT_ALLOWED"
                     return None
-                allowed_refs = {
-                    str(item) for item in role_input.get("allowed_evidence_refs", [])
-                }
+                allowed_refs = {str(item) for item in role_input.get("allowed_evidence_refs", [])}
                 if not set(output.evidence_refs).issubset(allowed_refs):
                     invocation.state = "INVALID_OUTPUT"
                     invocation.validation_status = "FAILED"
@@ -646,18 +798,21 @@ def _invoke_model(
         hour=0, minute=0, second=0, microsecond=0
     )
     day_start_utc = day_start_kst.astimezone(UTC)
-    daily_calls = db.scalar(
-        select(func.count(LlmInvocation.id))
-        .join(AgentStageRun, AgentStageRun.id == LlmInvocation.stage_run_id)
-        .where(
-            AgentStageRun.route_id == binding.route.id,
-            LlmInvocation.created_at >= day_start_utc,
-            or_(
-                LlmInvocation.error_code.is_(None),
-                LlmInvocation.error_code != "LOCAL_DAILY_CALL_LIMIT",
-            ),
+    daily_calls = (
+        db.scalar(
+            select(func.count(LlmInvocation.id))
+            .join(AgentStageRun, AgentStageRun.id == LlmInvocation.stage_run_id)
+            .where(
+                AgentStageRun.route_id == binding.route.id,
+                LlmInvocation.created_at >= day_start_utc,
+                or_(
+                    LlmInvocation.error_code.is_(None),
+                    LlmInvocation.error_code != "LOCAL_DAILY_CALL_LIMIT",
+                ),
+            )
         )
-    ) or 0
+        or 0
+    )
     if daily_calls >= binding.route.daily_call_limit:
         stage.state = "RUNNING"
         stage.started_at = now
@@ -768,11 +923,7 @@ def _assessment(
             exit_risk_score=50 if normal else None,
             confidence=0.5 if normal else 0,
             uncertainty=0.5 if normal else 1,
-            reason_codes=[
-                "MARKET_TREND_NEUTRAL"
-                if normal
-                else "MARKET_DATA_QUALITY_DEGRADED"
-            ],
+            reason_codes=["MARKET_TREND_NEUTRAL" if normal else "MARKET_DATA_QUALITY_DEGRADED"],
             evidence_refs=[],
         )
     if position is None:
@@ -830,10 +981,7 @@ def _assessment_v2(
             reason_codes=["OPEN_POSITION_NOT_FOUND"],
             evidence_refs=[],
         )
-    if (
-        role == "MARKET_SECTOR_SCOUT"
-        and server_input_policy_version == SERVER_INPUT_POLICY_VERSION
-    ):
+    if role == "MARKET_SECTOR_SCOUT" and server_input_policy_version == SERVER_INPUT_POLICY_VERSION:
         if market_context is None:
             return AgentAssessmentV2(
                 **common,
@@ -847,9 +995,21 @@ def _assessment_v2(
         index = market_context.get("index")
         sector = market_context.get("sector")
         breadth = market_context.get("breadth")
-        index_change = Decimal(str(index.get("change_pct"))) if isinstance(index, dict) and index.get("change_pct") is not None else None
-        sector_change = Decimal(str(sector.get("change_pct"))) if isinstance(sector, dict) and sector.get("change_pct") is not None else None
-        breadth_ratio = Decimal(str(breadth.get("advancer_ratio_pct"))) if isinstance(breadth, dict) and breadth.get("advancer_ratio_pct") is not None else None
+        index_change = (
+            Decimal(str(index.get("change_pct")))
+            if isinstance(index, dict) and index.get("change_pct") is not None
+            else None
+        )
+        sector_change = (
+            Decimal(str(sector.get("change_pct")))
+            if isinstance(sector, dict) and sector.get("change_pct") is not None
+            else None
+        )
+        breadth_ratio = (
+            Decimal(str(breadth.get("advancer_ratio_pct")))
+            if isinstance(breadth, dict) and breadth.get("advancer_ratio_pct") is not None
+            else None
+        )
         if index_change is None or sector_change is None or breadth_ratio is None:
             return AgentAssessmentV2(
                 **common,
@@ -961,10 +1121,7 @@ def _create_run(
         raise AgentRuntimeError("AGENT_DART_NOT_CONFIGURED", 409)
     if settings.krx_enabled and settings.krx_configuration_status() != "CONFIGURED":
         raise AgentRuntimeError("AGENT_KRX_NOT_CONFIGURED", 409)
-    if (
-        settings.naver_news_enabled
-        and settings.naver_news_configuration_status() != "CONFIGURED"
-    ):
+    if settings.naver_news_enabled and settings.naver_news_configuration_status() != "CONFIGURED":
         raise AgentRuntimeError("AGENT_NAVER_NEWS_NOT_CONFIGURED", 409)
     snapshot = _snapshot(db, market, symbol)
     position = db.scalar(
@@ -997,9 +1154,7 @@ def _create_run(
         }
     )
     position_snapshot_hash = _hash(position_snapshot)
-    market_context = select_market_context(
-        db, market=market, symbol=symbol, now=observed
-    )
+    market_context = select_market_context(db, market=market, symbol=symbol, now=observed)
     bindings = _load_routes(db, owner_id=user.id, route_ids=route_ids)
     route_versions = {
         role: {
@@ -1012,9 +1167,7 @@ def _create_run(
             "model_id": binding.model.id,
             "model_version": binding.model.version,
             "failure_policy": binding.route.fallback_policy,
-            "fallback_model_id": (
-                binding.fallback_model.id if binding.fallback_model else None
-            ),
+            "fallback_model_id": (binding.fallback_model.id if binding.fallback_model else None),
             "fallback_model_version": (
                 binding.fallback_model.version if binding.fallback_model else None
             ),
@@ -1067,9 +1220,7 @@ def _create_run(
         "position_snapshot_hash": position_snapshot_hash,
         "server_input_policy_version": SERVER_INPUT_POLICY_VERSION,
         "market_context_snapshot_id": market_context.id if market_context else None,
-        "market_context_snapshot_hash": (
-            market_context.payload_hash if market_context else None
-        ),
+        "market_context_snapshot_hash": (market_context.payload_hash if market_context else None),
         "assessment_schema_version": ASSESSMENT_SCHEMA_VERSION,
         "core_schema_version": CORE_SCHEMA_VERSION,
         "score_policy_version": SCORE_POLICY_VERSION,
@@ -1083,9 +1234,7 @@ def _create_run(
         "route_versions": route_versions,
     }
     input_hash = _hash(input_record)
-    idempotency_key = _hash(
-        {"owner_id": user.id, "purpose": purpose, "input_hash": input_hash}
-    )
+    idempotency_key = _hash({"owner_id": user.id, "purpose": purpose, "input_hash": input_hash})
     existing = db.scalar(select(AgentRun).where(AgentRun.idempotency_key == idempotency_key))
     if existing is not None:
         if existing.owner_id != user.id:
@@ -1110,9 +1259,7 @@ def _create_run(
         idempotency_key=idempotency_key,
         state="CREATED",
         basis_decision_id=basis_decision.id if basis_decision else None,
-        fusion_policy_version=(
-            FUSION_POLICY_VERSION if purpose == "TRADING_ADVISORY" else None
-        ),
+        fusion_policy_version=(FUSION_POLICY_VERSION if purpose == "TRADING_ADVISORY" else None),
         fusion_state="PENDING" if purpose == "TRADING_ADVISORY" else None,
         valid_until=observed
         + timedelta(
@@ -1168,6 +1315,401 @@ def create_diagnostic_run(
         basis_decision=None,
         now=now,
     )
+
+
+def create_v7_upstream_diagnostic_run(
+    db: Session,
+    *,
+    user: User,
+    market: str,
+    symbol: str,
+    route_ids: dict[str, str],
+    now: datetime | None = None,
+) -> tuple[AgentRun, bool]:
+    """Atomically admit the Phase 4 v7 DIAGNOSTIC upstream execution slice."""
+    observed = now or datetime.now(UTC)
+    settings = get_settings()
+    try:
+        snapshot = _snapshot(db, market, symbol)
+        state = db.get(MarketStreamState, (market, symbol))
+        if state is None:
+            raise AgentRuntimeError("AGENT_MARKET_STREAM_NOT_FOUND", 409)
+        market_context = select_market_context(db, market=market, symbol=symbol, now=observed)
+        decision_input, input_payload = build_v7_scout_input(
+            db,
+            user_id=user.id,
+            snapshot=snapshot,
+            state=state,
+            observed_at=observed,
+            quote_stale_seconds=settings.quote_stale_seconds,
+            dart_lookback_days=settings.dart_lookback_days,
+            krx_lookback_days=settings.krx_lookback_days,
+            naver_news_lookback_hours=settings.naver_news_lookback_hours,
+            market_context=market_context,
+        )
+        bindings = _load_routes(
+            db,
+            owner_id=user.id,
+            route_ids=route_ids,
+            required_roles=V7_LLM_ROUTE_ROLES,
+        )
+        route_versions = _route_version_snapshot(db, bindings)
+        route_versions_json = _canonical(route_versions)
+        frozen = select_active_policy_profiles(db)
+        idempotency_key = _hash(
+            {
+                "analysis_context": "ENTRY",
+                "dag_version": V7_DAG_VERSION,
+                "input_hash": decision_input.input_hash,
+                "owner_id": user.id,
+                "purpose": "DIAGNOSTIC",
+            }
+        )
+        existing = db.scalar(select(AgentRun).where(AgentRun.idempotency_key == idempotency_key))
+        if existing is not None:
+            existing_roles = {
+                item.role
+                for item in db.scalars(
+                    select(AgentStageRun).where(AgentStageRun.run_id == existing.id)
+                )
+            }
+            if (
+                existing.owner_id != user.id
+                or existing.dag_version != V7_DAG_VERSION
+                or existing.purpose != "DIAGNOSTIC"
+                or existing.analysis_context != "ENTRY"
+                or existing.input_hash != decision_input.input_hash
+                or existing.route_versions_json != route_versions_json
+                or existing.policy_profile_version_map_json != frozen.manifest_json
+                or existing.policy_profile_version_map_hash != frozen.manifest_hash
+                or existing_roles != allowed_roles(V7_DAG_VERSION)
+            ):
+                raise AgentRuntimeError("AGENT_IDEMPOTENCY_CONFLICT", 409)
+            db.commit()
+            return existing, False
+
+        valid_until_value = input_payload.get("valid_until")
+        if not isinstance(valid_until_value, str):
+            raise AgentRuntimeError("AGENT_INPUT_VALIDITY_INVALID")
+        valid_until = datetime.fromisoformat(valid_until_value)
+        position_snapshot = {
+            "calculation_version": "position-risk-input-v1",
+            "market_observed_at": snapshot.event_at.isoformat(),
+            "marker": "NO_OPEN_POSITION",
+            "source_refs": [snapshot.id],
+            "symbol": symbol,
+        }
+        run = AgentRun(
+            owner_id=user.id,
+            purpose="DIAGNOSTIC",
+            execution_stage="SHADOW",
+            market=market,
+            symbol=symbol,
+            market_snapshot_id=snapshot.id,
+            input_hash=decision_input.input_hash,
+            dag_version=V7_DAG_VERSION,
+            route_versions_json=route_versions_json,
+            policy_profile_version_map_json=frozen.manifest_json,
+            policy_profile_version_map_hash=frozen.manifest_hash,
+            idempotency_key=idempotency_key,
+            state="CREATED",
+            analysis_context="ENTRY",
+            position_snapshot_json=_canonical(position_snapshot),
+            position_snapshot_hash=_hash(position_snapshot),
+            server_input_policy_version=SERVER_INPUT_POLICY_VERSION,
+            market_context_snapshot_id=market_context.id if market_context else None,
+            market_context_snapshot_hash=(market_context.payload_hash if market_context else None),
+            valid_until=valid_until,
+        )
+        db.add(run)
+        db.flush()
+        for role, sequence, dependencies in stage_plan(V7_DAG_VERSION):
+            _stage(
+                db,
+                run=run,
+                role=role,
+                sequence=sequence,
+                dependencies=dependencies,
+                route_id=bindings[role].route.id if role in bindings else None,
+                input_hash=_hash(
+                    {
+                        "run_input_hash": run.input_hash,
+                        "role": role,
+                        "state": "AWAITING_EVIDENCE" if role in SCOUT_ROUTE_ROLES else "READY",
+                    }
+                ),
+                max_attempts=bindings[role].route.max_attempts if role in bindings else 2,
+                available_at=observed,
+            )
+        db.flush()
+        db.commit()
+        db.refresh(run)
+        return run, True
+    except (AgentRuntimeError, PolicyProfileError, ValueError):
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise AgentRuntimeError("AGENT_IDEMPOTENCY_CONFLICT", 409) from exc
+
+
+_GATE_ADMISSION_RESULT = {
+    GateOutcome.CLOSED: ("ACTIVATION_GATE_CLOSED", "BLOCKED", False, 409),
+    GateOutcome.SUPERSEDED: ("ACTIVATION_GATE_SUPERSEDED", "BLOCKED", False, 409),
+    GateOutcome.INVALID: ("ACTIVATION_GATE_INVALID", "INVALID", False, 409),
+    GateOutcome.DB_RETRYABLE_FAILURE: (
+        "ACTIVATION_GATE_DB_RETRYABLE_FAILURE",
+        "RETRYABLE_FAILURE",
+        True,
+        503,
+    ),
+}
+
+
+def _persist_trading_admission_denial(
+    db: Session,
+    *,
+    user: User,
+    correlation_id: str,
+    resolution: GateResolution,
+) -> AgentRuntimeError:
+    action, result, retryable, status_code = _GATE_ADMISSION_RESULT[resolution.outcome]
+    version = resolution.version
+    metadata = {
+        "schema_version": "finalization-audit-v1",
+        "agent_run_id": None,
+        "decision_id": None,
+        "evaluation_request_id": correlation_id,
+        "decision_context_id": None,
+        "source_stage_run_id": None,
+        "source_stage_output_hash": None,
+        "activation_gate_version_id": version.id if version is not None else None,
+        "activation_gate_version_hash": (
+            version.payload_hash if version is not None else None
+        ),
+        "retryable": retryable,
+    }
+    db.add(
+        AuditLog(
+            actor_type="SYSTEM",
+            actor_id=user.id,
+            action=action,
+            target="V7_ENTRY_ACTIVATION:MOCK",
+            result=result,
+            correlation_id=correlation_id,
+            metadata_json=_canonical(metadata),
+        )
+    )
+    db.commit()
+    return AgentRuntimeError(action, status_code)
+
+
+def create_v7_upstream_trading_run(
+    db: Session,
+    *,
+    user: User,
+    market: str,
+    symbol: str,
+    route_ids: dict[str, str],
+    correlation_id: str,
+    evidence_loader: EvidenceLoader | None,
+    validation_policy: ActivationValidationPolicy | None = None,
+    now: datetime | None = None,
+) -> tuple[AgentRun, bool]:
+    """Atomically admit a server-owned v7 TRADING run behind the Activation Gate."""
+    observed = now or datetime.now(UTC)
+    settings = get_settings()
+    denial: GateResolution | None = None
+    try:
+        snapshot = _snapshot(db, market, symbol)
+        state = db.get(MarketStreamState, (market, symbol))
+        if state is None:
+            raise AgentRuntimeError("AGENT_MARKET_STREAM_NOT_FOUND", 409)
+        market_context = select_market_context(db, market=market, symbol=symbol, now=observed)
+        decision_input, input_payload = build_v7_scout_input(
+            db,
+            user_id=user.id,
+            snapshot=snapshot,
+            state=state,
+            observed_at=observed,
+            quote_stale_seconds=settings.quote_stale_seconds,
+            dart_lookback_days=settings.dart_lookback_days,
+            krx_lookback_days=settings.krx_lookback_days,
+            naver_news_lookback_hours=settings.naver_news_lookback_hours,
+            market_context=market_context,
+            purpose="TRADING",
+        )
+        bindings = _load_routes(
+            db,
+            owner_id=user.id,
+            route_ids=route_ids,
+            required_roles=V7_LLM_ROUTE_ROLES,
+        )
+        route_versions = _route_version_snapshot(db, bindings)
+        route_versions_json = _canonical(route_versions)
+        frozen = select_active_policy_profiles(db)
+        actual_snapshot = build_actual_version_snapshot(
+            policy_version_map=json.loads(frozen.manifest_json),
+            route_versions=route_versions,
+        )
+        gate = select_current_v7_entry_activation_gate(
+            db,
+            now=observed,
+            evidence_loader=evidence_loader,
+            policy=validation_policy,
+            lock=True,
+        )
+        if gate.outcome != GateOutcome.PASS:
+            denial = gate
+            raise ActivationGateError(gate.outcome.value)
+        assert gate.version is not None and gate.payload is not None
+        if (
+            canonical_activation_json(actual_snapshot)
+            != canonical_activation_json(gate.payload.version_snapshot)
+            or version_snapshot_hash(actual_snapshot) != gate.payload.version_snapshot_hash
+        ):
+            denial = GateResolution(
+                GateOutcome.INVALID, version=gate.version, payload=gate.payload
+            )
+            raise ActivationGateError("ACTIVATION_GATE_SNAPSHOT_MISMATCH")
+
+        idempotency_key = _hash(
+            {
+                "analysis_context": "ENTRY",
+                "dag_version": V7_DAG_VERSION,
+                "input_hash": decision_input.input_hash,
+                "owner_id": user.id,
+                "purpose": "TRADING",
+            }
+        )
+        existing = db.scalar(select(AgentRun).where(AgentRun.idempotency_key == idempotency_key))
+        if existing is not None:
+            existing_roles = {
+                item.role
+                for item in db.scalars(
+                    select(AgentStageRun).where(AgentStageRun.run_id == existing.id)
+                )
+            }
+            if (
+                existing.owner_id != user.id
+                or existing.dag_version != V7_DAG_VERSION
+                or existing.purpose != "TRADING"
+                or existing.analysis_context != "ENTRY"
+                or existing.input_hash != decision_input.input_hash
+                or existing.route_versions_json != route_versions_json
+                or existing.policy_profile_version_map_json != frozen.manifest_json
+                or existing.policy_profile_version_map_hash != frozen.manifest_hash
+                or existing_roles != allowed_roles(V7_DAG_VERSION)
+            ):
+                raise AgentRuntimeError("AGENT_IDEMPOTENCY_CONFLICT", 409)
+            if (
+                existing.activation_gate_version_id != gate.version.id
+                or existing.activation_gate_version_hash != gate.version.payload_hash
+            ):
+                denial = GateResolution(
+                    GateOutcome.SUPERSEDED,
+                    version=gate.version,
+                    payload=gate.payload,
+                )
+                raise ActivationGateError("ACTIVATION_GATE_SUPERSEDED")
+            db.commit()
+            return existing, False
+
+        valid_until_value = input_payload.get("valid_until")
+        if not isinstance(valid_until_value, str):
+            raise AgentRuntimeError("AGENT_INPUT_VALIDITY_INVALID")
+        valid_until = datetime.fromisoformat(valid_until_value)
+        position_snapshot = {
+            "calculation_version": "position-risk-input-v1",
+            "market_observed_at": snapshot.event_at.isoformat(),
+            "marker": "NO_OPEN_POSITION",
+            "source_refs": [snapshot.id],
+            "symbol": symbol,
+        }
+        run = AgentRun(
+            owner_id=user.id,
+            purpose="TRADING",
+            execution_stage="SHADOW",
+            market=market,
+            symbol=symbol,
+            market_snapshot_id=snapshot.id,
+            input_hash=decision_input.input_hash,
+            dag_version=V7_DAG_VERSION,
+            route_versions_json=route_versions_json,
+            policy_profile_version_map_json=frozen.manifest_json,
+            policy_profile_version_map_hash=frozen.manifest_hash,
+            activation_gate_version_id=gate.version.id,
+            activation_gate_version_hash=gate.version.payload_hash,
+            idempotency_key=idempotency_key,
+            state="CREATED",
+            analysis_context="ENTRY",
+            position_snapshot_json=_canonical(position_snapshot),
+            position_snapshot_hash=_hash(position_snapshot),
+            server_input_policy_version=SERVER_INPUT_POLICY_VERSION,
+            market_context_snapshot_id=market_context.id if market_context else None,
+            market_context_snapshot_hash=(market_context.payload_hash if market_context else None),
+            valid_until=valid_until,
+        )
+        db.add(run)
+        db.flush()
+        for role, sequence, dependencies in stage_plan(V7_DAG_VERSION):
+            _stage(
+                db,
+                run=run,
+                role=role,
+                sequence=sequence,
+                dependencies=dependencies,
+                route_id=bindings[role].route.id if role in bindings else None,
+                input_hash=_hash(
+                    {
+                        "run_input_hash": run.input_hash,
+                        "role": role,
+                        "state": "AWAITING_EVIDENCE" if role in SCOUT_ROUTE_ROLES else "READY",
+                    }
+                ),
+                max_attempts=bindings[role].route.max_attempts if role in bindings else 2,
+                available_at=observed,
+            )
+        final_gate = select_current_v7_entry_activation_gate(
+            db,
+            now=observed,
+            evidence_loader=evidence_loader,
+            policy=validation_policy,
+            lock=True,
+        )
+        if final_gate.outcome != GateOutcome.PASS:
+            denial = final_gate
+            raise ActivationGateError(final_gate.outcome.value)
+        assert final_gate.version is not None
+        if (
+            final_gate.version.id != gate.version.id
+            or final_gate.version.payload_hash != gate.version.payload_hash
+        ):
+            denial = GateResolution(
+                GateOutcome.SUPERSEDED,
+                version=final_gate.version,
+                payload=final_gate.payload,
+            )
+            raise ActivationGateError("ACTIVATION_GATE_SUPERSEDED")
+        db.commit()
+        db.refresh(run)
+        return run, True
+    except ActivationGateError:
+        db.rollback()
+        if denial is None:
+            denial = GateResolution(GateOutcome.INVALID)
+        raise _persist_trading_admission_denial(
+            db,
+            user=user,
+            correlation_id=correlation_id,
+            resolution=denial,
+        )
+    except (AgentRuntimeError, PolicyProfileError, ValueError):
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise AgentRuntimeError("AGENT_IDEMPOTENCY_CONFLICT", 409) from exc
 
 
 def create_position_advisory_run(

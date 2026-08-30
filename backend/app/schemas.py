@@ -115,6 +115,8 @@ class RiskPolicyPayload(StrictModel):
     max_daily_entries: int = Field(ge=1, le=20)
     fixed_stop_loss_pct: Decimal = Field(ge=Decimal("-20.0"), le=Decimal("-0.1"))
     quote_stale_seconds: int = Field(ge=1, le=30)
+    account_funds_stale_seconds: int = Field(default=30, ge=1, le=300)
+    order_capacity_stale_seconds: int = Field(default=10, ge=1, le=60)
     max_spread_pct: Decimal = Field(ge=Decimal("0.01"), le=Decimal("5.00"))
     max_price_deviation_pct: Decimal = Field(ge=Decimal("0.01"), le=Decimal("5.00"))
     daily_loss_limit_pct: Decimal = Field(
@@ -204,8 +206,8 @@ class CoreOutputResponse(StrictModel):
 class DecisionExecutionResponse(StrictModel):
     execution_id: str
     action: str
-    mode: str
-    stage: str
+    mode: str | None
+    stage: str | None
     state: str
     result_code: str | None
     guard_evaluation_id: str | None
@@ -216,7 +218,7 @@ class DecisionExecutionResponse(StrictModel):
 
 
 class DecisionResponse(StrictModel):
-    schema_version: str = "1.0"
+    schema_version: Literal["1.0"] = "1.0"
     request_id: str
     decision_id: str
     purpose: Literal["DIAGNOSTIC", "TRADING"]
@@ -241,10 +243,76 @@ class DecisionResponse(StrictModel):
     created_at: datetime
 
 
+class SourcedDecisionInputResultResponse(StrictModel):
+    role: Literal[
+        "CONSERVATIVE_DECISION",
+        "BALANCED_DECISION",
+        "AGGRESSIVE_DECISION",
+    ]
+    agent_type: Literal["CONSERVATIVE", "BALANCED", "AGGRESSIVE"]
+    stage_run_id: str
+    output_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: Literal[
+        "SUCCEEDED",
+        "INSUFFICIENT_DATA",
+        "CONFLICTED",
+        "TIMED_OUT",
+        "FAILED",
+        "INVALID_OUTPUT",
+    ]
+    action: Literal["BUY", "WAIT", "REJECT", "UNKNOWN"]
+
+
+class SourcedDecisionLineageResponse(StrictModel):
+    source_agent_run_id: str
+    source_stage_run_id: str
+    source_stage_output_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    decision_context_id: str
+    decision_context_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    consensus_policy_version: Literal["consensus-policy-v1"]
+    decision_pattern: Literal[
+        "MANDATORY_UNKNOWN",
+        "MULTIPLE_REJECT",
+        "SINGLE_REJECT",
+        "ALL_BUY",
+        "BALANCED_PLUS_ONE_BUY",
+        "DEFAULT_WAIT",
+    ]
+    input_results: list[SourcedDecisionInputResultResponse]
+
+
+class SourcedEntryDecisionResponse(StrictModel):
+    schema_version: Literal["sourced-entry-decision-v1"]
+    request_id: str
+    decision_id: str
+    purpose: Literal["TRADING"]
+    evaluation_request_id: str
+    decision_kind: Literal["ENTRY"]
+    symbol: str
+    market: str
+    input_snapshot_id: str
+    decision_input_id: str
+    action: Literal["BUY", "WAIT", "REJECT", "UNKNOWN"]
+    reason_codes: list[str]
+    confidence: None
+    risk_level: None
+    configuration_version_id: None
+    execution_mode: None
+    execution_outcome: None
+    validation_status: Literal["VALID"]
+    execution: DecisionExecutionResponse | None
+    valid_until: datetime
+    created_at: datetime
+    lineage: SourcedDecisionLineageResponse
+
+
+DecisionItemResponse = DecisionResponse | SourcedEntryDecisionResponse
+
+
 class DecisionListResponse(StrictModel):
     schema_version: str = "1.0"
     request_id: str
-    items: list[DecisionResponse]
+    items: list[DecisionItemResponse]
 
 
 class MessageResponse(StrictModel):
@@ -476,6 +544,7 @@ class ApprovalResponse(StrictModel):
     quantity: int
     order_id: str | None
     result_code: str | None
+    version: int
     expires_at: datetime
     created_at: datetime
     updated_at: datetime
@@ -487,9 +556,17 @@ class ApprovalListResponse(StrictModel):
     items: list[ApprovalResponse]
 
 
-class ApprovalActionRequest(StrictModel):
+class ApprovalApproveRequest(StrictModel):
     schema_version: str = Field(pattern=r"^1\.0$")
     idempotency_key: str = Field(min_length=16, max_length=128)
+    expected_version: int = Field(ge=1)
+    reauth_proof: str = Field(min_length=16, max_length=512)
+
+
+class ApprovalRejectRequest(StrictModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    idempotency_key: str = Field(min_length=16, max_length=128)
+    expected_version: int = Field(ge=1)
 
 
 class ApprovalActionResponse(StrictModel):
@@ -596,6 +673,9 @@ LlmRole = Literal[
     "MARKET_SECTOR_SCOUT",
     "POSITION_RISK_SCOUT",
     "CORE",
+    "CONSERVATIVE_DECISION",
+    "BALANCED_DECISION",
+    "AGGRESSIVE_DECISION",
 ]
 
 
@@ -861,6 +941,9 @@ AgentRouteRole = Literal[
     "MARKET_SECTOR_SCOUT",
     "POSITION_RISK_SCOUT",
     "CORE",
+    "CONSERVATIVE_DECISION",
+    "BALANCED_DECISION",
+    "AGGRESSIVE_DECISION",
 ]
 
 

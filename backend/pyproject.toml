@@ -39,6 +39,9 @@ packages = ["app"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+markers = [
+  "postgresql: tests that require the isolated Phase 10G.1 PostgreSQL acceptance database",
+]
 
 [tool.ruff]
 line-length = 100

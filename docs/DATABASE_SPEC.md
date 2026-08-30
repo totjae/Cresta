@@ -343,6 +343,378 @@ market_snapshots(symbol, market, observed_at desc)
 | DB-152 | `agent_runs.purpose`는 기존 `DIAGNOSTIC`과 scheduler 전용 `TRADING_ADVISORY`를 구분한다. advisory row만 unique `basis_decision_id`, `fusion_policy_version`, `fusion_state`를 가지며 진단 row에는 이 필드가 null이어야 한다. |
 | DB-153 | advisory의 `fusion_state`는 `PENDING | NO_ESCALATION | ESCALATED | EXPIRED | FAILED_SAFE`만 허용한다. 상향 판단이 생성된 경우 unique `fusion_decision_id`와 안정적인 `fusion_reason_code`를 저장한다. |
 | DB-154 | migration `20260817_0038_position_agent_fusion` upgrade는 기존 Agent run을 재작성하지 않고 nullable provenance와 제약을 추가한다. 기준·결합 판단은 별도 불변 `decisions` row로 유지한다. downgrade는 신규 advisory run을 `DIAGNOSTIC` 이력으로 축소한 뒤 결합 provenance column을 제거하며 이미 생성된 불변 판단·실행 이력은 삭제하지 않는다. |
+
+## Cresta v2 ENTRY v7 영속성 계약
+
+이 절은 Phase 2A 역설계와 Phase 2B mapping 결정을 반영한 `agent-dag-v7`의 영속성 기준이다. 기존 `agent-dag-v1`~`agent-dag-v6`, `CORE`, `TRADING_ADVISORY`, `position-agent-fusion-v1` 및 과거 deterministic ENTRY 판단은 당시 의미로 유지하고 이 절의 객체로 소급 해석하거나 backfill하지 않는다.
+
+### v7 Evaluation Run과 목적
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-157 | 신규 `DecisionRun`을 만들지 않는다. v7 ENTRY evaluation root는 기존 `agent_runs`를 재사용하며 `dag_version=agent-dag-v7`, `analysis_context=ENTRY`로 식별한다. `agent_runs.id`가 evaluation lineage root다. |
+| DB-158 | `agent_runs.purpose`는 기존 `DIAGNOSTIC`, 기존 POSITION 전용 `TRADING_ADVISORY`와 v7 scheduler 전용 `TRADING`을 허용한다. 최초 v7 구현은 `DIAGNOSTIC`만 생성하고, activation 이후 production evaluation은 admission부터 `TRADING`이어야 하며 DIAGNOSTIC run이나 결과를 TRADING으로 승격·복사하지 않는다. |
+| DB-159 | v7 run은 nullable `policy_profile_version_map_json`, `policy_profile_version_map_hash`, `activation_gate_version_id`, `activation_gate_version_hash` provenance를 사용한다. v7은 policy map을 반드시 가지며 v7 `TRADING`은 유효한 activation gate ID/hash도 반드시 가진다. 기존 v1~v6와 POSITION advisory row는 nullable 상태로 보존하고 backfill하지 않는다. |
+
+`policy_profile_version_map_json`은 Conservative, Balanced, Aggressive의 정확히 세 항목을 agent type 순서로 정규화한 canonical JSON이다. 각 항목은 `configuration_version_id`, category, sequence, agent type과 payload hash를 포함한다. PolicyProfile은 공통 판단 입력이 아니므로 DecisionContext manifest에 포함하지 않는다.
+
+### `decision_contexts`
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-160 | `decision_contexts`는 v7 AgentRun당 최대 하나인 서버 소유 불변 `decision-context-v1` reference manifest다. 최소 `id`, unique `run_id` FK, `schema_version`, `decision_input_snapshot_id` FK, `evidence_bundle_id` FK, nullable `market_context_snapshot_id` FK, 고정 v7 Scout stage ID 4개, Candidate Audit stage ID, configuration provenance JSON/hash, version manifest JSON/hash, canonical `manifest_json`, `context_hash`, `frozen_at`, `valid_until`, `created_at`을 저장한다. |
+| DB-161 | Context는 MarketSnapshot, EvidenceItem, EvidenceBundle 또는 stage output 원문을 복제하지 않는다. `manifest_json`은 기존 immutable row ID와 저장된 hash, 적용 상태·schema/version provenance만 포함하며 각 Scout와 Candidate Audit의 stage ID, role, terminal state와 output hash를 보존한다. |
+| DB-162 | v7 market/scout base input은 기존 `decision_input_snapshots`를 `scout-input-v2` schema로 재사용한다. 과거 `scout-input-v1`을 재해석하지 않으며 Context와 향후 finalized Decision은 같은 snapshot ID를 참조한다. |
+| DB-163 | `AgentStageRun.state`가 scheduling의 권위 상태이고 structured result의 `status`는 같은 값이어야 한다. Technical, News·Disclosure, Market·Sector Scout는 schema-valid output/hash가 있는 `SUCCEEDED | INSUFFICIENT_DATA | CONFLICTED`, ENTRY의 Position Risk Scout는 이에 더해 명시적 `NOT_APPLICABLE`을 freeze 가능한 terminal로 허용한다. Candidate Audit은 `SUCCEEDED`여야 한다. stage 부재, state/status 불일치, output/hash 부재, `TIMED_OUT | FAILED | INVALID_OUTPUT`은 Context freeze를 거부한다. `INSUFFICIENT_DATA | CONFLICTED | NOT_APPLICABLE`은 누락과 구분해 manifest에 보존하며 AI 계약의 BUY fail-closed 규칙을 적용한다. |
+| DB-164 | Context freeze는 모든 필수 Scout와 Candidate Audit terminal 확인, 참조 row 잠금·검증, canonical manifest/hash 계산과 Context insert를 한 transaction에서 수행한다. Context commit 이후에만 세 Decision Agent stage가 runnable하며 commit 전에는 claim할 수 없다. 같은 `run_id + manifest/hash` 재시도는 기존 Context를 반환하고 같은 run의 다른 manifest/hash는 conflict로 fail-closed 한다. Context update·replacement는 금지한다. |
+| DB-165 | Context `valid_until`은 DecisionInputSnapshot, EvidenceBundle에 포함된 evidence freshness, MarketContextSnapshot, Scout result와 AgentRun의 유효시각 중 가장 이른 값으로 서버가 계산하고 그 값을 manifest/hash에 포함한다. 호출자가 별도 더 긴 값을 지정할 수 없으며 필수 참조의 유효시각을 계산할 수 없으면 freeze를 거부한다. |
+| DB-166 | Context가 참조하는 Scout stage, Candidate Audit stage와 EvidenceBundle은 모두 `run_id`와 같은 AgentRun 소속이어야 한다. 첫 구현은 각 기본 FK와 freeze transaction의 잠금 기반 server validation으로 이를 강제한다. PostgreSQL과 SQLite 간 차이가 큰 불필요한 composite FK 또는 generic context-reference relation table은 도입하지 않으며 same-run 불일치는 insert 전에 rollback한다. |
+
+Context canonical JSON은 UTF-8, Unicode 비 ASCII 문자를 escape하지 않는 JSON, key 사전순 정렬, 배열의 계약상 정규 순서, 불필요한 공백 없는 `,`·`:` separator를 사용한다. hash는 canonical UTF-8 bytes의 lowercase SHA-256 hex다. `schema_version`은 canonicalization 규칙을 포함하며 알 수 없는 상위 version을 자동 해석하지 않는다.
+
+### v7 role과 결과 영속성
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-167 | `agent_stage_runs.role` allowlist는 기존 역할을 모두 유지하고 `CONSERVATIVE_DECISION`, `BALANCED_DECISION`, `AGGRESSIVE_DECISION`, `ENTRY_ARBITER`를 추가한다. DB allowlist는 역사적 역할의 합집합이고 애플리케이션의 versioned DAG validation이 v1~v6 run에 신규 role 삽입을 거부한다. |
+| DB-168 | `llm_role_routes`와 `llm_prompt_profiles`에는 세 Decision Agent role만 추가한다. `ENTRY_ARBITER`는 internal stage이므로 `route_id`, `invocation_id`가 모두 null이어야 하며 LlmRoleRoute, PromptProfile, ModelProfile과 LlmInvocation을 만들 수 없다. |
+| DB-169 | DecisionAgentResult 전용 table을 만들지 않는다. 세 Decision Agent의 `AgentStageRun.output_json/output_hash`에 `decision-agent-result-v1`을 저장하고 stage role과 `agent_type`을 일대일 검증한다. stage input hash는 DecisionContext ID/hash, 해당 PolicyProfile ID/hash, route/input contract version에 결합하며 완료 output과 hash를 수정하지 않는다. |
+| DB-170 | ArbiterResult 전용 table을 만들지 않는다. `ENTRY_ARBITER` stage의 `output_json/output_hash`가 `entry-consensus-v1` ArbiterResult이며 Context ID/hash, C/B/A result stage ID/hash, agent type 순서로 정규화된 result 목록, consensus policy version, decision pattern, action, reason code와 schema version을 보존한다. `(run_id, role)` unique로 한 run의 Arbiter를 최대 하나로 제한하고 동일 result IDs/hashes와 consensus policy version은 동일 canonical output/hash를 생성해야 한다. |
+
+### PolicyProfile
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-171 | PolicyProfile은 별도 table이나 PromptProfile/RoleRoute로 표현하지 않고 system-owned `configuration_versions`를 재사용한다. category는 `V7_ENTRY_POLICY_CONSERVATIVE`, `V7_ENTRY_POLICY_BALANCED`, `V7_ENTRY_POLICY_AGGRESSIVE`로 고정하고 `scope=SYSTEM`, `target_id=MOCK`을 첫 deployment target으로 사용한다. 각 payload는 `policy-schema-v1`, 일치하는 agent type, policy parameters와 validation metadata를 포함하며 payload/hash는 기존 ConfigurationVersion 불변 계약을 따른다. |
+| DB-172 | v7 admission은 세 category에서 정확히 한 개씩의 ACTIVE version을 같은 transaction snapshot으로 선택해 DB-159의 canonical map에 고정한다. 누락·중복·agent type/category 불일치·payload hash 불일치는 admission을 거부하며 실행 중 ACTIVE 교체가 기존 run map을 변경하지 않는다. |
+
+### Finalized ENTRY Decision lineage와 멱등성
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-173 | 기존 `decisions`에 v7 전용 nullable `source_agent_run_id` FK, `source_stage_run_id` FK와 `source_stage_output_hash`를 둔다. 세 값은 all-or-none이다. 값이 있는 Decision은 `purpose=TRADING`, `decision_kind=ENTRY`, source run `agent-dag-v7 + purpose=TRADING + analysis_context=ENTRY`, source stage `role=ENTRY_ARBITER`, `source_stage.run_id=source_agent_run_id`, 저장 hash와 immutable stage output hash 일치를 모두 만족해야 한다. |
+| DB-174 | v7 sourced ENTRY Decision은 동일 source run과 source Arbiter stage별 최대 하나다. 논리 uniqueness는 필수이며 migration은 PostgreSQL partial unique와 SQLite가 동일 의미를 검증할 수 있는 nullable unique index/constraint 전략을 각각 명시한다. legacy Decision의 source 필드는 모두 null이고 backfill하지 않는다. |
+| DB-175 | Finalizer는 기존 `decisions.evaluation_request_id` unique를 재사용한다. identity material은 `schema_version=entry-finalization-identity-v1`, AgentRun ID, DecisionContext ID/hash, ENTRY_ARBITER stage ID/output hash와 consensus policy version을 key 사전순·공백 없는 canonical JSON으로 직렬화하고 UTF-8 SHA-256을 계산한다. 저장값은 `v7fin-` 뒤에 hash 앞 58 hex를 붙인 64자 문자열이다. |
+| DB-176 | Finalizer transaction의 commit 결과가 불명확하면 같은 `evaluation_request_id`를 먼저 조회한다. 기존 row의 source run/stage/hash, Context ID/hash와 consensus policy version이 전부 일치하면 기존 Decision을 반환하고 하나라도 다르면 idempotency conflict로 fail-closed 한다. 새 FinalizationIdentity table은 만들지 않는다. |
+
+### v7 TRADING Activation Gate
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-177 | Activation Gate는 별도 table이나 ExecutionStage 결합으로 표현하지 않고 system-owned `configuration_versions` category `V7_ENTRY_ACTIVATION`을 사용한다. 첫 target은 `scope=SYSTEM`, `target_id=MOCK`이다. ConfigurationVersion의 `ACTIVE` lifecycle과 payload의 `gate_state=OPEN | CLOSED`는 별개이며 ACTIVE row 부재, CLOSED, schema/hash 오류, 만료 또는 target version 불일치는 CLOSED와 동일하게 처리한다. |
+| DB-178 | `activation-gate-v1` payload는 target DAG, DecisionContext·DecisionAgentResult schema, 세 PolicyProfile ID/hash map, consensus policy, prompt/model/route version map, safety evidence descriptor 목록, canonical version snapshot/hash, validation policy version과 유효시간을 포함한다. 알 수 없는 필드·schema 또는 부분 version snapshot은 OPEN으로 해석하지 않는다. |
+| DB-179 | 각 safety evidence descriptor는 `test_id`, requirement IDs, `result=PASSED`, code revision 또는 동등 build identity, TEST_PLAN/spec version, `executed_at`, `valid_until` 또는 명시적 freshness contract, `evidence_ref`, `evidence_hash`를 모두 가진다. 단순 boolean 통과값은 허용하지 않으며 activation acceptance set 전체가 존재·PASSED·target version 일치·freshness·hash 검증을 통과해야 gate validation이 성공한다. |
+| DB-180 | v7 TRADING run admission은 당시 ACTIVE+OPEN gate ID/hash를 AgentRun에 freeze한다. Finalizer는 현재 gate를 다시 조회해 run freeze ID/hash, ACTIVE+OPEN 상태, DAG/policy/schema/route map과 Context/Arbiter 유효성을 재검증한다. gate가 superseded·CLOSED·변경되면 기존 run을 새 gate로 승격하지 않고 finalization을 거부한다. ExecutionStage는 이 검증과 독립적으로 Decision 이후 Approval/Order admission을 제어한다. |
+
+### 보존·삭제와 compatibility
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-181 | v7 AgentRun, DecisionContext, source Scout/Arbiter stage, EvidenceBundle과 finalized Decision은 판단 보존기간 동안 애플리케이션 API로 UPDATE·DELETE하지 않는다. 신규 Context 및 Decision source FK는 `ON DELETE RESTRICT` 또는 동등 `NO ACTION`을 사용하고 surviving Decision의 lineage를 `SET NULL`이나 cascade로 조용히 제거하지 않는다. |
+| DB-182 | Phase 3 migration은 신규 table, additive role allowlist, nullable provenance와 source constraint만 추가한다. 기존 v1~v6 AgentRun·CORE·POSITION advisory·deterministic ENTRY Decision을 재작성하거나 Context/source lineage를 backfill하지 않는다. v7 Context 또는 sourced Decision이 존재하는 DB의 downgrade는 lineage를 삭제·null 처리하지 않고 명시적으로 거부하며, v7 row가 없는 경우에만 신규 구조를 제거한다. |
+
+### v7 upstream runtime 영속 계약
+
+이 절은 Phase 4 구현 전에 확정하는 기존 table 재사용 계약이다. Phase 3A~3C의 schema·freeze·PolicyProfile 계약을 변경하지 않으며 Phase 4B 자체는 migration이나 runtime을 만들지 않는다.
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-183 | `scout-input-v2`는 기존 `decision_input_snapshots`의 불변 `input_json/input_hash`에 저장한다. canonical input의 정확한 top-level field는 `schema_version`, `user_id`, `purpose`, `analysis_context`, `snapshot_id`, `market`, `symbol`, `observed_at`, `valid_until`, `data_quality`, `session_state`, `quote`, `indicators`, `position`, `open_orders`, `account_risk_summary`, `market_context`, `strategy`, `configuration_version`, `prior_decision_summary`, `server_input_policy_version`, `market_snapshot_provenance`, `indicator_provenance`, `market_context_provenance`다. v1 공통 field의 이름·null 의미·Decimal/time canonicalization을 유지하며 hash는 DB-160 아래의 canonical JSON 규칙을 사용한다. |
+| DB-184 | `market_snapshot_provenance`는 snapshot ID·payload hash·source·event/received time, `indicator_provenance`는 nullable snapshot ID·calculator/input version·payload hash·validity, `market_context_provenance`는 nullable snapshot ID/hash/schema/quality/observed/received/valid time을 보존한다. input의 `user_id`는 내부 user UUID이고 계좌번호·로그인 식별자·비밀을 포함하지 않는다. `prior_decision_summary`는 v1 naming compatibility를 위한 명시적 null이다. EvidenceBundle·Scout output·DecisionContext·PolicyProfile·Decision Agent·Arbiter·주문·실행 data는 저장하지 않는다. |
+| DB-185 | `scout-input-v2.valid_until`과 `input_hash`는 AI-252~254의 source provenance 및 minimum-validity 계약으로 서버가 계산한다. 동일 source와 policy version은 동일 canonical input/hash를 만들고 PolicyProfile 변경은 이를 변경하지 않는다. 필수 source hash/version/validity 누락·불일치·만료는 v7 admission을 거부한다. |
+| DB-186 | Phase 4 v7 admission transaction은 DecisionInputSnapshot, 네 Scout route version snapshot, DB-172 policy map, AgentRun과 upstream 7개 AgentStageRun을 원자적으로 고정한다. C/B/A Decision Agent, `ENTRY_ARBITER`, `CORE` stage는 materialize하지 않으며 실패 시 partial row를 commit하지 않는다. 이는 DB-167의 최종 role allowlist나 MAO-200의 11-stage 논리 DAG를 축소하지 않는다. |
+| DB-187 | v7 upstream 완료 checkpoint는 새 column/state 없이 `AgentRun.state=RUNNING`, 필수 upstream terminal AgentStageRun과 unique DecisionContext 존재로 표현한다. DecisionContext Freeze는 Candidate Audit commit 뒤 별도 transaction이며 동일 manifest retry·conflict는 DB-164를 그대로 적용한다. v1~v6 terminal CORE finalization 의미는 변경하지 않는다. |
+| DB-188 | `evidence-verifier-v2`와 `evidence-candidate-audit-v2`는 별도 table 없이 해당 AgentStageRun의 immutable `output_json/output_hash`에 저장한다. schema별 필드·freshness·canonical ordering은 MAO-228~231을 따르고, v1~v6 historical output을 backfill·재해석하지 않는다. |
+| DB-189 | v7 Scout AgentStageRun의 `input_hash`는 MAO-233~235의 `scout-role-input-v1` canonical material에 결합한다. DecisionInputSnapshot·EvidenceBundle·route와 역할별 nullable provenance는 저장된 ID/hash로 해석 가능해야 하며 다른 Scout output 또는 PolicyProfile을 포함하지 않는다. |
+| DB-190 | v7 upstream route snapshot은 기존 네 Scout LlmRoleRoute row의 immutable identity/version/hash를 재사용한다. `CORE` route를 요구하거나 동일 Scout route row를 v7용으로 복제하지 않으며 v1~v6 route provenance를 변경하지 않는다. |
+
+### 11.7 v7 Decision Agent runtime persistence
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-191 | Phase 7 이후 신규 v7 AgentRun의 route version map은 네 Scout와 C/B/A Decision role의 정확히 일곱 route identity/version/hash를 가진다. `ENTRY_ARBITER`와 `CORE`는 포함하지 않는다. Phase 4~6에 이미 생성된 네-route run은 수정·backfill하지 않으며 route map shape로 historical run을 invalid 처리하지 않는다. |
+| DB-192 | 각 C/B/A AgentStageRun `input_hash`는 exact `decision-agent-stage-input-v1` canonical material의 SHA-256이다. exact field set은 `schema_version`, `decision_context_id`, `decision_context_hash`, `role`, `agent_type`, `policy_profile_id`, `policy_profile_hash`, `route_id`, `route_version`, `route_version_hash`, `prompt_profile_id`, `prompt_version`, `prompt_hash`, `requested_model_profile_id`, `input_contract_version=decision-agent-input-v1`이다. 다른 Decision Agent 결과·정책, Scout route map 또는 호출자가 만든 hash는 포함하지 않는다. |
+| DB-193 | `decision-agent-result-v1`은 별도 table 없이 C/B/A AgentStageRun의 immutable `output_json/output_hash`에 저장한다. output hash는 AI-260~264의 exact server-owned result를 canonicalize하며 terminal stage state는 result status와 AI-261 matrix대로 일치해야 한다. 권위 terminal C/B/A stage에 null result/hash를 허용하지 않는다. |
+| DB-194 | decision-stage reconciliation은 DB-164 Context reconciliation과 분리된 transaction이다. `(run_id, role)` unique constraint와 저장된 input/route/prompt/policy hash를 이용해 정확한 세 stage를 원자적·멱등적으로 만들며 exact partial retry만 복구하고 mismatch에서는 기존 row를 변경하지 않는다. 새 table·state·column은 요구하지 않는다. |
+| DB-195 | Decision Agent result의 `valid_until`은 DecisionContext `valid_until`과 정확히 같고 Policy/route/prompt lifecycle timestamp가 이를 연장하지 않는다. completion transaction은 run/stage row와 fencing을 잠근 뒤 Context same-run/hash/expiry 및 frozen Policy/route/prompt/input hash를 다시 검증하고 output/state를 한 transaction에서 commit한다. |
+| DB-196 | claim transaction은 lease/fencing만 짧게 commit하고 Provider network call과 immutable input resolution 동안 DB row lock을 보유하지 않는다. completion 또는 권위 recovery transaction만 structured result/hash와 terminal state를 함께 기록하며 stale fencing token update는 0행이어야 한다. |
+
+### 11.8 ENTRY_ARBITER runtime persistence
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-197 | `entry-arbiter-input-v1`의 exact field는 `schema_version`, `decision_context_id`, `decision_context_hash`, `policy_version`, `input_results`, `valid_until`이다. `input_results`는 C/B/A 순서의 정확히 세 항목이고 item exact field는 `role`, `agent_type`, `stage_run_id`, `output_hash`, `status`, `action`이다. 전체 canonical JSON의 UTF-8 SHA-256이 ENTRY_ARBITER stage `input_hash`다. |
+| DB-198 | arbiter-stage reconciliation은 같은 run/context의 역할별 한 terminal C/B/A stage를 잠그고 structured Result, canonical output hash, role/type, state/status, frozen Policy provenance와 Context/Result validity를 검증한 뒤 ENTRY_ARBITER를 별도 transaction에서 materialize한다. 구조 오류·cross-run/context·만료에서는 stage를 만들지 않는다. |
+| DB-199 | ENTRY_ARBITER는 `(run_id, role)` unique를 재사용하며 route_id와 invocation_id가 null이고 dependency JSON은 C/B/A 세 role의 canonical AND 목록이다. 같은 input hash 재시도는 기존 row를 반환하고 다른 hash 또는 identity의 기존 row는 수정하지 않고 conflict로 종료한다. 새 table·column·state·migration은 요구하지 않는다. |
+| DB-200 | `entry-consensus-v1` exact field는 `schema_version`, `decision_context_id`, `decision_context_hash`, `action`, `policy_version`, `input_result_ids`, `input_results`, `decision_pattern`, `reason_codes`, `valid_until`이다. `input_results`는 DB-197과 같은 ordered item 목록이고 `input_result_ids`는 그 stage IDs와 같은 순서로 정확히 일치한다. |
+| DB-201 | ArbiterResult `valid_until`은 DecisionContext와 세 DecisionAgentResult validity에 정확히 일치한다. runtime timestamp는 Result payload에 넣지 않고 AgentStageRun lifecycle metadata로만 저장하며 exact canonical Result JSON의 SHA-256을 `output_hash`로 저장한다. |
+| DB-202 | 구조적으로 유효한 non-success C/B/A Result를 평가한 UNKNOWN consensus는 ENTRY_ARBITER `SUCCEEDED`와 non-null canonical output/hash다. materialization 뒤 provenance/input mismatch는 `CONFLICTED`, expiry는 `TIMED_OUT`, evaluator internal failure는 `FAILED`이고 세 상태 모두 output_json/output_hash가 null이다. |
+| DB-203 | claim/completion transaction은 C/B/A stage identity와 output hash, strict Result, Context identity/hash/expiry, stored/rebuilt Arbiter input hash, route/invocation null과 fencing을 다시 검증한다. stale fencing completion은 0행이고 terminal output을 update·replace하지 않는다. |
+| DB-204 | ENTRY_ARBITER는 LlmRoleRoute, PromptProfile, ModelProfile, LlmInvocation 또는 별도 result/lineage table을 만들지 않는다. 향후 Finalizer는 기존 AgentRun, DecisionContext, ordered C/B/A stage IDs/hashes, exact Arbiter stage/output hash와 consensus policy/validity로 lineage를 검증한다. |
+
+### 11.9 Activation Gate와 sourced v7 Decision finalization
+
+Activation payload의 exact schema·ordering·hash source of truth는
+`CONFIGURATION_SPEC.md` CFG-104~111이고 Finalizer 행동·API mapping은
+`AI_DECISION_SPEC.md` AI-276~286이다. `V7_ENTRY_ACTIVATION`은 기존
+ConfigurationVersion과 AgentRun의 `activation_gate_version_id/hash`를 재사용하며 새 Gate
+table을 만들지 않는다.
+
+`sourced-entry-decision-v1` row의 exact persistence는 다음과 같다.
+
+| Decision field | exact value/nullability |
+| --- | --- |
+| `purpose`, `decision_kind` | `TRADING`, `ENTRY` |
+| `evaluation_request_id` | canonical `v7fin-` 64-char identity |
+| `decision_input_id` | DecisionContext의 DecisionInputSnapshot ID |
+| `input_snapshot_id`, `symbol`, `market` | frozen DecisionInputSnapshot provenance |
+| `schema_version` | `sourced-entry-decision-v1` |
+| `action` | ArbiterResult의 `BUY | WAIT | REJECT | UNKNOWN` exact value |
+| `reason_codes_json`, `valid_until` | ArbiterResult의 canonical reason list와 validity |
+| `source_agent_run_id`, `source_stage_run_id`, `source_stage_output_hash` | v7 TRADING run, exact ENTRY_ARBITER stage, canonical output hash; 모두 non-null |
+| `validation_status` | `VALID` |
+| `model_provider`, `model_id`, `prompt_version` | `null` |
+| `scout_output_json`, `core_output_json` | `null` |
+| `confidence`, `risk_level`, `latency_ms` | `null` |
+| `configuration_version_id`, `execution_mode`, `execution_outcome` | `null` |
+
+위 sourced Decision row는 불변이므로 후속 실행도 마지막 두 execution field를 update하지
+않고 기존 `decision_executions`에 mode/outcome을 append한다.
+
+Phase 9C additive migration은 `decisions.schema_version`의 저장 길이를 16에서 32로
+확대해 `sourced-entry-decision-v1`을 손실 없이 저장하고, `ck_decisions_action`에 `UNKNOWN`을 추가하며
+`model_provider`, `model_id`, `prompt_version`, `scout_output_json`, `core_output_json`,
+`confidence`, `risk_level`, `latency_ms`, `execution_outcome`만 nullable로 전환한다.
+`ck_decisions_execution_outcome`은 null 또는 기존 네 값만 허용하도록 바꾼다. source
+all-or-none FK와 두 partial unique index는 0039를 그대로 재사용한다. 새 Context column,
+FinalizationIdentity table, legacy column 삭제·rename과 legacy row backfill은 없다.
+
+간단한 representation CHECK는 source가 모두 null인 legacy row가 위 아홉 legacy field를
+모두 non-null로 유지하고, source가 모두 non-null인 row는
+`schema_version=sourced-entry-decision-v1`이며 위 아홉 field가 모두 null,
+`validation_status=VALID`, `purpose=TRADING`, `decision_kind=ENTRY`,
+`action IN (BUY, WAIT, REJECT, UNKNOWN)`임을 보장한다. 나머지
+cross-table DB-173 의미는 FK만으로 표현할 수 없으므로 Finalizer application validator가
+run DAG/purpose/context, stage role/run/state/null route/invocation과 canonical output hash를
+insert 전과 write boundary에 검사한다.
+
+Finalizer transaction은 다음 순서다.
+
+```text
+BEGIN
+1. source AgentRun lock
+2. purpose/DAG/analysis-context validation
+3. DecisionContext integrity and DB-time expiry validation
+4. C/B/A + ENTRY_ARBITER lineage/schema/output hash validation
+5. frozen/current Activation Gate lock and validation
+6. entry-finalization-identity-v1 build
+7. evaluation_request_id와 source unique 기존 Decision lookup
+8. existing row exact immutable payload/lineage comparison
+9. immutable Decision insert
+10. flush
+11. source, Gate identity/state/evidence와 expiry write-boundary recheck
+12. Decision, FINALIZATION_SUCCEEDED audit, AgentRun SUCCEEDED/completed_at COMMIT
+```
+
+step 11에서 DB-authoritative time이 Context/Arbiter/Gate validity 이상이거나 current ACTIVE
+Gate ID/hash/state/evidence가 frozen provenance와 달라지면 insert를 rollback한다. network,
+Provider와 Execution side effect는 transaction 안팎 모두 없다. terminal denial/failure는
+Decision 없이 AuditLog와 run terminal transition을 한 transaction으로 commit한다.
+
+동일 identity retry는 source lineage뿐 아니라 위 표의 모든 immutable Decision field가
+exact match일 때만 기존 row를 반환한다. mismatch는 기존 row를 update하지 않고
+`FINALIZATION_IDENTITY_CONFLICT`다. PostgreSQL concurrent insert의 loser는 IntegrityError를
+rollback하고 authoritative row를 재조회해 같은 exact 비교를 수행한다. commit outcome이
+불명확한 retry는 insert보다 `evaluation_request_id` 조회가 먼저다.
+이미 `SUCCEEDED`인 run의 exact Decision 재조회는 기존 row만 반환하고 completed_at 또는
+success audit을 추가하지 않는다. run lock과 terminal-state check로 authoritative
+`FINALIZATION_SUCCEEDED` audit은 run당 최대 하나다.
+
+Finalization audit은 기존 append-only `audit_logs`를 사용한다. `actor_type=SYSTEM`,
+`actor_id=AgentRun.owner_id`, `target=AgentRun.id`, `correlation_id=AgentRun.id`다. `action`과
+`result` exact mapping은 다음과 같다.
+
+| action | result | terminal/retry |
+| --- | --- | --- |
+| `FINALIZATION_SUCCEEDED` | `SUCCEEDED` | terminal success |
+| `ACTIVATION_GATE_CLOSED` | `BLOCKED` | terminal safety denial |
+| `ACTIVATION_GATE_SUPERSEDED` | `BLOCKED` | terminal safety denial |
+| `ACTIVATION_GATE_INVALID` | `INVALID` | terminal failure |
+| `SOURCE_EXPIRED` | `EXPIRED` | terminal failure |
+| `SOURCE_CONFLICTED` | `CONFLICTED` | terminal failure |
+| `FINALIZATION_IDENTITY_CONFLICT` | `CONFLICTED` | terminal failure |
+| `FINALIZATION_DB_RETRYABLE_FAILURE` | `RETRYABLE_FAILURE` | non-terminal retry |
+| `ACTIVATION_GATE_DB_RETRYABLE_FAILURE` | `RETRYABLE_FAILURE` | pre-run admission retry |
+
+`metadata_json`은 strict `finalization-audit-v1`로 `schema_version`, `agent_run_id`,
+`decision_id`, `evaluation_request_id`, `decision_context_id`, `source_stage_run_id`,
+`source_stage_output_hash`, `activation_gate_version_id`, `activation_gate_version_hash`,
+`retryable`의 정확히 열 field를 모두 가진다. unavailable value는 JSON null이고
+`retryable`은 위 두 `*_DB_RETRYABLE_FAILURE` action에서만 true다. success audit은 Decision/run과 같은 transaction,
+terminal failure audit은 terminal run transition과 같은 transaction이다. DB operation이
+rollback된 retryable failure는 별도 짧은 transaction으로 run error와 audit을 저장한다.
+metadata JSON은 UTF-8, `ensure_ascii=false`, key 사전순, compact separator로 canonicalize하고
+unknown/missing field를 허용하지 않는다.
+그 transaction조차 DB 장애로 불가능하면 운영 log만 임시 사용하고, DB가 복구된 첫
+reconciliation이 새 finalization 시도 전에 해당 failure audit을 영속한다.
+
+TRADING admission이 run 생성 전에 Gate 부재 또는 CLOSED로 거부되면 같은 AuditLog
+`action=ACTIVATION_GATE_CLOSED`, `result=BLOCKED`를 사용하고, malformed·evidence/hash
+invalid·ACTIVE ambiguity는 `action=ACTIVATION_GATE_INVALID`, `result=INVALID`를 사용한다.
+이때 `target=V7_ENTRY_ACTIVATION:MOCK`, `correlation_id`는 scheduler evaluation request UUID,
+`actor_type=SYSTEM`, `actor_id`는 대상 owner ID다. metadata는 같은
+`finalization-audit-v1` shape에서 `agent_run_id`, Decision/source identity와 frozen Gate가
+없으면 null이고 발견된 Gate ID/hash만 가능한 범위에서 기록한다. admission DB read/lock
+failure는 run을 만들지 않고 scheduler의 기존 retry/backoff를 사용하며, DB가 사용 가능한
+별도 transaction에서 `action=ACTIVATION_GATE_DB_RETRYABLE_FAILURE`,
+`result=RETRYABLE_FAILURE`, `retryable=true`로 영속한다.
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-205 | sourced v7 Decision은 위 exact physical mapping과 `sourced-entry-decision-v1` discriminator를 사용하며 semantic value가 없는 legacy field를 sentinel로 채우지 않는다. |
+| DB-206 | Phase 9C migration은 schema_version 길이 32 확대, UNKNOWN action, exact 아홉 nullable field, nullable execution outcome CHECK와 representation CHECK만 additive 적용하고 legacy row를 변경하지 않는다. |
+| DB-207 | Finalizer application validator는 DB-173의 cross-table run/stage/hash 의미와 Context/C/B/A/Arbiter/Gate validity를 insert 전과 write boundary에 검증한다. |
+| DB-208 | finalization transaction은 위 12-step ordering을 따르고 Decision·success audit·run terminal transition을 원자적으로 commit한다. |
+| DB-209 | 동일 identity 또는 source unique retry는 exact immutable payload까지 일치할 때만 기존 Decision을 반환하며 concurrent/ambiguous commit도 재조회 후 같은 비교를 사용한다. |
+| DB-210 | Finalizer outcome은 위 exact AuditLog action/result와 strict metadata로 영속하고 logs-only denial을 허용하지 않는다. |
+| DB-211 | Gate denial·source expiry/conflict·identity conflict는 Decision 0건과 terminal audit/run 상태이고 transient DB failure는 rollback 후 non-terminal retry 상태를 보존한다. |
+| DB-212 | sourced v7 row가 하나라도 있거나 UNKNOWN/nullable representation을 기존 schema가 표현할 수 없으면 downgrade를 명시적으로 거부하며 coercion, sentinel backfill 또는 lineage 삭제를 하지 않는다. |
+| DB-213 | run 생성 전 Gate admission denial과 transient DB failure도 위 exact AuditLog representation으로 영속하며 admission failure에서 partial AgentRun/stage를 남기지 않는다. |
+
+Activation acceptance set의 구체적인 test ID는 [테스트 계획](../TEST_PLAN.md)의 `Cresta v2 ENTRY Decision Architecture` 절을 따른다. AI 행동 의미는 [AI 판단 계약](AI_DECISION_SPEC.md), v7 stage 순서와 authority는 [다중 에이전트 오케스트레이션 명세](MULTI_AGENT_ORCHESTRATION_SPEC.md), Activation Gate와 ExecutionStage의 분리는 [판단 실행·승인 명세](DECISION_EXECUTION_SPEC.md)를 따른다.
+
+### 11.10 sourced ENTRY execution authority persistence
+
+Phase 10은 별도 ExecutionStage lifecycle table을 만들지 않는다. current stage는
+`ConfigurationVersion(SYSTEM, MOCK, V7_ENTRY_EXECUTION_STAGE)`, frozen lifecycle은 기존
+`decision_executions`를 사용한다. additive migration은 legacy row를 재분류하지 않고 다음
+shape를 추가한다.
+
+`decision_executions`에는 nullable `contract_version`,
+`execution_stage_version_id`(ConfigurationVersion RESTRICT FK),
+`execution_stage_payload_hash`를 추가한다. sourced row는
+`contract_version=sourced-entry-execution-v1`, existing `execution_key`는
+`entry-execution-identity-v1`의 `v7exe-<64 lowercase hex>`다. 기존 non-null `mode`와 `stage`는
+sourced contract에 한해 nullable로 바꾸고 conditional CHECK를 둔다. `NO_ACTION` 및
+config selection 전 `FAILED_SAFE`(`SOURCE_AUTHORITY_INVALID | DECISION_EXPIRED |
+EXECUTION_STAGE_UNAVAILABLE`)는 mode/stage/stage ID/hash가 모두 null이다. BUY가 authority
+selection을 통과한 lifecycle은 mode/stage/stage ID/hash가 모두 non-null이다. legacy row는
+mode/stage non-null을 계속 요구한다.
+`contract_version=sourced-entry-execution-v1`인 `decision_id` partial unique index로 Decision당
+exact-one을 DB에서도 강제한다. legacy row의 새 field는 null로 보존하고 기존 key 의미를
+바꾸지 않는다.
+
+`guard_evaluations.execution_id`는 nullable DecisionExecution FK로 유지하고 nullable
+`stop_trigger_id`(StopTrigger RESTRICT FK)를 추가한다. 신규 row conditional CHECK는 다음과
+같다.
+
+```text
+subject_type = DECISION_EXECUTION
+  => execution_id IS NOT NULL AND stop_trigger_id IS NULL
+     AND subject_id = execution_id
+
+subject_type = STOP_TRIGGER
+  => execution_id IS NULL AND stop_trigger_id IS NOT NULL
+     AND subject_id = stop_trigger_id
+```
+
+기존 valid Decision Guard는 그대로 둔다. historical SQLite STOP_TRIGGER row는 subject_id가
+실제 StopTrigger를 가리킬 때만 deterministic하게 `stop_trigger_id=subject_id`,
+`execution_id=null`로 교정하고, 대상이 없거나 ambiguous하면 migration을 명시적으로
+거부한다. PostgreSQL FK 위반을 SQLite 성공으로 정상 취급하지 않는다.
+
+`order_intents`에는 nullable `source_type`, `source_id`, `decision_execution_id`,
+`stop_trigger_id`, `guard_evaluation_id`, `approval_id`, `execution_policy_version_id`,
+`risk_policy_version_id`, `execution_stage_version_id`, `execution_stage_payload_hash`와
+`authority_key`를 추가한다. 신규 authority row의 exact source enum은
+`DECISION_EXECUTION | STOP_TRIGGER | BROKER_DIAGNOSTIC | LEGACY_EXECUTION | BROKER_IMPORTED`다.
+명시적 FK는 각각 기존 source/Guard/Approval/ConfigurationVersion을 RESTRICT로 참조한다.
+`authority_key`는 initial authoritative intent identity이고 신규 non-import source에서 non-null
+unique다. TradingOrder는 기존 non-null intent_id를 통해 provenance를 따라가며 lineage를
+중복 저장하지 않는다.
+
+DECISION_EXECUTION source conditional contract는 decision_execution_id와
+guard_evaluation_id가 non-null이고 source_id=decision_execution_id다. automatic이면
+approval_id=null, manual이면 approval_id가 non-null이고 Order 생성 transaction에서
+APPROVED여야 한다. STOP_TRIGGER source는 stop_trigger_id와 Guard가 non-null이고 stage/risk
+provenance를 가진다. BROKER_DIAGNOSTIC은 별도 diagnostic request identity를 source_id와
+authority_key에 보존한다. BROKER_IMPORTED는 이미 Broker에서 관측한 주문이고 신규 send
+대상이 아니다.
+
+`orders.status`에는 unsent terminal `INVALIDATED`를 additive로 추가한다. CREATED에서만
+authority revocation으로 전이할 수 있고 quantity invariant는 requested=remaining인 채
+유지한다. event exact type은 `ORDER_AUTHORITY_REVOKED_BEFORE_SEND`다. migration 이전
+unclassified row의 provenance column은 null로 남긴다. unclassified CREATED row는 migration
+중 source를 추측하지 않고 이후 pre-send/reconciliation에서
+`INVALIDATED / ORDER_SOURCE_UNCLASSIFIED`로 닫는다. 이미 SUBMITTING 이상인 row는 기존
+ambiguous-send/reconciliation lifecycle을 유지한다.
+
+Approval의 기존 unique execution_id와 version을 재사용하고 `reauth_proof_id`를 실제
+`reauth_proofs.id` RESTRICT FK, `order_id`를 `orders.id` RESTRICT FK로 정합화한다. application
+CAS는 PENDING+owner+expected_version 조건부 갱신이며 같은 transaction에서 proof를 소비한다.
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-214 | sourced DecisionExecution은 `contract_version=sourced-entry-execution-v1`, canonical `v7exe-` key와 sourced decision_id partial unique로 Decision당 exact-one을 강제한다. policy/stage 변경은 새 row를 허용하지 않는다. |
+| DB-215 | authority selection을 통과한 sourced BUY DecisionExecution은 current stage ConfigurationVersion ID/hash와 mode/stage를 non-null freeze한다. NO_ACTION과 pre-selection FAILED_SAFE는 mode/stage/provenance가 모두 null이며 conditional representation CHECK로 default stage 합성을 금지한다. |
+| DB-216 | stage control-plane은 기존 ConfigurationVersion exact-one ACTIVE lifecycle을 재사용하며 별도 ExecutionStage table을 만들지 않는다. |
+| DB-217 | GuardEvaluation은 nullable execution_id와 stop_trigger_id의 위 conditional subject CHECK/FK를 사용한다. StopTrigger ID를 DecisionExecution FK에 저장하는 현행 misuse는 P0 migration blocker다. |
+| DB-218 | historical valid STOP_TRIGGER subject는 실제 target exact match일 때만 deterministic 교정하고 orphan/ambiguous row가 있으면 migration을 거부한다. legacy Decision Guard는 재작성하지 않는다. |
+| DB-219 | OrderIntent는 위 exact source/provenance columns와 source enum을 저장하고 authority_key unique로 같은 initial authority의 intent/order 중복을 차단한다. |
+| DB-220 | DECISION_EXECUTION source는 execution/Guard와 optional Approval link가 서로 같은 authority chain이어야 한다. automatic은 approval null, manual은 APPROVED Approval required를 application validator와 FK/unique로 강제한다. |
+| DB-221 | STOP_TRIGGER, BROKER_DIAGNOSTIC, LEGACY_EXECUTION, BROKER_IMPORTED는 source별 validator를 사용하며 unknown/null 신규 source는 authority를 갖지 않는다. BROKER_IMPORTED는 send candidate가 아니다. |
+| DB-222 | TradingOrder는 OrderIntent FK를 통해 source chain을 결정적으로 추적하고 Decision/Arbiter lineage를 중복 저장하지 않는다. replacement Order는 같은 intent/order_group lifecycle이며 새 DecisionExecution이 아니다. |
+| DB-223 | orders CHECK에 unsent terminal `INVALIDATED`를 추가하고 CREATED authority revocation은 `ORDER_AUTHORITY_REVOKED_BEFORE_SEND` OrderEvent와 audit을 같은 transaction에 저장한다. |
+| DB-224 | migration 이전 null-source CREATED Order는 backfill하지 않고 runtime reconciliation에서 INVALIDATED/ORDER_SOURCE_UNCLASSIFIED로 닫는다. SUBMITTING 이후 row는 existing external-side-effect recovery를 유지한다. |
+| DB-225 | Approval은 execution당 최대 하나를 유지하고 owner+PENDING+expected_version CAS, target-bound one-time reauth proof 소비와 Order 생성/상태 전이를 한 transaction에서 처리한다. reauth_proof_id와 order_id는 실제 FK로 정합화한다. |
+| DB-226 | execution handoff transaction은 source validation, config freeze, lifecycle create/reuse, initial Guard, terminal/Approval/automatic intent, audit을 함께 commit하며 helper의 중간 commit을 허용하지 않는다. |
+| DB-227 | Approval transaction은 row lock/CAS, owner/proof, current authority, Guard, OrderIntent/CREATED Order와 execution/approval/audit 전이를 함께 commit하거나 rollback한다. |
+| DB-228 | broker pre-send transaction은 Order→Intent→source와 current stage/policy/emergency/expiry를 검증하고 authority가 있으면 SUBMITTING/fencing을 commit한다. network call 동안 DB lock을 유지하지 않는다. |
+| DB-229 | finalized sourced Decision 중 authoritative execution이 없는 row를 찾는 reconciliation은 exact-one unique와 lookup-first loser recovery를 사용하며 WAIT·REJECT·UNKNOWN도 NO_ACTION으로 복구한다. |
+| DB-230 | Phase 10 PostgreSQL acceptance는 sourced exact-one, stage locking, Approval CAS, intent/order unique, Guard subject FK, fixed-stop 교정, concurrent creation, pre-send fencing과 ambiguous-send reconciliation을 실제 PostgreSQL에서 검증한다. |
+| DB-231 | `account_funds_snapshots`와 `order_capacity_snapshots`는 서로 분리된 append-only 금융 증거다. 기존 주문·체결·포지션에서 값을 추정하거나 backfill하지 않고 raw Broker payload도 저장하지 않는다. |
+| DB-232 | account funds identity는 broker/account_alias/environment/source_api_id/query_type/received_at이고 `entr`, `ord_alow_amt`, `pymn_alow_amt` 및 D+1/D+2 예수·인출 가능 값을 nullable `BIGINT`로 저장한다. missing과 authoritative zero를 구분하고 signed amount를 보존한다. |
+| DB-233 | capacity identity는 broker/account_alias/environment/source_api_id/symbol/side/trade_type/requested_price와 nullable io_amount/requested_quantity/expected_buy_price 전체다. 응답의 `ord_alowa`, 예수·인출 가능 금액, 20/30/40/50/60/감면60/100% margin별 amount와 quantity를 구별해 nullable `BIGINT`로 저장한다. |
+| DB-234 | capacity quantity는 null 또는 0 이상이고 요청 price는 양수다. usable cash-only 필드가 누락돼도 NULL evidence를 보존할 수 있으나 이를 usable authority로 승격하지 않는다. |
+| DB-235 | latest funds selector는 broker/account/environment exact match 후 `received_at DESC, id DESC`, capacity selector는 모든 request identity의 NULL-safe exact match 후 같은 정렬을 사용한다. 다른 계좌·환경·symbol·side·price fallback은 금지한다. |
+| DB-236 | snapshot에는 time-dependent `is_fresh`를 저장하지 않는다. future Guard는 persisted `received_at`과 server current time으로 age를 계산한다. |
+| DB-237 | 금융 조회 network call 동안 DB row lock이나 장기 transaction을 유지하지 않는다. successful normalize 뒤 짧은 append transaction으로 저장하며 실패 시 새 row는 0건이다. |
+| DB-238 | `20260828_0042`는 0041 이후 두 table과 selector index를 additive 생성하며 backfill은 없다. table에 금융 evidence가 있으면 destructive downgrade를 명시적으로 거부한다. |
+| DB-239 | financial freshness는 snapshot에 `is_fresh`를 저장하지 않고 GRD-107~116의 evaluation-time 계산을 사용한다. 기존 Guard `rule_results`/evidence와 audit JSON은 frozen/current policy version·TTL, effective TTL, snapshot provenance, evaluation time과 age를 재구성 가능하게 보존한다. |
+| DB-240 | future `received_at`은 usable evidence가 아니고 required nullable financial field는 fresh row에서도 BLOCK이다. authoritative zero는 NULL과 구분해 0으로 보존하며 account funds와 exact capacity를 상호 대체하지 않는다. |
+| DB-241 | funds/capacity refresh는 network call과 normalization/persist를 authority transaction 밖에서 끝낸 뒤, 짧은 Guard/Approval transaction이 exact persisted row를 다시 선택한다. refresh 실패는 partial Guard PASS나 Order row를 만들지 않는다. |
+| DB-242 | OrderIntent authority identity의 canonical material·serialization·digest는 EXE-263~273을 단일 기준으로 한다. existing `authority_key` 128-character column과 unique foundation은 72-character `ordauth-<sha256>`를 수용하므로 Phase 10D.2 schema migration은 없다. |
+| DB-243 | authority_key는 source grant uniqueness, request_hash/idempotency/client_order_id는 exact order/submission lifecycle을 담당한다. 같은 key의 immutable terms conflict는 새 row나 새 key 없이 fail-closed하고 transaction을 rollback한다. |
+| DB-244 | pre-contract row에 authority_key를 추측 backfill하지 않는다. Phase 10B source taxonomy, execution당 exact-one Approval과 initial intent/order authority, Phase 10D.1B append-only financial tables·exact selectors는 변경하지 않는다. |
+| DB-245 | Phase 10F는 기존 0041/0042 representation으로 구현하며 schema migration이 없다. BROKER_SEND Guard는 기존 typed subject FK/CHECK를 사용하고 revocation reason은 OrderEvent/Audit JSON 및 lifecycle result_code에 저장한다. |
+| DB-246 | pre-send semantic BLOCK의 Guard, Order INVALIDATED, authority event/audit와 source lifecycle 회수는 한 transaction이다. DB failure는 모두 rollback해 partial Guard 또는 terminal state를 남기지 않는다. |
+| DB-247 | revocation event source identity는 Order별 deterministic key로 exactly-once를 보장한다. helper는 CREATED만 잠그고 INVALIDATED/SUBMITTING 이상을 변경하지 않는다. |
+| DB-248 | Phase 10F SQLite 검증은 PostgreSQL `SKIP LOCKED`, row-lock ordering, CREATED→INVALIDATED/SUBMITTING race, lease fencing과 ambiguous commit의 production concurrency evidence를 대체하지 않는다. |
+| DB-249 | additive migration `20260829_0043`은 `order_events.event_type`만 `varchar(32)`에서 `varchar(64)`로 확대해 exact `ORDER_AUTHORITY_REVOKED_BEFORE_SEND` 35자를 손실 없이 저장한다. event 이름·의미·기존 row를 변경하거나 backfill하지 않는다. ORM capacity도 64로 일치시킨다. |
+| DB-250 | `20260829_0043` downgrade는 모든 `order_events.event_type` 길이가 32 이하일 때만 `varchar(32)`로 축소한다. 32자를 초과하는 row가 하나라도 있으면 silent truncation 없이 명시적으로 거부하고 기존 schema/data를 보존한다. |
+
+### 11.11 AuditLog result capacity correction
+
+`audit_logs.result`에는 API 입력이나 Broker 원문이 아니라 아래 server-owned exact literal만
+영속한다. 2026-08-29 inventory는 93개 unique literal이고 최장 길이는 35자다. 괄호는 문자
+길이다. 같은 literal이 여러 경로에 나타나면 한 번만 계수한다.
+
+| persistence path / normative owner | exact result literals |
+| --- | --- |
+| 인증·control-plane·Finalizer (`SECURITY_SPEC`, DB-210/213) | `BLOCKED`(7), `CONFLICTED`(10), `EXPIRED`(7), `FAILED`(6), `INVALID`(7), `ORDER_CREATED`(13), `PASSED`(6), `PENDING`(7), `REJECTED`(8), `RETRYABLE_FAILURE`(17), `SUCCEEDED`(9), `SUCCESS`(7) |
+| DecisionExecution terminal audit (EXE-221~250) | `APPROVAL_PENDING`(16), `DISABLED`(8), `FAILED_SAFE`(11), `GUARD_BLOCKED`(13), `NO_ACTION`(9), `SHADOW_RECORDED`(15) |
+| Approval invalidation (EXE-232/249/250/275) | `ACTION_MODE_DOWNGRADED`(22), `APPROVAL_EXPIRED`(16), `EMERGENCY_STOP_ACTIVE`(21), `EXECUTION_STAGE_DOWNGRADED`(26), `EXECUTION_STAGE_UNAVAILABLE`(27), `RISK_POLICY_UNAVAILABLE`(23), `SOURCE_AUTHORITY_INVALID`(24) |
+| BUY Guard의 persisted blocking result (Guard risk contract) | `BROKER_CONNECTION_OK`(20), `BROKER_NOT_READY`(16), `CONSECUTIVE_LOSS_LIMIT`(22), `DAILY_ENTRIES_LIMIT`(19), `DAILY_LOSS_LIMIT`(16), `DECISION_EXPIRED`(16), `EMERGENCY_STOP_ACTIVE`(21), `ENVIRONMENT_NOT_MOCK`(20), `MARKET_DATA_STALE`(17), `NO_ACTIVE_DAILY_LOSS_EVENT`(26), `OPEN_POSITIONS_LIMIT`(20), `ORDER_SIZE_NOT_CONFIGURED`(25), `SNAPSHOT_MISSING`(16), `SPREAD_LIMIT`(12), `SYMBOL_EXPOSURE_LIMIT`(21), `SYMBOL_NOT_WATCHED`(18), `TOTAL_EXPOSURE_LIMIT`(20) |
+| SELL Guard의 persisted blocking result (Guard/order contract) | `BROKER_READY`(12), `MARKET_DATA_FRESH`(17), `MARKET_SESSION_TRADABLE`(23), `MARKETABLE_SELL_PRICE_AVAILABLE`(31), `NO_ACTIVE_OR_UNKNOWN_ORDER`(26), `NOT_RECONCILING`(15), `POSITION_FOUND`(14), `POSITION_ID_MATCH`(17), `POSITION_MANAGED_QUANTITY_POSITIVE`(34), `POSITION_VERSION_MATCH`(22), `QUANTITY_BELOW_ONE`(18), `SELL_QUANTITY_AVAILABLE`(23), `SELL_RATIO_VALID`(16) |
+| shared/financial/Broker Guard blocking result (GRD-107~116, EXE-257/279) | `ACCOUNT_FUNDS_FRESH`(19), `ACTION_NOT_IMPLEMENTED`(22), `CURRENT_ORDER_AMOUNT_ALLOWED`(28), `FINANCIAL_CONTEXT_INVALID`(25), `FROZEN_ORDER_AMOUNT_ALLOWED`(27), `GENERIC_ORDERABLE_AMOUNT_SUFFICIENT`(35), `INSTRUMENT_TRADABLE`(19), `MARGIN_100_AMOUNT_SUFFICIENT`(28), `MARGIN_100_QUANTITY_SUFFICIENT`(30), `ORDER_CAPACITY_FRESH`(20), `ORDERABLE_CASH_SUFFICIENT`(25), `PRICE_DEVIATION_EXCEEDED`(24), `STRICT_MOCK_AUTHORITY`(21) |
+| Broker pre-send direct revocation (EXE-274~279, ORD-053/054, STM-038) | `APPROVAL_AUTHORITY_REVOKED`(26), `AUTOMATIC_AUTHORITY_REVOKED`(27), `BROKER_DIAGNOSTIC_AUTHORITY_INVALID`(35), `CURRENT_POLICY_UNAVAILABLE`(26), `EXECUTION_STAGE_PROVENANCE_INVALID`(34), `ORDER_AUTHORITY_KEY_INVALID`(27), `ORDER_SOURCE_NOT_SENDABLE`(25), `ORDER_SOURCE_UNCLASSIFIED`(25), `SOURCE_OWNER_UNAVAILABLE`(24) |
+| Broker current BUY Guard derived result (EXE-274/279) | `CURRENT_BROKER_CONNECTION_OK`(28), `CURRENT_BROKER_NOT_READY`(24), `CURRENT_CONSECUTIVE_LOSS_LIMIT`(30), `CURRENT_DAILY_ENTRIES_LIMIT`(27), `CURRENT_DAILY_LOSS_LIMIT`(24), `CURRENT_DECISION_EXPIRED`(24), `CURRENT_EMERGENCY_STOP_ACTIVE`(29), `CURRENT_ENVIRONMENT_NOT_MOCK`(28), `CURRENT_MARKET_DATA_STALE`(25), `CURRENT_NO_ACTIVE_DAILY_LOSS_EVENT`(34), `CURRENT_OPEN_POSITIONS_LIMIT`(28), `CURRENT_ORDER_SIZE_NOT_CONFIGURED`(33), `CURRENT_SNAPSHOT_MISSING`(24), `CURRENT_SPREAD_LIMIT`(20), `CURRENT_SYMBOL_EXPOSURE_LIMIT`(29), `CURRENT_SYMBOL_NOT_WATCHED`(26), `CURRENT_TOTAL_EXPOSURE_LIMIT`(28) |
+
+| ID | 요구사항 |
+| --- | --- |
+| DB-251 | additive migration `20260829_0044`는 `audit_logs.result`만 `varchar(24)`에서 `varchar(64)`로 확대한다. 위 exact result literal, 기존 row와 authority 의미를 변경하거나 backfill하지 않고 ORM도 64로 일치시킨다. |
+| DB-252 | `20260829_0044` downgrade는 모든 `audit_logs.result` 길이가 24 이하일 때만 `varchar(24)`로 축소한다. 24자를 초과하는 row가 하나라도 있으면 명시적으로 거부하고 기존 schema/data를 보존한다. |
+
 ## 거래시장 선택 평가
 
 `venue_selection_evaluations`는 [거래시장 자동 선택 명세](VENUE_SELECTION_SPEC.md)의 SHADOW 평가를 보존한다. 사용자·종목·방향·수량·주문유형·긴급도·세션·거래일 상태·캘린더 정책과 판정 근거·NXT 적격성·SOR 지원 여부·양 시장 snapshot 참조·선택 결과·reason code·canonical input hash를 저장한다. 이 테이블은 주문 권한을 가지지 않으며 `order_creation_allowed=false`로 고정한다.

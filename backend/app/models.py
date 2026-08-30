@@ -155,7 +155,7 @@ class AuditLog(Base):
     actor_id: Mapped[str | None] = mapped_column(String(36))
     action: Mapped[str] = mapped_column(String(64), nullable=False)
     target: Mapped[str | None] = mapped_column(String(128))
-    result: Mapped[str] = mapped_column(String(24), nullable=False)
+    result: Mapped[str] = mapped_column(String(64), nullable=False)
     request_ip: Mapped[str | None] = mapped_column(String(64))
     user_agent: Mapped[str | None] = mapped_column(String(256))
     correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
@@ -250,7 +250,7 @@ class Decision(Base):
     __table_args__ = (
         CheckConstraint(
             "action IN ('BUY','WAIT','REJECT','RISK_BLOCK','HOLD','TIGHTEN_STOP',"
-            "'PARTIAL_SELL','FULL_SELL','EMERGENCY_EXIT')",
+            "'PARTIAL_SELL','FULL_SELL','EMERGENCY_EXIT','UNKNOWN')",
             name="ck_decisions_action",
         ),
         CheckConstraint(
@@ -259,8 +259,53 @@ class Decision(Base):
             name="ck_decisions_execution_mode",
         ),
         CheckConstraint(
-            "execution_outcome IN ('NO_ACTION','DISABLED','APPROVAL_REQUIRED','GUARD_BLOCKED')",
+            "execution_outcome IS NULL OR execution_outcome IN "
+            "('NO_ACTION','DISABLED','APPROVAL_REQUIRED','GUARD_BLOCKED')",
             name="ck_decisions_execution_outcome",
+        ),
+        CheckConstraint(
+            "(source_agent_run_id IS NULL AND source_stage_run_id IS NULL "
+            "AND source_stage_output_hash IS NULL) OR "
+            "(source_agent_run_id IS NOT NULL AND source_stage_run_id IS NOT NULL "
+            "AND source_stage_output_hash IS NOT NULL)",
+            name="ck_decisions_source_lineage_all_or_none",
+        ),
+        CheckConstraint(
+            "((source_agent_run_id IS NULL AND source_stage_run_id IS NULL "
+            "AND source_stage_output_hash IS NULL "
+            "AND schema_version <> 'sourced-entry-decision-v1' "
+            "AND model_provider IS NOT NULL AND model_id IS NOT NULL "
+            "AND prompt_version IS NOT NULL AND scout_output_json IS NOT NULL "
+            "AND core_output_json IS NOT NULL AND confidence IS NOT NULL "
+            "AND risk_level IS NOT NULL AND latency_ms IS NOT NULL "
+            "AND execution_outcome IS NOT NULL) OR "
+            "(source_agent_run_id IS NOT NULL AND source_stage_run_id IS NOT NULL "
+            "AND source_stage_output_hash IS NOT NULL "
+            "AND schema_version = 'sourced-entry-decision-v1' "
+            "AND purpose = 'TRADING' AND decision_kind = 'ENTRY' "
+            "AND action IN ('BUY','WAIT','REJECT','UNKNOWN') "
+            "AND validation_status = 'VALID' "
+            "AND model_provider IS NULL AND model_id IS NULL "
+            "AND prompt_version IS NULL AND scout_output_json IS NULL "
+            "AND core_output_json IS NULL AND confidence IS NULL "
+            "AND risk_level IS NULL AND latency_ms IS NULL "
+            "AND execution_outcome IS NULL AND execution_mode IS NULL "
+            "AND configuration_version_id IS NULL))",
+            name="ck_decisions_representation",
+        ),
+        Index(
+            "uq_decisions_source_agent_run",
+            "source_agent_run_id",
+            unique=True,
+            sqlite_where=text("source_agent_run_id IS NOT NULL"),
+            postgresql_where=text("source_agent_run_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_decisions_source_stage_run",
+            "source_stage_run_id",
+            unique=True,
+            sqlite_where=text("source_stage_run_id IS NOT NULL"),
+            postgresql_where=text("source_stage_run_id IS NOT NULL"),
         ),
         Index("ix_decisions_symbol_created", "symbol", "created_at"),
     )
@@ -277,23 +322,47 @@ class Decision(Base):
     symbol: Mapped[str] = mapped_column(String(16), nullable=False)
     market: Mapped[str] = mapped_column(String(16), nullable=False)
     decision_kind: Mapped[str] = mapped_column(String(16), nullable=False)
-    model_provider: Mapped[str] = mapped_column(String(32), nullable=False)
-    model_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    prompt_version: Mapped[str] = mapped_column(String(32), nullable=False)
-    schema_version: Mapped[str] = mapped_column(String(16), nullable=False)
-    scout_output_json: Mapped[str] = mapped_column(Text, nullable=False)
-    core_output_json: Mapped[str] = mapped_column(Text, nullable=False)
+    model_provider: Mapped[str | None] = mapped_column(String(32))
+    model_id: Mapped[str | None] = mapped_column(String(64))
+    prompt_version: Mapped[str | None] = mapped_column(String(32))
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    scout_output_json: Mapped[str | None] = mapped_column(Text)
+    core_output_json: Mapped[str | None] = mapped_column(Text)
     action: Mapped[str] = mapped_column(String(32), nullable=False)
-    confidence: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
-    risk_level: Mapped[str] = mapped_column(String(16), nullable=False)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(6, 5))
+    risk_level: Mapped[str | None] = mapped_column(String(16))
     reason_codes_json: Mapped[str] = mapped_column(Text, nullable=False)
     valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     configuration_version_id: Mapped[str | None] = mapped_column(String(36))
     execution_mode: Mapped[str | None] = mapped_column(String(24))
-    execution_outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    execution_outcome: Mapped[str | None] = mapped_column(String(32))
     validation_status: Mapped[str] = mapped_column(String(16), nullable=False)
-    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    source_agent_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "agent_runs.id",
+            name="fk_decisions_source_agent_run",
+            ondelete="RESTRICT",
+            use_alter=True,
+        )
+    )
+    source_stage_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "agent_stage_runs.id",
+            name="fk_decisions_source_stage_run",
+            ondelete="RESTRICT",
+            use_alter=True,
+        )
+    )
+    source_stage_output_hash: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    source_agent_run: Mapped[AgentRun | None] = relationship(
+        foreign_keys=[source_agent_run_id]
+    )
+    source_stage_run: Mapped[AgentStageRun | None] = relationship(
+        foreign_keys=[source_stage_run_id]
+    )
 
 
 class DecisionExecution(Base):
@@ -301,11 +370,11 @@ class DecisionExecution(Base):
     __table_args__ = (
         UniqueConstraint("execution_key", name="uq_decision_executions_key"),
         CheckConstraint(
-            "mode IN ('AUTOMATIC','MANUAL_APPROVAL','DISABLED')",
+            "mode IS NULL OR mode IN ('AUTOMATIC','MANUAL_APPROVAL','DISABLED')",
             name="ck_decision_executions_mode",
         ),
         CheckConstraint(
-            "stage IN ('SHADOW','APPROVAL_ONLY','MOCK_AUTOMATIC')",
+            "stage IS NULL OR stage IN ('SHADOW','APPROVAL_ONLY','MOCK_AUTOMATIC')",
             name="ck_decision_executions_stage",
         ),
         CheckConstraint(
@@ -314,7 +383,30 @@ class DecisionExecution(Base):
             "'INVALIDATED','ORDER_CREATED','FAILED_SAFE')",
             name="ck_decision_executions_state",
         ),
+        CheckConstraint(
+            "((contract_version IS NULL AND mode IS NOT NULL AND stage IS NOT NULL "
+            "AND execution_stage_version_id IS NULL "
+            "AND execution_stage_payload_hash IS NULL) OR "
+            "(contract_version = 'sourced-entry-execution-v1' AND "
+            "(((state = 'NO_ACTION' OR (state = 'FAILED_SAFE' AND result_code IN "
+            "('SOURCE_AUTHORITY_INVALID','DECISION_EXPIRED','EXECUTION_STAGE_UNAVAILABLE'))) "
+            "AND mode IS NULL AND stage IS NULL AND execution_stage_version_id IS NULL "
+            "AND execution_stage_payload_hash IS NULL) OR "
+            "(state <> 'NO_ACTION' AND NOT (state = 'FAILED_SAFE' AND result_code IN "
+            "('SOURCE_AUTHORITY_INVALID','DECISION_EXPIRED','EXECUTION_STAGE_UNAVAILABLE')) "
+            "AND mode IS NOT NULL AND stage IS NOT NULL "
+            "AND execution_stage_version_id IS NOT NULL "
+            "AND execution_stage_payload_hash IS NOT NULL))))",
+            name="ck_decision_executions_representation",
+        ),
         Index("ix_decision_executions_decision", "decision_id", "created_at"),
+        Index(
+            "uq_decision_executions_sourced_decision",
+            "decision_id",
+            unique=True,
+            sqlite_where=text("contract_version = 'sourced-entry-execution-v1'"),
+            postgresql_where=text("contract_version = 'sourced-entry-execution-v1'"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
@@ -327,13 +419,22 @@ class DecisionExecution(Base):
     symbol: Mapped[str] = mapped_column(String(16), nullable=False)
     market: Mapped[str] = mapped_column(String(16), nullable=False)
     action: Mapped[str] = mapped_column(String(32), nullable=False)
-    mode: Mapped[str] = mapped_column(String(24), nullable=False)
-    stage: Mapped[str] = mapped_column(String(24), nullable=False)
+    mode: Mapped[str | None] = mapped_column(String(24))
+    stage: Mapped[str | None] = mapped_column(String(24))
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="ROUTING")
     result_code: Mapped[str | None] = mapped_column(String(64))
+    contract_version: Mapped[str | None] = mapped_column(String(40))
     execution_policy_version_id: Mapped[str | None] = mapped_column(String(36))
     risk_policy_version_id: Mapped[str | None] = mapped_column(String(36))
     strategy_config_version_id: Mapped[str | None] = mapped_column(String(36))
+    execution_stage_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "configuration_versions.id",
+            name="fk_decision_executions_stage_version",
+            ondelete="RESTRICT",
+        )
+    )
+    execution_stage_payload_hash: Mapped[str | None] = mapped_column(String(64))
     guard_evaluation_id: Mapped[str | None] = mapped_column(String(36))
     approval_id: Mapped[str | None] = mapped_column(String(36))
     order_intent_id: Mapped[str | None] = mapped_column(String(36))
@@ -349,12 +450,27 @@ class GuardEvaluation(Base):
     __tablename__ = "guard_evaluations"
     __table_args__ = (
         CheckConstraint("result IN ('PASSED','BLOCKED')", name="ck_guard_evaluations_result"),
+        CheckConstraint(
+            "((subject_type = 'DECISION_EXECUTION' AND execution_id IS NOT NULL "
+            "AND stop_trigger_id IS NULL AND subject_id = execution_id) OR "
+            "(subject_type = 'STOP_TRIGGER' AND execution_id IS NULL "
+            "AND stop_trigger_id IS NOT NULL AND subject_id = stop_trigger_id) OR "
+            "(subject_type NOT IN ('DECISION_EXECUTION','STOP_TRIGGER') "
+            "AND execution_id IS NOT NULL AND stop_trigger_id IS NULL))",
+            name="ck_guard_evaluations_typed_subject",
+        ),
         Index("ix_guard_evaluations_execution", "execution_id", "evaluated_at"),
+        Index("ix_guard_evaluations_stop_trigger", "stop_trigger_id", "evaluated_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
-    execution_id: Mapped[str] = mapped_column(
-        ForeignKey("decision_executions.id", ondelete="CASCADE"), nullable=False
+    execution_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decision_executions.id", ondelete="CASCADE")
+    )
+    stop_trigger_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "stop_triggers.id", name="fk_guard_evaluations_stop_trigger", ondelete="RESTRICT"
+        )
     )
     phase: Mapped[str] = mapped_column(String(24), nullable=False)
     subject_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -390,8 +506,19 @@ class Approval(Base):
     scope_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     actor_id: Mapped[str | None] = mapped_column(String(36))
-    reauth_proof_id: Mapped[str | None] = mapped_column(String(36))
-    order_id: Mapped[str | None] = mapped_column(String(36))
+    reauth_proof_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "reauth_proofs.id", name="fk_approvals_reauth_proof", ondelete="RESTRICT"
+        )
+    )
+    order_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "orders.id",
+            name="fk_approvals_order",
+            ondelete="RESTRICT",
+            use_alter=True,
+        )
+    )
     result_code: Mapped[str | None] = mapped_column(String(64))
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -503,6 +630,126 @@ class BrokerWorkerState(Base):
     )
 
 
+class AccountFundsSnapshot(Base):
+    __tablename__ = "account_funds_snapshots"
+    __table_args__ = (
+        CheckConstraint("broker = 'KIWOOM'", name="ck_account_funds_broker"),
+        CheckConstraint("environment = 'MOCK'", name="ck_account_funds_environment"),
+        CheckConstraint("source_api_id = 'kt00001'", name="ck_account_funds_source"),
+        CheckConstraint("query_type IN ('2','3')", name="ck_account_funds_query_type"),
+        Index(
+            "ix_account_funds_authority_latest",
+            "broker",
+            "account_alias",
+            "environment",
+            "received_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    broker: Mapped[str] = mapped_column(String(24), nullable=False)
+    account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
+    environment: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_api_id: Mapped[str] = mapped_column(String(10), nullable=False)
+    query_type: Mapped[str] = mapped_column(String(1), nullable=False)
+    deposit: Mapped[int | None] = mapped_column(BigInteger)
+    generic_orderable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    withdrawable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    d1_estimated_deposit: Mapped[int | None] = mapped_column(BigInteger)
+    d1_buy_settlement_amount: Mapped[int | None] = mapped_column(BigInteger)
+    d1_sell_settlement_amount: Mapped[int | None] = mapped_column(BigInteger)
+    d1_withdrawable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    d2_estimated_deposit: Mapped[int | None] = mapped_column(BigInteger)
+    d2_buy_settlement_amount: Mapped[int | None] = mapped_column(BigInteger)
+    d2_sell_settlement_amount: Mapped[int | None] = mapped_column(BigInteger)
+    d2_withdrawable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+
+class OrderCapacitySnapshot(Base):
+    __tablename__ = "order_capacity_snapshots"
+    __table_args__ = (
+        CheckConstraint("broker = 'KIWOOM'", name="ck_order_capacity_broker"),
+        CheckConstraint("environment = 'MOCK'", name="ck_order_capacity_environment"),
+        CheckConstraint("source_api_id = 'kt00010'", name="ck_order_capacity_source"),
+        CheckConstraint("side IN ('BUY','SELL')", name="ck_order_capacity_side"),
+        CheckConstraint("trade_type IN ('1','2')", name="ck_order_capacity_trade_type"),
+        CheckConstraint("requested_price > 0", name="ck_order_capacity_price"),
+        CheckConstraint(
+            "requested_quantity IS NULL OR requested_quantity > 0",
+            name="ck_order_capacity_requested_quantity",
+        ),
+        CheckConstraint(
+            "expected_buy_price IS NULL OR expected_buy_price > 0",
+            name="ck_order_capacity_expected_buy_price",
+        ),
+        CheckConstraint(
+            "(side = 'BUY' AND trade_type = '2') OR (side = 'SELL' AND trade_type = '1')",
+            name="ck_order_capacity_side_trade_type",
+        ),
+        CheckConstraint(
+            "(margin_20_orderable_quantity IS NULL OR margin_20_orderable_quantity >= 0) AND "
+            "(margin_30_orderable_quantity IS NULL OR margin_30_orderable_quantity >= 0) AND "
+            "(margin_40_orderable_quantity IS NULL OR margin_40_orderable_quantity >= 0) AND "
+            "(margin_50_orderable_quantity IS NULL OR margin_50_orderable_quantity >= 0) AND "
+            "(margin_60_orderable_quantity IS NULL OR margin_60_orderable_quantity >= 0) AND "
+            "(reduced_margin_60_orderable_quantity IS NULL OR "
+            "reduced_margin_60_orderable_quantity >= 0) AND "
+            "(margin_100_orderable_quantity IS NULL OR margin_100_orderable_quantity >= 0)",
+            name="ck_order_capacity_quantities_nonnegative",
+        ),
+        Index(
+            "ix_order_capacity_authority_latest",
+            "broker",
+            "account_alias",
+            "environment",
+            "symbol",
+            "side",
+            "requested_price",
+            "received_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    broker: Mapped[str] = mapped_column(String(24), nullable=False)
+    account_alias: Mapped[str] = mapped_column(String(64), nullable=False)
+    environment: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_api_id: Mapped[str] = mapped_column(String(10), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    trade_type: Mapped[str] = mapped_column(String(1), nullable=False)
+    requested_price: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    io_amount: Mapped[int | None] = mapped_column(BigInteger)
+    requested_quantity: Mapped[int | None] = mapped_column(BigInteger)
+    expected_buy_price: Mapped[int | None] = mapped_column(BigInteger)
+    orderable_cash: Mapped[int | None] = mapped_column(BigInteger)
+    deposit: Mapped[int | None] = mapped_column(BigInteger)
+    withdrawable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    next_day_withdrawable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    d2_estimated_deposit: Mapped[int | None] = mapped_column(BigInteger)
+    margin_20_orderable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    margin_20_orderable_quantity: Mapped[int | None] = mapped_column(BigInteger)
+    margin_30_orderable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    margin_30_orderable_quantity: Mapped[int | None] = mapped_column(BigInteger)
+    margin_40_orderable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    margin_40_orderable_quantity: Mapped[int | None] = mapped_column(BigInteger)
+    margin_50_orderable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    margin_50_orderable_quantity: Mapped[int | None] = mapped_column(BigInteger)
+    margin_60_orderable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    margin_60_orderable_quantity: Mapped[int | None] = mapped_column(BigInteger)
+    reduced_margin_60_orderable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    reduced_margin_60_orderable_quantity: Mapped[int | None] = mapped_column(BigInteger)
+    margin_100_orderable_amount: Mapped[int | None] = mapped_column(BigInteger)
+    margin_100_orderable_quantity: Mapped[int | None] = mapped_column(BigInteger)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+
 class AnalysisSchedulerLease(Base):
     __tablename__ = "analysis_scheduler_leases"
     __table_args__ = (
@@ -611,6 +858,40 @@ class OrderIntent(Base):
     __table_args__ = (
         CheckConstraint("requested_quantity > 0", name="ck_order_intents_requested_positive"),
         CheckConstraint("side IN ('BUY','SELL')", name="ck_order_intents_side"),
+        CheckConstraint(
+            "source_type IS NULL OR source_type IN "
+            "('DECISION_EXECUTION','STOP_TRIGGER','BROKER_DIAGNOSTIC',"
+            "'LEGACY_EXECUTION','BROKER_IMPORTED')",
+            name="ck_order_intents_source_type",
+        ),
+        CheckConstraint(
+            "((source_type IS NULL AND source_id IS NULL AND decision_execution_id IS NULL "
+            "AND stop_trigger_id IS NULL AND guard_evaluation_id IS NULL "
+            "AND approval_id IS NULL AND execution_policy_version_id IS NULL "
+            "AND risk_policy_version_id IS NULL AND execution_stage_version_id IS NULL "
+            "AND execution_stage_payload_hash IS NULL AND authority_key IS NULL) OR "
+            "(source_type = 'DECISION_EXECUTION' AND source_id = decision_execution_id "
+            "AND decision_execution_id IS NOT NULL AND stop_trigger_id IS NULL "
+            "AND guard_evaluation_id IS NOT NULL AND execution_stage_version_id IS NOT NULL "
+            "AND execution_stage_payload_hash IS NOT NULL AND authority_key IS NOT NULL) OR "
+            "(source_type = 'STOP_TRIGGER' AND source_id = stop_trigger_id "
+            "AND stop_trigger_id IS NOT NULL AND decision_execution_id IS NULL "
+            "AND guard_evaluation_id IS NOT NULL AND execution_stage_version_id IS NOT NULL "
+            "AND execution_stage_payload_hash IS NOT NULL AND authority_key IS NOT NULL) OR "
+            "(source_type IN ('BROKER_DIAGNOSTIC','LEGACY_EXECUTION') "
+            "AND source_id IS NOT NULL AND decision_execution_id IS NULL "
+            "AND stop_trigger_id IS NULL AND authority_key IS NOT NULL) OR "
+            "(source_type = 'BROKER_IMPORTED' AND source_id IS NOT NULL "
+            "AND decision_execution_id IS NULL AND stop_trigger_id IS NULL))",
+            name="ck_order_intents_authority_provenance",
+        ),
+        Index(
+            "uq_order_intents_authority_key",
+            "authority_key",
+            unique=True,
+            sqlite_where=text("authority_key IS NOT NULL"),
+            postgresql_where=text("authority_key IS NOT NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
@@ -625,6 +906,53 @@ class OrderIntent(Base):
     action: Mapped[str] = mapped_column(String(32), nullable=False)
     requested_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     config_version: Mapped[str | None] = mapped_column(String(36))
+    source_type: Mapped[str | None] = mapped_column(String(32))
+    source_id: Mapped[str | None] = mapped_column(String(128))
+    decision_execution_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "decision_executions.id",
+            name="fk_order_intents_decision_execution",
+            ondelete="RESTRICT",
+        )
+    )
+    stop_trigger_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "stop_triggers.id", name="fk_order_intents_stop_trigger", ondelete="RESTRICT"
+        )
+    )
+    guard_evaluation_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "guard_evaluations.id",
+            name="fk_order_intents_guard_evaluation",
+            ondelete="RESTRICT",
+        )
+    )
+    approval_id: Mapped[str | None] = mapped_column(
+        ForeignKey("approvals.id", name="fk_order_intents_approval", ondelete="RESTRICT")
+    )
+    execution_policy_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "configuration_versions.id",
+            name="fk_order_intents_execution_policy",
+            ondelete="RESTRICT",
+        )
+    )
+    risk_policy_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "configuration_versions.id",
+            name="fk_order_intents_risk_policy",
+            ondelete="RESTRICT",
+        )
+    )
+    execution_stage_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "configuration_versions.id",
+            name="fk_order_intents_stage_version",
+            ondelete="RESTRICT",
+        )
+    )
+    execution_stage_payload_hash: Mapped[str | None] = mapped_column(String(64))
+    authority_key: Mapped[str | None] = mapped_column(String(128))
     correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -666,7 +994,7 @@ class TradingOrder(Base):
         CheckConstraint(
             "status IN ('CREATED','VALIDATING','SUBMITTING','ACKNOWLEDGED','OPEN',"
             "'PARTIALLY_FILLED','FILLED','CANCEL_PENDING','CANCELLED','REPLACE_PENDING',"
-            "'REPLACED','REJECTED','UNKNOWN','RECONCILING')",
+            "'REPLACED','REJECTED','UNKNOWN','RECONCILING','INVALIDATED')",
             name="ck_orders_status",
         ),
         Index("ix_orders_account_broker", "account_alias", "broker_order_id"),
@@ -727,7 +1055,7 @@ class OrderEvent(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
     order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"), nullable=False)
-    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     source: Mapped[str] = mapped_column(String(24), nullable=False)
     source_key: Mapped[str] = mapped_column(String(128), nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -1329,7 +1657,8 @@ class LlmPromptProfile(Base):
         UniqueConstraint("owner_id", "role", "version_label", name="uq_llm_prompt_role_label"),
         CheckConstraint(
             "role IN ('TECHNICAL_SCOUT','NEWS_DISCLOSURE_SCOUT','MARKET_SECTOR_SCOUT',"
-            "'POSITION_RISK_SCOUT','CORE')",
+            "'POSITION_RISK_SCOUT','CORE','CONSERVATIVE_DECISION','BALANCED_DECISION',"
+            "'AGGRESSIVE_DECISION')",
             name="ck_llm_prompt_profiles_role",
         ),
         CheckConstraint(
@@ -1365,7 +1694,8 @@ class LlmRoleRoute(Base):
     __table_args__ = (
         CheckConstraint(
             "role IN ('INTEL_COLLECTOR','EVIDENCE_VERIFIER','TECHNICAL_SCOUT',"
-            "'NEWS_DISCLOSURE_SCOUT','MARKET_SECTOR_SCOUT','POSITION_RISK_SCOUT','CORE')",
+            "'NEWS_DISCLOSURE_SCOUT','MARKET_SECTOR_SCOUT','POSITION_RISK_SCOUT','CORE',"
+            "'CONSERVATIVE_DECISION','BALANCED_DECISION','AGGRESSIVE_DECISION')",
             name="ck_llm_role_routes_role",
         ),
         CheckConstraint(
@@ -1499,7 +1829,7 @@ class AgentRun(Base):
     __tablename__ = "agent_runs"
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('DIAGNOSTIC','TRADING_ADVISORY')",
+            "purpose IN ('DIAGNOSTIC','TRADING_ADVISORY','TRADING')",
             name="ck_agent_runs_foundation_purpose",
         ),
         CheckConstraint("market IN ('KRX','NXT')", name="ck_agent_runs_market"),
@@ -1527,7 +1857,9 @@ class AgentRun(Base):
             "(purpose = 'DIAGNOSTIC' AND basis_decision_id IS NULL "
             "AND fusion_policy_version IS NULL AND fusion_state IS NULL) OR "
             "(purpose = 'TRADING_ADVISORY' AND basis_decision_id IS NOT NULL "
-            "AND fusion_policy_version IS NOT NULL AND fusion_state IS NOT NULL)",
+            "AND fusion_policy_version IS NOT NULL AND fusion_state IS NOT NULL) OR "
+            "(purpose = 'TRADING' AND basis_decision_id IS NULL "
+            "AND fusion_policy_version IS NULL AND fusion_state IS NULL)",
             name="ck_agent_runs_advisory_context",
         ),
         Index("ix_agent_runs_owner_created", "owner_id", "created_at"),
@@ -1545,6 +1877,12 @@ class AgentRun(Base):
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     dag_version: Mapped[str] = mapped_column(String(64), nullable=False)
     route_versions_json: Mapped[str] = mapped_column(Text, nullable=False)
+    policy_profile_version_map_json: Mapped[str | None] = mapped_column(Text)
+    policy_profile_version_map_hash: Mapped[str | None] = mapped_column(String(64))
+    activation_gate_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("configuration_versions.id", ondelete="RESTRICT")
+    )
+    activation_gate_version_hash: Mapped[str | None] = mapped_column(String(64))
     idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="CREATED")
     core_action: Mapped[str | None] = mapped_column(String(32))
@@ -1572,6 +1910,10 @@ class AgentRun(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    decision_context: Mapped[DecisionContext | None] = relationship(
+        back_populates="run", uselist=False
+    )
+
 
 class AgentStageRun(Base):
     __tablename__ = "agent_stage_runs"
@@ -1580,7 +1922,8 @@ class AgentStageRun(Base):
         CheckConstraint(
             "role IN ('INTEL_COLLECTOR','EVIDENCE_VERIFIER','TECHNICAL_SCOUT',"
             "'NEWS_DISCLOSURE_SCOUT','MARKET_SECTOR_SCOUT','POSITION_RISK_SCOUT',"
-            "'EVIDENCE_CANDIDATE_AUDITOR','CORE')",
+            "'EVIDENCE_CANDIDATE_AUDITOR','CORE','CONSERVATIVE_DECISION',"
+            "'BALANCED_DECISION','AGGRESSIVE_DECISION','ENTRY_ARBITER')",
             name="ck_agent_stage_runs_role",
         ),
         CheckConstraint(
@@ -1627,6 +1970,55 @@ class AgentStageRun(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DecisionContext(Base):
+    __tablename__ = "decision_contexts"
+    __table_args__ = (
+        Index("ix_decision_contexts_context_hash", "context_hash"),
+        Index("ix_decision_contexts_valid_until", "valid_until"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    decision_input_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("decision_input_snapshots.id", ondelete="RESTRICT"), nullable=False
+    )
+    evidence_bundle_id: Mapped[str] = mapped_column(
+        ForeignKey("evidence_bundles.id", ondelete="RESTRICT"), nullable=False
+    )
+    market_context_snapshot_id: Mapped[str | None] = mapped_column(
+        ForeignKey("market_context_snapshots.id", ondelete="RESTRICT")
+    )
+    technical_scout_stage_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_stage_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    news_disclosure_scout_stage_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_stage_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    market_sector_scout_stage_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_stage_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    position_risk_scout_stage_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_stage_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    candidate_audit_stage_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_stage_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    configuration_provenance_json: Mapped[str] = mapped_column(Text, nullable=False)
+    configuration_provenance_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    version_manifest_json: Mapped[str] = mapped_column(Text, nullable=False)
+    version_manifest_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    manifest_json: Mapped[str] = mapped_column(Text, nullable=False)
+    context_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    frozen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    run: Mapped[AgentRun] = relationship(back_populates="decision_context")
 
 
 class EvidenceItem(Base):

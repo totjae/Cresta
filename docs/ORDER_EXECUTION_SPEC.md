@@ -161,10 +161,23 @@ order_guard:
 | ID | 요구사항 |
 | --- | --- |
 | ORD-039 | 주문 전 안전검사는 [판단 실행 및 승인 오케스트레이션 명세](DECISION_EXECUTION_SPEC.md)의 불변 Guard evaluation을 생성하고 주문이 해당 evaluation ID를 참조하게 한다. |
-| ORD-040 | 자동 실행은 `PRE_ORDER`, 승인 실행은 `APPROVAL_CREATION`과 승인 시 새 `PRE_ORDER` 평가를 통과해야 한다. 이전 평가를 최신 검사로 재사용하지 않는다. |
+| ORD-040 | 자동 실행은 Order 생성 직전 `PRE_ORDER`, 승인 실행은 생성 전 `PRE_ORDER`와 승인 시 새 `APPROVAL_REVALIDATION` 평가를 통과해야 한다. Broker worker는 별도 `BROKER_SEND` 평가를 남기며 이전 평가를 최신 검사로 재사용하지 않는다. |
 | ORD-041 | Guard 통과, 주문 의도, 첫 `CREATED` 주문과 감사 로그는 하나의 transaction에서 생성하며 중간 상태를 Broker polling에 노출하지 않는다. |
 | ORD-042 | `BUY` 수량은 활성 `entry_order_amount`를 기준가격으로 나눈 정수 주식 수이며 AI confidence·한도 최대값·브라우저 입력으로 확대하지 않는다. |
 | ORD-043 | 매도 수량은 실제 포지션에서 활성 매도 주문 예약수량을 뺀 값을 넘을 수 없고 position version 변경 시 기존 승인을 무효화한다. |
+| ORD-052 | 신규 authority OrderIntent는 typed source, execution/trigger, Guard, optional Approval, stage와 policy provenance 및 stable authority key를 저장하고 TradingOrder는 intent를 통해 이를 추적한다. |
+| ORD-053 | broker pre-send authority가 만료·downgrade·emergency·source invalid로 회수되면 CREATED 주문을 `INVALIDATED`와 `ORDER_AUTHORITY_REVOKED_BEFORE_SEND` event로 원자 종료하고 Broker 호출을 하지 않는다. |
+| ORD-054 | migration 이전 unclassified CREATED 주문은 source를 추측하지 않고 INVALIDATED/ORDER_SOURCE_UNCLASSIFIED로 닫는다. SUBMITTING 이상은 신규 invalidation이 아니라 기존 Broker reconciliation을 따른다. |
+| ORD-055 | initial OrderIntent authority identity의 단일 규범은 EXE-263~273의 `order-authority-key-v1`이다. stored form은 `ordauth-`와 64자리 lowercase SHA-256 hex이며 price·quantity 같은 order terms를 key material에 넣지 않는다. |
+| ORD-056 | manual DECISION_EXECUTION order는 exact-one Approval ID를 authority material에 포함하고 automatic order는 explicit null을 사용한다. 같은 execution+approval retry는 같은 intent를 재사용한다. |
+| ORD-057 | 같은 authority_key로 immutable OrderIntent/order terms가 달라지면 idempotent success가 아니라 fail-closed conflict다. terms 변화로 새 authority key나 두 번째 initial order authority를 만들지 않는다. |
+| ORD-058 | authority_key는 exact request의 `request_hash`, TradingOrder `idempotency_key`, `client_order_id`, replacement/fencing metadata를 대체하지 않으며 각각의 기존 충돌·재동기화 규칙을 유지한다. |
+| ORD-059 | PRE_ORDER와 APPROVAL_REVALIDATION은 GRD-107~116의 independent funds/capacity freshness를 통과해야 한다. quote freshness가 금융 freshness를 대신하지 않고 exact request-bound capacity가 아니면 주문을 만들지 않는다. |
+| ORD-060 | Stage·Risk/Execution Policy의 live 변화는 CREATED 주문 authority를 회수할 수 있으나 같은 source execution에 새 authority_key를 발급하지 않는다. migration 전 row는 추측 backfill하지 않는다. |
+| ORD-061 | Broker worker는 검사 중인 자기 Order를 active/UNKNOWN/RECONCILING conflict와 SELL reserved 수량에서 제외하고, 다른 충돌 row만 차단한다. |
+| ORD-062 | pre-send current authority가 기존 immutable price/quantity보다 작으면 Order를 축소·재작성하지 않고 INVALIDATED 처리한다. replacement 또는 새 initial authority를 자동 생성하지 않는다. |
+| ORD-063 | `BROKER_SEND` PASS와 SUBMITTING commit 뒤 외부 MOCK submit을 transaction 밖에서 호출한다. commit 실패 시 호출은 0이고, 호출 결과가 불명확하면 UNKNOWN/reconciliation만 사용한다. |
+| ORD-064 | STOP_TRIGGER unsent 회수는 Order INVALIDATED와 별도로 기존 EXIT_PENDING 위험 및 ACTIVE RiskEvent를 유지한다. 이는 Broker 취소·청산 완료나 새 trigger authority가 아니다. |
 
 ## 4. 오류·예외 또는 경계 조건
 

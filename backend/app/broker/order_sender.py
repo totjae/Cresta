@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -17,7 +18,16 @@ from app.broker.kiwoom import (
     KiwoomOrderRejectedError,
     KiwoomOrderRequest,
 )
+from app.broker.pre_send_authority import (
+    PreSendStatus,
+    validate_created_order_authority,
+)
 from app.broker.worker_state import LeaseIdentity, lease_is_current
+from app.config import Settings, get_settings
+from app.execution_stage import (
+    EvidenceLoader,
+    ExecutionStageValidationPolicy,
+)
 from app.ids import uuid7
 from app.models import BrokerWorkerState, OrderEvent, TradingGate, TradingOrder
 from app.reconciliation import ACCOUNT_ALIAS
@@ -150,6 +160,10 @@ def send_new_order_once(
     order_id: str,
     *,
     now: datetime | None = None,
+    settings: Settings | None = None,
+    stage_evidence_loader: EvidenceLoader | None = None,
+    stage_validation_policy: ExecutionStageValidationPolicy | None = None,
+    before_submission_commit: Callable[[], None] | None = None,
 ) -> KiwoomSendResult:
     """Send one persisted CREATED order once; never creates an order or retries HTTP."""
     observed_at = now or datetime.now(UTC)
@@ -162,7 +176,17 @@ def send_new_order_once(
     if order.status != "CREATED":
         db.rollback()
         return KiwoomSendResult(order.id, order.status, order.broker_order_id, False)
-    return _send_locked_order(db, client, identity, order, observed_at=observed_at)
+    return _send_locked_order(
+        db,
+        client,
+        identity,
+        order,
+        observed_at=observed_at,
+        settings=settings or get_settings(),
+        stage_evidence_loader=stage_evidence_loader,
+        stage_validation_policy=stage_validation_policy,
+        before_submission_commit=before_submission_commit,
+    )
 
 
 def send_next_created_order(
@@ -171,6 +195,10 @@ def send_next_created_order(
     identity: LeaseIdentity,
     *,
     now: datetime | None = None,
+    settings: Settings | None = None,
+    stage_evidence_loader: EvidenceLoader | None = None,
+    stage_validation_policy: ExecutionStageValidationPolicy | None = None,
+    before_submission_commit: Callable[[], None] | None = None,
 ) -> KiwoomSendResult | None:
     """Claim and send at most one FIFO Kiwoom MOCK order for the active worker."""
     observed_at = now or datetime.now(UTC)
@@ -178,7 +206,17 @@ def send_next_created_order(
     if order is None:
         db.rollback()
         return None
-    return _send_locked_order(db, client, identity, order, observed_at=observed_at)
+    return _send_locked_order(
+        db,
+        client,
+        identity,
+        order,
+        observed_at=observed_at,
+        settings=settings or get_settings(),
+        stage_evidence_loader=stage_evidence_loader,
+        stage_validation_policy=stage_validation_policy,
+        before_submission_commit=before_submission_commit,
+    )
 
 
 def cancel_next_expired_buy_once(
@@ -306,13 +344,39 @@ def _send_locked_order(
     order: TradingOrder,
     *,
     observed_at: datetime,
+    settings: Settings,
+    stage_evidence_loader: EvidenceLoader | None,
+    stage_validation_policy: ExecutionStageValidationPolicy | None,
+    before_submission_commit: Callable[[], None] | None,
 ) -> KiwoomSendResult:
+    _require_worker_ready(db, identity, now=observed_at)
+    authority = validate_created_order_authority(
+        db,
+        order,
+        settings=settings,
+        now=observed_at,
+        stage_evidence_loader=stage_evidence_loader,
+        stage_validation_policy=stage_validation_policy,
+    )
+    if authority.status is PreSendStatus.RETRYABLE:
+        db.rollback()
+        return KiwoomSendResult(order.id, "CREATED", None, False)
+    if authority.status is PreSendStatus.REVOKED:
+        order_id = order.id
+        db.commit()
+        return KiwoomSendResult(order_id, "INVALIDATED", None, False)
     _require_worker_ready(db, identity, now=observed_at)
     request = _order_request(order)
     order_id = order.id
-    _transition(db, order, "VALIDATING", occurred_at=observed_at)
-    _transition(db, order, "SUBMITTING", occurred_at=observed_at)
-    db.commit()
+    try:
+        _transition(db, order, "VALIDATING", occurred_at=observed_at)
+        _transition(db, order, "SUBMITTING", occurred_at=observed_at)
+        if before_submission_commit is not None:
+            before_submission_commit()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     try:
         acknowledgement = client.place_order(request)

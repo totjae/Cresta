@@ -38,9 +38,9 @@ Cresta 첫 버전의 제품 범위와 사용자에게 제공할 거래 통제 �
 | --- | --- |
 | PRD-010 | 실행 모드는 시스템 전체가 아니라 행동별로 설정할 수 있어야 한다. |
 | PRD-011 | 매수, 부분매도, 일반 전량매도, 목표수익 매도, 고정손절, 추적손절, 장 마감 청산과 긴급청산을 각각 설정할 수 있어야 한다. |
-| PRD-012 | 시스템 기본값은 일반 매수·매도 `MANUAL_APPROVAL`, 고정손절·장 마감 청산·긴급청산 `AUTOMATIC`으로 한다. |
+| PRD-012 | 행동별 시스템 기본값은 일반 매수·매도 `MANUAL_APPROVAL`, 고정손절·장 마감 청산·긴급청산 `AUTOMATIC`으로 한다. 단, 행동별 mode보다 ExecutionStage가 우선하며 `AUTOMATIC` 기본값은 해당 stage가 승인 없는 실행을 허용할 때만 효력이 있다. |
 | PRD-013 | 자동 기능 활성화 및 위험한 설정 변경은 사전 경고와 감사 로그를 남긴다. |
-| PRD-014 | 승인 대기 중 자동손절 조건이 발생하면 Guard의 손절 정책을 우선한다. |
+| PRD-014 | 승인 대기 중 손절 조건이 발생하면 Guard 신호를 고우선 처리하되 ExecutionStage를 우회하지 않는다. `APPROVAL_ONLY`에서는 고우선 승인 또는 위험 경보를 제공하고, 승인 없는 자동손절은 `MOCK_AUTOMATIC`에서만 허용한다. 세부 실행 경계는 `DECISION_EXECUTION_SPEC.md` EXE-211~213을 따른다. |
 | PRD-015 | Guard의 계좌·한도·데이터·중복 주문 검사는 어떤 실행 모드에서도 생략할 수 없다. |
 
 권장 기본값:
@@ -100,6 +100,12 @@ Guard의 변경 불가 안전한도
 | PRD-042 | OpenAI·Anthropic·Gemini 공식 API, Vercel AI Gateway, 승인된 OpenAI 호환 Gateway와 Ollama를 교체 가능한 Adapter로 지원할 수 있어야 한다. |
 | PRD-043 | 사용자는 Web UI에서 역할별 provider·model·fallback·한도와 SHADOW 상태를 설정하되 credential은 write-only 보안 절차로 관리한다. |
 | PRD-044 | 신규 agent·provider·model·prompt는 SHADOW 검증을 거치며 provider 장애·출력 오류가 Guard를 우회하거나 신규매수를 허용해서는 안 된다. |
+| PRD-045 | v7 production ENTRY 평가는 admission부터 `purpose=TRADING`인 별도 run이어야 하며 DIAGNOSTIC run·ArbiterResult를 TRADING으로 승격·복사할 수 없다. |
+| PRD-046 | 검증된 Activation Gate가 admission과 Decision 확정 직전에 모두 OPEN인 경우에만 server-owned Finalizer가 BUY·WAIT·REJECT·UNKNOWN을 그대로 immutable TRADING Decision으로 확정한다. Gate 거부는 다른 action Decision을 만들지 않는다. |
+| PRD-047 | Finalized Decision은 주문이 아니며 WAIT·REJECT·UNKNOWN은 항상 NO_ACTION이다. BUY도 후속 ExecutionStage, 행동별 권한과 Guard를 별도로 통과하기 전에는 승인·주문·Broker 권한이 없다. |
+| PRD-048 | 하나의 sourced ENTRY Decision은 policy나 stage 변경과 무관하게 authoritative execution lifecycle을 정확히 하나만 가지며 실행 결과가 Decision 또는 terminal AgentRun을 변경하지 않는다. |
+| PRD-049 | ExecutionStage와 행동별 mode는 각각 frozen/current authority 중 더 제한적인 값으로 평가한다. stage·mode 완화는 기존 execution을 자동 승격하지 않고, 축소·Decision 만료·PAUSE_ENTRY는 외부 제출 전의 BUY 권한을 즉시 회수한다. |
+| PRD-050 | LIVE automatic은 제공하지 않는다. APPROVAL_ONLY의 AUTOMATIC 및 FIXED_STOP direct order는 금지하고 승인 없는 자동 주문은 검증된 MOCK_AUTOMATIC+MOCK target에서만 허용한다. |
 
 ## 4. 오류·예외 또는 경계 조건
 

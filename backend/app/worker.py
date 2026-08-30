@@ -28,8 +28,10 @@ from app.broker.worker_state import (
 )
 from app.config import Settings, get_settings
 from app.db import SessionLocal
+from app.execution_stage import EvidenceLoader
 from app.ids import uuid7
 from app.reconciliation import ReconciliationResult, run_kiwoom_reconciliation
+from app.sourced_handoff import SourcedHandoffWorker
 from app.stop_trigger import recover_exit_pending, run_fixed_stop_triggers
 from app.watch import QuoteEvent, WatchError, ingest_quote
 from app.watchlist import active_kiwoom_symbols
@@ -54,11 +56,13 @@ class KiwoomBrokerWorker:
         client: KiwoomMockClient | None = None,
         websocket: KiwoomAccountWebSocket | None = None,
         owner_id: str | None = None,
+        stage_evidence_loader: EvidenceLoader | None = None,
     ) -> None:
         self.settings = settings
         self.client = client or KiwoomMockClient(settings)
         self.websocket = websocket or KiwoomAccountWebSocket(settings)
         self.owner_id = owner_id or uuid7()
+        self.stage_evidence_loader = stage_evidence_loader
         self.stop_event = asyncio.Event()
         self.lease_lost = asyncio.Event()
         self.identity: LeaseIdentity | None = None
@@ -287,7 +291,13 @@ class KiwoomBrokerWorker:
 
         def execute() -> KiwoomSendResult | None:
             with SessionLocal() as db:
-                return send_next_created_order(db, self.client, self.identity)
+                return send_next_created_order(
+                    db,
+                    self.client,
+                    self.identity,
+                    settings=self.settings,
+                    stage_evidence_loader=self.stage_evidence_loader,
+                )
 
         return await asyncio.to_thread(execute)
 
@@ -320,8 +330,14 @@ class KiwoomBrokerWorker:
                     settings=self.settings,
                     now=now,
                     correlation_id=correlation_id,
+                    stage_evidence_loader=self.stage_evidence_loader,
                 )
-                recover_exit_pending(db, settings=self.settings, now=now)
+                recover_exit_pending(
+                    db,
+                    settings=self.settings,
+                    now=now,
+                    stage_evidence_loader=self.stage_evidence_loader,
+                )
 
         try:
             await asyncio.to_thread(execute)
@@ -430,8 +446,13 @@ async def _run_worker(worker_name: str) -> int:
         "kiwoom": KiwoomBrokerWorker,
         "scheduler": AnalysisSchedulerWorker,
         "agent": AgentWorker,
+        "sourced-handoff": SourcedHandoffWorker,
     }
-    worker = workers[worker_name](get_settings())
+    settings = get_settings()
+    if worker_name == "kiwoom" and settings.kiwoom_configuration_status() != "CONFIGURED":
+        logger.error("Kiwoom worker configuration unavailable code=KIWOOM_NOT_CONFIGURED")
+        return 2
+    worker = workers[worker_name](settings)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
@@ -441,7 +462,9 @@ async def _run_worker(worker_name: str) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="cresta-worker")
-    parser.add_argument("worker", choices=["kiwoom", "scheduler", "agent"])
+    parser.add_argument(
+        "worker", choices=["kiwoom", "scheduler", "agent", "sourced-handoff"]
+    )
     args = parser.parse_args()
     raise SystemExit(asyncio.run(_run_worker(args.worker)))
 

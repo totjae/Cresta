@@ -426,6 +426,22 @@ Core·Guard·Console은 키움 TR 코드나 원본 필드에 직접 의존하지
 | KIW-142 | 실시간 item은 suffix를 제거한 6자리 종목과 `KRX/NXT` 시장으로 정규화하며 체결·호가 cache는 wire item별로 격리한다. 한 시장 이벤트가 다른 시장 snapshot을 덮어쓰면 안 된다. |
 | KIW-143 | MOCK의 NXT quote 구독과 저장은 분석용으로 허용하지만 주문 Adapter의 `KRX only` 검사는 유지한다. NXT quote 존재나 구독 성공은 NXT 주문 권한을 뜻하지 않는다. |
 
+### 3.14 Phase 10D.1B 금융 권위 조회
+
+| ID | 요구사항 |
+| --- | --- |
+| KIW-144 | MOCK 금융 Adapter는 계좌 일치 검증 후 `kt00001`을 explicit `qry_tp`로 호출한다. 계좌 권위 재동기화의 서버 정책은 추정예탁자산 조회인 `qry_tp=3`이며 응답은 계좌 별칭 `KIWOOM_MOCK_PRIMARY`, 환경 `MOCK`, source `kt00001`과 결합한다. |
+| KIW-145 | `kt00010`은 서버가 정한 6자리 symbol, BUY/SELL에 대응하는 official `trde_tp`, 양의 정수 `uv`를 필수 전송하고 `io_amt`, `trde_qty`, `exp_buy_unp`는 실제 요청에 있을 때만 전송한다. 계좌 ID는 호출자 입력으로 받지 않는다. |
+| KIW-146 | 금융 숫자 정규화는 부호 있는 10진 정수 문자열과 zero padding만 허용한다. 0은 0, 누락·null·blank는 null이고 alphabetic·decimal·comma 형식은 `KIWOOM_INVALID_RESPONSE`다. 금액의 음수는 보존하되 capacity quantity 음수는 거부한다. |
+| KIW-147 | 성공 응답 수신 시 서버의 timezone-aware UTC clock으로 `received_at`을 생성한다. raw payload, token, Authorization header, credential과 전체 계좌번호는 DTO·DB·로그에 저장하지 않는다. |
+| KIW-148 | `kt00001` 실패·malformed 응답은 새 자금 snapshot을 만들지 않고 기존 자금 증거를 변경하지 않는다. 이 실패 때문에 성공한 기존 주문·체결·포지션 projection을 가짜 값으로 대체하지 않는다. |
+| KIW-149 | `kt00010`은 read-only internal query-and-persist 경계로만 제공하고 각 성공 관측을 새 snapshot으로 저장한다. 다른 symbol·side·price·optional request context의 결과를 재사용하지 않으며 이 단계에서 Guard·Approval·Order·Broker send를 호출하지 않는다. |
+| KIW-150 | worker는 CREATED만으로 송신하지 않고 OrderIntent typed source와 current authority를 검증한다. null/unknown/unproven legacy 및 BROKER_IMPORTED는 신규 send 대상이 아니다. |
+| KIW-151 | sourced BUY와 fixed-stop은 source별 BROKER_SEND Guard와 strict MOCK account/environment/endpoint를 통과하고 current worker lease·fencing·gate가 동일 transaction에서 재확인된 경우에만 SUBMITTING으로 전이한다. |
+| KIW-152 | pre-send authority transaction은 `kt00001`, `kt00010` 또는 다른 Broker read를 호출하지 않고 persisted evidence만 읽는다. network submit은 SUBMITTING commit 뒤 DB transaction 밖에서 수행한다. |
+| KIW-153 | semantic authority 상실은 INVALIDATED event/audit로 닫지만 DB retryable/commit failure는 CREATED를 유지한다. SUBMITTING 이후 authority 변화는 INVALIDATED가 아니라 기존 Broker result/reconciliation lifecycle을 따른다. |
+| KIW-154 | worker의 stage evidence loader는 deployment-owned immutable artifact resolver다. resolver가 없거나 evidence가 invalid/stale이면 MOCK_AUTOMATIC authority는 fail-closed하며 이를 SHADOW/default authority로 대체하지 않는다. |
+
 ## 4. 오류·예외 또는 경계 조건
 
 - 고정 IP가 맞더라도 키움 등록이 완료되지 않았으면 인증 성공으로 간주하지 않는다.

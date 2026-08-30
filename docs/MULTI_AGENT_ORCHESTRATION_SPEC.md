@@ -8,7 +8,8 @@ Cresta의 정보 수집, 증거 검증, 기술·뉴스·시장·포지션 평가
 
 - 거래 판단에 사용할 외부 정보의 수집·정규화·검증
 - `Technical`, `News/Disclosure`, `Market/Sector`, `Position Risk` Scout
-- Scout 결과를 종합하는 Core
+- 기존 v1~v6에서 Scout 결과를 종합하는 Core
+- Cresta v2 ENTRY v7의 DecisionContext, 세 Decision Agent와 deterministic Arbiter
 - 실행 순서, 병렬 실행, 멱등성, timeout과 실패 처리
 - 에이전트 실행·증거·출력의 영속화와 감사
 - SHADOW 평가와 이후 승인·자동 실행 단계의 경계
@@ -31,10 +32,16 @@ Cresta의 정보 수집, 증거 검증, 기술·뉴스·시장·포지션 평가
 | `MARKET_SECTOR_SCOUT` | 시장·업종 Scout | 시장 snapshot·검증 증거 | `AgentAssessment` | 없음 |
 | `POSITION_RISK_SCOUT` | 포지션 위험 Scout | 포지션·시세·위험 요약 | `AgentAssessment` | 없음 |
 | `CORE` | Cresta Core | 불변 입력·Scout 결과 | 기존 `core_output` | 없음 |
+| `CONSERVATIVE_DECISION` | 보수형 Decision Agent | `DecisionContext` + Conservative `PolicyProfile` | `decision-agent-result-v1` | 없음 |
+| `BALANCED_DECISION` | 균형형 Decision Agent | `DecisionContext` + Balanced `PolicyProfile` | `decision-agent-result-v1` | 없음 |
+| `AGGRESSIVE_DECISION` | 공격형 Decision Agent | `DecisionContext` + Aggressive `PolicyProfile` | `decision-agent-result-v1` | 없음 |
+| `ENTRY_ARBITER` | 결정론적 ENTRY Arbiter | 세 Decision Agent 결과 | `entry-consensus-v1` | 없음 |
 
-`Guard`, `Execution Orchestrator`, `Broker`는 에이전트가 아니며 결정론적 서비스다. 어떤 에이전트에도 주문 API, Broker 자격증명, 파일시스템 또는 임의 네트워크 도구를 제공하지 않는다.
+`ENTRY_ARBITER`, `Guard`, `Execution Orchestrator`, `Broker`는 LLM 에이전트가 아니라 결정론적 서비스 또는 내부 stage다. 어떤 에이전트에도 주문 API, Broker 자격증명, 파일시스템 또는 임의 네트워크 도구를 제공하지 않는다.
 
 ## 4. 오케스트레이션 그래프
+
+아래 그래프와 MAO-001~005는 기존 Agent Runtime v1~v6 계약이다. 신규 ENTRY v7 그래프와 요구사항은 15절을 적용한다.
 
 ```text
 공식 공시·뉴스·허용 웹 소스 ─> Intel ─> Verify ─┬─> News/Disclosure Scout ─┐
@@ -234,10 +241,16 @@ app/agents/contracts.py       공통 schema와 enum
 app/agents/orchestrator.py    DAG 계획·run 생성·stage 전이
 app/agents/evidence.py        증거 정규화·검증·bundle 생성
 app/agents/scouts.py          역할별 입력 조립
-app/agents/core.py            Core 입력 조립·출력 검증
+app/agents/core.py            legacy v1~v6 및 POSITION 호환 Core 입력 조립·출력 검증
 app/agents/worker.py          queue claim·timeout·heartbeat
 app/llm/*                     Provider/Gateway 호출 계층
 ```
+
+Cresta v2 v7은 Phase 2에서 기존 AgentRun/AgentStageRun worker를 재사용하고 별도 1:1 DecisionContext persistence만 추가하는 것으로 확정됐다. 물리 경계는 DB-157~182를 따르며 실제 module·class 이름은 Phase 3에서 이 책임을 중복하지 않는 범위로 결정한다.
+
+### Historical Agent Runtime v1~v6 first implementation slice
+
+이 절은 기존 v1~v6 Agent Runtime의 역사적 구현 계획이다. Cresta v2 `agent-dag-v7`의 최초 구현 slice를 정의하지 않는다.
 
 첫 구현 slice는 `SHADOW` 전용으로 다음까지만 포함한다.
 
@@ -370,3 +383,207 @@ app/llm/*                     Provider/Gateway 호출 계층
 | MAO-138 | Position·Market Context 파생 입력은 역할별 Provider 요청의 `allowed_input_refs`에 포함하고 Core에는 Scout가 채택한 assessment와 hash만 전달한다. Provider가 새 source ref나 파생값을 생성해 입력 provenance로 승격할 수 없다. |
 | MAO-139 | v5 DIAGNOSTIC의 실행 action은 계속 WAIT이며 Decision·Approval·OrderIntent·TradingOrder를 생성하지 않는다. 서버 입력 확장은 거래 권한을 변경하지 않는다. |
 | MAO-140 | 신규 admission은 `agent-dag-v6`로 분리한다. v6의 필수 Scout가 불완전하면 Core stage는 LLM invocation을 만들지 않고 서버 축소 결과로 성공 종료한다. run은 Scout 상태에 따라 `PARTIAL` 또는 `FAILED`로 집계하되 Core 자체를 Provider 계약 오류로 실패시키지 않으며, 모든 필수 Scout가 완전할 때만 Core Provider를 호출한다. 기존 v5 run과 idempotency key는 재작성하거나 재사용하지 않는다. |
+
+## 15. Cresta v2 ENTRY Agent Runtime v7
+
+이 절은 신규 `agent-dag-v7`의 목표 계약이다. 기존 `agent-dag-v1`~`agent-dag-v6`, `CORE`, `agent-core-v1/v2` run과 저장 결과는 당시 의미로 보존하며 v7 용어로 재해석하지 않는다.
+
+```text
+Intel
+  ↓
+Verify
+  ↓
+Technical / News·Disclosure / Market·Sector / Position Risk(*) Scout
+  ↓
+Candidate Audit
+  ↓
+DecisionContext Freeze
+  ↓
+┌───────────────────────┬───────────────────┬──────────────────────┐
+│ Conservative Decision │ Balanced Decision │ Aggressive Decision  │
+└───────────────────────┴───────────────────┴──────────────────────┘
+                              ↓
+                    Deterministic Arbiter
+                              ↓
+                         ArbiterResult
+```
+
+논리 도메인 객체명은 `ArbiterResult`이며 `entry-consensus-v1`은 해당 객체의 schema version이다.
+
+`ENTRY`에서 열린 포지션이 없는 `POSITION_RISK_SCOUT`는 기존 v4~v6 계약과 같이 `NOT_APPLICABLE`일 수 있다. 신규 역할 코드는 `CONSERVATIVE_DECISION`, `BALANCED_DECISION`, `AGGRESSIVE_DECISION`, `ENTRY_ARBITER`다. `ENTRY_ARBITER`는 LLM Agent가 아니라 서버 소유 deterministic internal stage다.
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-200 | `agent-dag-v7`은 Cresta v2 ENTRY 전용 신규 DAG version이며 기존 v1~v6 run의 의미와 결과를 변경하지 않는다. |
+| MAO-201 | v7의 Intel·Verify·Scout·Candidate Audit 단계는 가능한 기존 runtime 계약을 재사용한다. |
+| MAO-202 | `DecisionContext`는 Scout와 Candidate Audit 종료 후 한 번만 고정한다. |
+| MAO-203 | 세 Decision Agent stage는 동일한 `DecisionContext` ID와 hash를 입력으로 독립 실행한다. |
+| MAO-204 | 세 Decision Agent는 서로 dependency를 가지지 않고 가능한 경우 병렬 실행한다. |
+| MAO-205 | 한 Decision Agent의 output 또는 prompt를 다른 Decision Agent의 입력에 포함하지 않는다. |
+| MAO-206 | Arbiter는 세 Decision Agent stage가 종료 상태에 도달한 후 한 번만 실행한다. |
+| MAO-207 | Arbiter stage는 Provider route, model 또는 invocation을 생성하지 않는다. |
+| MAO-208 | 필수 Decision Agent가 실패·timeout·invalid output이면 `BUY` consensus를 만들지 않는다. |
+| MAO-209 | v7 ENTRY run은 Decision Agent 또는 Arbiter 단계에서 Approval, OrderIntent, TradingOrder 또는 Broker 호출을 생성할 수 없다. |
+| MAO-210 | v7 최초 완결 decision slice는 SHADOW/DIAGNOSTIC이며 ArbiterResult 이후 거래 resource를 생성하지 않는다. 이에 앞선 Phase 4 upstream partial slice는 MAO-221~235에 따라 DecisionContext Freeze에서 checkpoint한다. |
+| MAO-211 | DIAGNOSTIC v7 결과는 기존 run과 동일하게 TRADING으로 승격할 수 없다. |
+| MAO-212 | v7 TRADING admission/finalization은 별도 activation gate가 열렸을 때만 허용한다. |
+| MAO-213 | v7 evaluation root는 기존 AgentRun이다. 최초 slice는 admission부터 `purpose=DIAGNOSTIC`이고 activation 이후 scheduler-owned production run은 admission부터 `purpose=TRADING`이며, 두 목적 사이의 상태 전이나 결과 복사를 허용하지 않는다. |
+| MAO-214 | DecisionContext Freeze는 AgentStage가 아니라 Scout와 Candidate Audit 이후의 서버 소유 영속 transaction이다. Context commit 전에는 세 Decision Agent stage가 runnable하거나 claim 가능하지 않다. |
+| MAO-215 | Freeze는 필수 stage의 존재, 권위 `AgentStageRun.state`와 structured status 일치, output hash, 같은-run EvidenceBundle·stage provenance를 검증한다. ENTRY Position Risk의 명시적 `NOT_APPLICABLE`은 허용하지만 stage 부재로 대체할 수 없다. 세부 terminal matrix는 DB-163을 따른다. |
+| MAO-216 | Decision Agent 결과는 각 role의 AgentStageRun output이고 ArbiterResult는 ENTRY_ARBITER AgentStageRun output이다. 별도 DecisionAgentResult/ArbiterResult table을 만들지 않으며 `(run_id, role)` uniqueness를 유지한다. |
+| MAO-217 | Provider route가 필요한 v7 role은 네 Scout와 세 Decision Agent다. `ENTRY_ARBITER`는 internal role로서 route·prompt·model·invocation을 가지지 않으며 기존 `CORE` route는 v1~v6에만 유지한다. |
+| MAO-218 | run admission은 세 system-owned PolicyProfile ConfigurationVersion을 DecisionContext와 분리된 canonical version map에 고정한다. 세 Agent는 같은 Context와 자신의 PolicyProfile만 입력받는다. |
+| MAO-219 | Context, stage result, finalization source와 activation provenance의 물리 영속 계약은 `DATABASE_SPEC.md` DB-157~182를 따르며 DAG layer가 별도 DecisionRun, EvidenceSet 또는 generic context-reference lifecycle을 만들지 않는다. |
+| MAO-220 | Context freeze 또는 stage claim 재시도는 기존 unique identity와 hash를 먼저 조회한다. 같은 identity의 다른 hash, cross-run reference 또는 version mismatch는 기존 결과를 갱신하지 않고 fail-closed 한다. |
+
+v7 논리 stage는 Intel 1, Verify 1, Scout 4, Candidate Audit 1, Decision Agent 3, Arbiter 1로 총 11개다. `DecisionContext Freeze`는 이 개수에 포함되는 stage가 아니며 DB-164의 별도 server-owned transaction이다. `agent_stage_runs`의 DB role allowlist는 기존 역할과 신규 네 역할의 합집합을 허용하지만 runtime은 `dag_version`별 stage set을 검증해 v1~v6 row의 의미를 보존한다.
+
+### 15.1 Phase 4 v7 upstream execution slice
+
+Phase 4의 실행 범위는 최종 `agent-dag-v7` 중 Intel, Evidence Verifier, 네 Scout와 Candidate Audit의 7개 stage 및 그 뒤의 server-owned DecisionContext Freeze다. Phase 4 admission은 미구현 C/B/A Decision Agent와 `ENTRY_ARBITER` stage를 선생성·claim·실행하지 않으며, 이 제한을 v7의 최종 stage set으로 해석하지 않는다.
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-221 | Phase 4 v7 upstream admission은 `purpose=DIAGNOSTIC`, `analysis_context=ENTRY`만 허용하고 upstream 7개 stage만 materialize한다. `CORE`, C/B/A Decision Agent와 `ENTRY_ARBITER` stage를 만들거나 실행하지 않으며 production scheduler와 TRADING admission에 연결하지 않는다. |
+| MAO-222 | upstream stage와 DecisionContext Freeze가 완료돼도 AgentRun을 `SUCCEEDED` 또는 다른 terminal state로 finalize하지 않는다. `dag_version=agent-dag-v7`, `purpose=DIAGNOSTIC`, `analysis_context=ENTRY`, 필수 upstream terminal, DecisionContext 존재, downstream 미활성 조건의 AgentRun은 `RUNNING`을 유지하며 Context가 upstream checkpoint 완료의 영속 증거다. 새 lifecycle enum을 추가하지 않는다. |
+| MAO-223 | v1~v6은 terminal `CORE`를 기준으로 기존 finalization을 유지한다. v7 upstream checkpoint는 `CORE`를 조회하지 않으며 CORE 부재가 exception, `FAILED` 또는 `SUCCEEDED` 전이 원인이 되어서는 안 된다. full v7 finalization은 Decision Agent/Arbiter runtime phase에서 별도로 확정한다. |
+| MAO-224 | Candidate Audit output을 먼저 commit한 뒤 별도 reconciliation transaction이 eligible v7 upstream run을 조회하고 `freeze_decision_context(run_id)`를 호출한다. 같은 manifest retry는 기존 Context를 반환하고 다른 manifest/hash conflict는 fail-closed 하며, Provider/stage completion transaction 안에서 Context를 freeze하지 않는다. |
+| MAO-225 | v7 upstream Scout는 versioned contract registry에서 `AgentAssessmentV2`와 `scout-input-v2` server-owned input path로 명시 등록한다. 등록 범위는 네 Scout뿐이며 C/B/A Decision Agent와 `ENTRY_ARBITER` runtime contract를 Phase 4에서 등록·실행하지 않는다. |
+| MAO-226 | v7 upstream의 route-required set은 `TECHNICAL_SCOUT`, `NEWS_DISCLOSURE_SCOUT`, `MARKET_SECTOR_SCOUT`, `POSITION_RISK_SCOUT` 정확히 네 역할이다. `CORE` route를 요구하지 않고 기존 Scout route row를 복제하지 않으며 admission은 실제 선택한 네 route의 immutable ID/version/hash provenance를 고정한다. v1~v6 route set은 변경하지 않는다. |
+| MAO-227 | v7 upstream admission은 `scout-input-v2` 확정, 네 Scout route snapshot, DB-172 PolicyProfile map freeze, AgentRun insert와 upstream stage materialization을 한 transaction 경계에서 수행한다. 하나라도 실패하면 partial run/stage를 남기지 않는다. PolicyProfile map은 Context와 Scout input 밖에 유지한다. |
+
+### 15.2 v7 Evidence Verifier와 Candidate Audit result
+
+v1~v6의 historical Verifier·Candidate Audit output은 당시 schema로 보존한다. 다음 envelope은 v7 신규 stage output에만 적용하며 완료된 output의 canonical JSON/hash는 수정하지 않는다.
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-228 | v7 Evidence Verifier는 `evidence-verifier-v2` envelope을 사용한다. canonical 필드는 `schema_version`, `stage_run_id`, `role=EVIDENCE_VERIFIER`, `status`, `evidence_bundle_id`, `evidence_bundle_hash`, `observed_at`, `valid_until`, `evidence_policy_version`, `freshness_policy_version`, `freshness_policy_snapshot_hash`, evidence item ID 순으로 정규화한 `verified_item_validity[]`, 정렬·중복 제거한 `reason_codes`다. stage identity/role/state, 같은-run bundle ID/hash와 output hash를 Context Freeze가 직접 검증할 수 있어야 한다. |
+| MAO-229 | `evidence-freshness-policy-v1`은 source별 freshness anchor와 duration source를 `DART_DISCLOSURE/PRIMARY = event_at + dart_lookback_days`, `KRX_DAILY_MARKET/PRIMARY = event_at + krx_lookback_days`, `NEWS/SECONDARY = published_at + naver_news_lookback_hours`로 고정한다. duration의 실제 값은 run admission에 적용된 configuration snapshot에서 읽고 그 version/hash를 result provenance에 보존하며 새 hard-coded 숫자를 만들지 않는다. |
+| MAO-230 | freshness anchor는 위 정책이 지정한 timezone-aware timestamp여야 하며 다른 timestamp로 임의 대체하지 않는다. 각 item의 `item_valid_until`을 먼저 계산하고 Verifier `valid_until = min(AgentRun.valid_until, Context에 사용하는 모든 verified item의 item_valid_until)`로 계산한다. stale item은 기존 bundle policy대로 제외·표시한다. source rule·timestamp·configuration provenance가 없거나 usable verified item이 0개면 freeze-eligible `SUCCEEDED`로 처리하지 않고 안정적인 reason code와 함께 fail-closed 한다. |
+| MAO-231 | v7 Candidate Audit은 기존 internal/provider-free 로직을 재사용하고 `evidence-candidate-audit-v2` envelope을 사용한다. canonical 필드는 `schema_version`, `stage_run_id`, `role=EVIDENCE_CANDIDATE_AUDITOR`, `status`, `observed_at`, `evidence_bundle_id`, `evidence_bundle_hash`, ID 순으로 정규화한 `candidate_ids`, `candidate_count`, key 순으로 정규화한 `provider_counts`와 `source_counts`, 정렬·중복 제거한 `reason_codes`, `audit_policy_version`, `candidate_set_hash`다. EvidenceBundle을 수정·승격하지 않으며 Context Freeze가 stage identity/role/state와 output hash를 직접 검증한다. |
+| MAO-232 | ENTRY에 열린 포지션이 없으면 Position Risk stage는 존재하되 Provider invocation을 만들지 않고 AI-255의 명시적 `NOT_APPLICABLE` AgentAssessmentV2를 저장한다. stage 부재는 Context Freeze 실패다. |
+
+### 15.3 v7 Scout role input hash
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-233 | 각 v7 Scout stage `input_hash`는 `scout-role-input-v1` canonical material의 SHA-256이다. 공통 필드는 `schema_version`, `role`, `scout_input_snapshot_id`, `scout_input_hash`, `evidence_bundle_id`, `evidence_bundle_hash`, `route_id`, `route_version_hash`, `input_contract_version`이며 역할에 실제 전달되는 Indicator, MarketContext, position provenance만 명시적 nullable reference로 포함한다. |
+| MAO-234 | `scout-role-input-v1`은 UUID·role·key 정규 순서와 canonical Decimal/time 규칙을 사용한다. 관련 source/dependency 또는 route/input-contract version 변경은 hash를 변경하고, 해당 역할에 전달되지 않는 다른 Scout output과 PolicyProfile 변경은 hash에 영향을 주지 않는다. |
+| MAO-235 | Stage claim·replay는 저장된 input material을 다시 canonicalize해 `input_hash`를 검증한다. 단순 `run_input_hash + role` 조합이나 호출자가 제공한 hash를 v7 Scout 감사 provenance로 사용하지 않는다. |
+
+### 6.10 v7 Decision Agent materialization과 실행
+
+Phase 7B는 최종 논리 DAG를 바꾸지 않고, committed DecisionContext 이후의 세
+Decision Agent stage를 실제 runtime에 연결하기 위한 계약만 확정한다. Arbiter는
+후속 단계까지 논리 role로만 남으며 materialize하거나 실행하지 않는다.
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-236 | Phase 7 이후 신규 v7 admission은 네 Scout와 `CONSERVATIVE_DECISION`, `BALANCED_DECISION`, `AGGRESSIVE_DECISION`의 정확히 일곱 LLM route identity/version/hash를 원자적으로 freeze한다. `ENTRY_ARBITER`와 `CORE` route는 요구하지 않는다. 이미 admission된 네-route Phase 4~6 run은 backfill·변경하지 않고 당시 계약으로 replay한다. |
+| MAO-237 | Candidate Audit commit과 DecisionContext freeze 뒤 별도 decision-stage reconciliation transaction이 run과 Context를 잠그고 Context 및 frozen Policy/route map을 검증한 후 C/B/A stage를 원자적으로 materialize한다. initial admission transaction이나 Context freeze transaction에 세 stage를 끼워 넣지 않는다. |
+| MAO-238 | reconciliation은 동일 canonical `decision-agent-stage-input-v1`이면 기존 stage를 재사용하고, 정확한 부분집합만 있으면 기존 row의 identity/hash/state를 검증한 뒤 나머지를 한 transaction에서 생성한다. 중복 role 또는 기존 input/route/prompt/policy mismatch는 어떤 row도 변경하지 않고 conflict로 종료한다. |
+| MAO-239 | C/B/A 각각의 유일한 stage dependency는 같은 run의 terminal `EVIDENCE_CANDIDATE_AUDITOR`다. committed·유효한 DecisionContext는 별도 claim gate이며 C/B/A 상호 dependency는 없다. 따라서 세 stage는 서로 독립적으로 병렬 claim할 수 있다. |
+| MAO-240 | v7 논리 role registry는 Intel, Verifier, 네 Scout, Candidate Audit, C/B/A, Arbiter의 11개 role을 유지한다. phase enablement registry는 Phase 7에서 C/B/A까지만 enabled materialization으로 표시하고 Arbiter는 disabled로 유지한다. enabled set을 하드코딩한 stage-count나 positional index로 DAG 의미를 판정하지 않는다. |
+| MAO-241 | worker dispatch는 C/B/A role을 명시적 Decision Agent handler로 보내며 Scout/Core handler로 분류하지 않는다. handler는 AI-256~265의 input resolver, role별 Prompt/Route와 Policy 검증, model-output validation, server result 저장만 수행하고 다른 Decision Agent 결과를 읽지 않는다. |
+| MAO-242 | Decision Agent 실행은 (1) 짧은 claim transaction에서 lease/fencing을 commit하고, (2) immutable input을 resolve한 뒤 DB row lock 없이 Provider network call을 수행하며, (3) 별도 completion transaction에서 fencing과 Context·Policy·route·prompt·stage-input validity를 재검증하고 result/state를 함께 commit한다. Provider 호출 동안 run/stage row lock을 유지하지 않는다. |
+| MAO-243 | Provider 호출 전후의 모든 권위 terminal 실패도 AI-263의 structured result/output hash를 남긴다. stale worker는 쓰지 못하고 outcome-unknown recovery만 권위 fencing으로 terminalize한다. Decision Agent에는 web search, live data/Broker/position fetch, 파일·코드 실행, Approval·Order·Arbiter tool을 제공하지 않는다. |
+| MAO-244 | 세 역할은 공통 system instruction을 공유할 수 있으나 각각 고정된 PromptProfile과 LlmRoleRoute provenance를 가져야 한다. 정책 숫자는 PolicyProfile에만 존재하며 production provisioning 값은 bootstrap 상수로 생성하지 않는다. Arbiter가 후속 활성화될 때는 이 stage/result identity와 hash를 입력으로 재사용하고 C/B/A 계약을 재작성하지 않는다. |
+| MAO-245 | application/control-plane의 schema, profile, prompt와 API role validator는 C/B/A 세 role을 DB allowlist와 동일하게 생성·검증·activation할 수 있어야 하고 각 role의 PromptProfile, LlmRoleRoute, ModelProfile binding과 fallback 설정을 검증한다. WEB_SEARCH 또는 동등 external acquisition은 항상 거부하며 필수 row가 없는 환경의 admission/materialization은 fail-closed 한다. |
+
+### 15.3 Phase 8 ENTRY_ARBITER runtime 계약
+
+Phase 8은 Phase 7의 세 immutable DecisionAgentResult를 변경하지 않고 provider-less
+`ENTRY_ARBITER`를 연결한다. 세 결과가 commit된 뒤 별도 arbiter-stage reconciliation이
+AI-266~275와 DB-197~204의 canonical input을 검증·생성하고 stage를 원자적·멱등적으로
+materialize한다. 마지막 완료 Agent의 completion transaction 안에서 consensus를 직접
+계산하지 않는다.
+
+Arbiter의 direct dependency는 `CONSERVATIVE_DECISION`, `BALANCED_DECISION`,
+`AGGRESSIVE_DECISION` 정확히 세 개의 AND 목록이다. DecisionContext는 stage dependency가
+아니라 materialization·claim·completion integrity gate다. 일반 downstream
+`DEPENDENCY_OK`를 적용하지 않고, terminal structured Result/hash가 유효하면
+Decision Agent의 semantic state가 non-success여도 정상 dependency로 소비한다.
+
+materialization 전 구조 오류·만료는 stage를 만들지 않는다. materialization 후
+claim/completion 재검증의 provenance mismatch는 `CONFLICTED`, expiry는 `TIMED_OUT`,
+예상치 못한 evaluator failure는 `FAILED`이며 모두 output을 남기지 않는다. 유효한
+non-success Agent Result를 정상 평가한 `UNKNOWN` consensus는 Arbiter stage
+`SUCCEEDED`다.
+
+worker는 기존 짧은 claim/lease/fencing lifecycle을 재사용하되 `ENTRY_ARBITER`를
+Scout/Core/Decision Agent handler가 아닌 전용 provider-less handler로 dispatch한다.
+claim 전 Context와 세 Result, canonical input hash, null route/invocation을 검증한다.
+pure evaluation 뒤 completion transaction은 fencing·ownership·Context expiry/hash,
+세 stage identity/output hash/result와 Arbiter input hash를 다시 검증하고 exact
+ArbiterResult/state를 함께 commit한다. Decision Agent completion 뒤 opportunistic trigger와
+idle worker recovery는 같은 reconciliation helper를 호출할 수 있다.
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-246 | arbiter-stage reconciliation은 C/B/A terminal structured Result commit 뒤 별도 transaction에서 실행하며 exact eligible set 전에는 ENTRY_ARBITER를 만들지 않는다. |
+| MAO-247 | reconciliation은 C/B/A canonical order와 `entry-arbiter-input-v1` hash로 stage를 materialize하고 `(run_id, role)` unique를 재사용한다. 같은 input은 기존 stage를 반환하고 다른 input hash는 row를 수정하지 않고 conflict로 종료한다. |
+| MAO-248 | ENTRY_ARBITER의 direct dependencies는 C/B/A 정확히 세 role의 AND 목록이고 Context는 별도 integrity gate다. |
+| MAO-249 | ENTRY_ARBITER dependency eligibility는 operational success가 아니라 terminal structured Result와 valid output hash다. 따라서 structured `INSUFFICIENT_DATA | CONFLICTED | TIMED_OUT | FAILED | INVALID_OUTPUT`도 정상 입력이다. |
+| MAO-250 | worker는 기존 claim/lease/fencing으로 ENTRY_ARBITER를 claim하고 전용 provider-less handler로 dispatch한다. 새 worker/service와 Provider transaction은 만들지 않는다. |
+| MAO-251 | claim 전에는 v7 DIAGNOSTIC/ENTRY run, non-terminal state, Context와 C/B/A identity/schema/hash/state/Policy/validity, rebuilt input hash, null route/invocation을 검증한다. |
+| MAO-252 | completion은 fencing·ownership/state, Context identity/hash/expiry, ordered C/B/A stage/output identity, strict Result와 input hash, null route/invocation을 다시 검증한다. mismatch는 output 없는 CONFLICTED, expiry는 output 없는 TIMED_OUT이다. |
+| MAO-253 | pure consensus evaluator는 DB·clock·network·configuration side effect 없이 normalized status/action을 action/pattern/reason으로 변환한다. internal failure는 output 없는 FAILED다. |
+| MAO-254 | Decision Agent completion 후 trigger와 idle recovery는 같은 reconciliation helper를 사용하며 completion role/order와 process crash가 Arbiter identity/hash/result를 변경하지 않는다. |
+| MAO-255 | ENTRY_ARBITER는 ArbiterResult만 생성하고 DIAGNOSTIC run을 Decision·Approval·Order·Broker·Finalizer·Activation·Execution으로 연결하지 않는다. |
+
+### 15.4 Phase 9 Activation admission, Finalizer reconciliation과 run lifecycle
+
+v7 production evaluation은 scheduler/server-owned admission만 `purpose=TRADING`으로 생성할
+수 있다. 공개 DIAGNOSTIC endpoint와 임의 내부 호출은 TRADING을 선택할 수 없다. 동일
+owner/market/symbol/slot에서도 purpose를 포함한 idempotency material을 사용하므로
+DIAGNOSTIC과 TRADING은 서로 다른 AgentRun identity이며 기존 run의 purpose 변경, 결과
+promotion 또는 복사는 금지한다.
+
+TRADING admission transaction은 `scout-input-v2`, 일곱 Scout/C/B/A route snapshot, 세
+PolicyProfile map과 정확히 한 valid `ACTIVE + OPEN` Activation ConfigurationVersion ID/hash를
+함께 freeze하고 upstream 7개 stage만 materialize한다. Gate 부재·중복·CLOSED·malformed,
+evidence invalid/stale/hash mismatch에서는 AgentRun과 partial stage를 만들지 않는다.
+admission 뒤 Context→C/B/A→ENTRY_ARBITER 경로는 DIAGNOSTIC과 같은 frozen data contract를
+사용하되 처음부터 끝까지 purpose=TRADING을 유지한다.
+
+TRADING ArbiterResult commit은 Finalizer transaction을 포함하지 않는다. commit 뒤 같은
+`finalization reconciliation` helper를 즉시 opportunistic 호출할 수 있고, idle
+worker/server sweep와 crash recovery도 같은 helper로 `RUNNING` TRADING run 중 authoritative
+ArbiterResult가 있고 Decision이 없는 후보를 다시 찾는다. Finalizer는 AgentStageRun,
+claim/lease/fencing 또는 LlmInvocation을 만들지 않는다.
+
+AgentRun terminal mapping은 다음과 같다. `completed_at`은 terminal transition transaction의
+server-owned DB timestamp로 null에서 한 번만 설정하며 idempotent retry가 덮어쓰지 않는다.
+
+| case | AgentRun.state | AgentRun.error_code | retry | Decision |
+| --- | --- | --- | --- | --- |
+| DIAGNOSTIC authoritative ArbiterResult committed | `SUCCEEDED` | `null` | no | 0 |
+| DIAGNOSTIC Arbiter stage `CONFLICTED` | `FAILED` | `ENTRY_ARBITER_CONFLICTED` | no | 0 |
+| DIAGNOSTIC Arbiter stage `TIMED_OUT` | `FAILED` | `ENTRY_ARBITER_TIMED_OUT` | no | 0 |
+| DIAGNOSTIC Arbiter stage `FAILED` | `FAILED` | `ENTRY_ARBITER_FAILED` | no | 0 |
+| TRADING Decision inserted 또는 exact existing row reused | `SUCCEEDED` | `null` | no | exactly 1 |
+| Gate CLOSED | `CANCELLED` | `ACTIVATION_GATE_CLOSED` | no | 0 |
+| Gate superseded | `CANCELLED` | `ACTIVATION_GATE_SUPERSEDED` | no | 0 |
+| malformed/missing evidence/hash/ambiguous Gate | `FAILED` | `ACTIVATION_GATE_INVALID` | no | 0 |
+| Context/Arbiter expired | `FAILED` | `SOURCE_EXPIRED` | no | 0 |
+| source provenance/schema/hash conflict | `FAILED` | `SOURCE_CONFLICTED` | no | 0 |
+| finalization identity/unique payload conflict | `FAILED` | `FINALIZATION_IDENTITY_CONFLICT` | no | 0 |
+| transient DB/lock failure | 기존 `RUNNING` 유지 | `FINALIZATION_DB_RETRYABLE_FAILURE` | yes | 0 |
+
+`BUY | WAIT | REJECT | UNKNOWN`은 모두 workflow operational success이므로 action으로 run
+성공 여부를 바꾸지 않는다. `CANCELLED`는 명시적 live safety denial이고 `FAILED`는 invalid
+safety configuration, terminal source/identity integrity 또는 expiry를 뜻한다. transient
+failure가 해소되어 성공하면 error code를 null로 지운 뒤 Decision insert와 `SUCCEEDED`
+transition을 같은 transaction으로 commit한다. terminal Gate denial은 Decision 부재가
+정상이며 persistent audit가 그 이유를 설명한다.
+
+| ID | 요구사항 |
+| --- | --- |
+| MAO-256 | v7 TRADING은 scheduler/server-owned admission만 생성하고 purpose를 idempotency identity에 포함하며 DIAGNOSTIC mutation·promotion·복사를 금지한다. |
+| MAO-257 | TRADING admission은 input, 일곱 route, 세 policy와 정확히 한 valid ACTIVE+OPEN Gate ID/hash를 원자적으로 freeze하며 실패 시 run/stage 0건이다. |
+| MAO-258 | TRADING은 purpose 외에는 기존 v7 frozen pipeline contract를 재사용하고 Arbiter까지 purpose를 바꾸지 않는다. |
+| MAO-259 | Arbiter commit과 Finalizer transaction은 분리하고 opportunistic trigger·idle sweep·crash recovery가 같은 finalization reconciliation helper를 사용한다. |
+| MAO-260 | DIAGNOSTIC 및 TRADING run lifecycle은 위 exact state/error mapping을 사용하고 UNKNOWN action도 authoritative workflow success로 닫는다. |
+| MAO-261 | Decision insert/reuse와 TRADING run SUCCEEDED transition은 원자적이며 completed_at은 terminal transition에서 한 번만 설정한다. |
+| MAO-262 | retryable DB failure는 RUNNING과 재조정 가능성을 유지하고 terminal denial/failure는 되살리지 않는다. |

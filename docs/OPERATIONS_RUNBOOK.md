@@ -73,8 +73,10 @@ sudo docker compose -f deploy/compose.yaml run --rm --no-deps api \
 
 ```text
 PostgreSQL healthy
+→ one-shot migration 20260829_0044 success
 → Redis healthy
-→ API·Console ready
+→ API·scheduler·agent·sourced-handoff·Broker worker start
+→ API /readyz·Console ready
 → Active Broker lease 획득
 → 키움 인증·계좌조회
 → 계좌 전체 재동기화
@@ -82,6 +84,21 @@ PostgreSQL healthy
 → Guard 점검
 → READY
 ```
+
+배포 process inventory:
+
+| service | entrypoint | dependency | host port | durable state | health/restart |
+| --- | --- | --- | --- | --- | --- |
+| postgres | upstream PostgreSQL 17 | secret file·bind volume | 없음 | `data/postgres` | `pg_isready`, unless-stopped |
+| redis | `redis-server --appendonly yes` | bind volume | 없음 | `data/redis` AOF | `redis-cli ping`, unless-stopped |
+| migration | `alembic upgrade head` | PostgreSQL healthy | 없음 | schema only | successful completion, restart no |
+| api | backend image default Uvicorn | migration success·Redis healthy | 없음 | PostgreSQL | `/healthz`, `/readyz`, unless-stopped |
+| frontend | `node server.js` | API healthy | 없음 | 없음 | HTTP root, unless-stopped |
+| nginx | `nginx` | API·Frontend healthy | `127.0.0.1:7788` | 없음 | proxied `/healthz`, unless-stopped |
+| worker | `cresta-worker kiwoom` | migration success·Redis healthy·MOCK secrets | 없음 | PostgreSQL | process/Broker state, unless-stopped |
+| scheduler | `cresta-worker scheduler` | migration success·Redis healthy | 없음 | PostgreSQL | scheduler lease/state, unless-stopped |
+| agent | `cresta-worker agent` | migration success·Redis healthy | 없음 | PostgreSQL | claim lease/fencing, unless-stopped |
+| sourced-handoff | `cresta-worker sourced-handoff` | migration success | 없음 | PostgreSQL | process/log counters, unless-stopped |
 
 | ID | 요구사항 |
 | --- | --- |
@@ -102,7 +119,7 @@ PostgreSQL healthy
 network-online + docker active
 → cresta-boot.service: compose config 검증
 → compose up -d --wait --wait-timeout 180
-→ PostgreSQL·Redis healthy
+→ PostgreSQL healthy → migration success → Redis healthy
 → API·Console healthy
 → gateway /healthz healthy
 → boot unit active (exited)
@@ -144,7 +161,7 @@ curl --fail --silent --show-error --max-time 5 \
 → 이미지 digest 고정 및 취약점 검사
 → DB 암호화 백업
 → 장외 또는 신규진입 중지 상태 전환
-→ migration 실행
+→ one-shot migration 실행 및 성공 확인
 → 서비스 교체
 → health·인증·재동기화·시세 검사
 → 수동 READY 승인
@@ -293,7 +310,7 @@ sudo docker compose \
 sudo docker compose \
   -f deploy/compose.yaml \
   -f deploy/compose.kiwoom.yaml \
-  up -d --build api worker scheduler agent
+  up -d --build api worker scheduler agent sourced-handoff
 
 sudo docker compose \
   -f deploy/compose.yaml \
@@ -341,6 +358,79 @@ Docker Compose에서 API 또는 Frontend 컨테이너만 재생성하면 고정 
 | OPS-082 | NAVER API HUB News는 선택형 `deploy/compose.naver-news.yaml`로 활성화한다. Client ID·Secret 두 파일이 모두 존재할 때만 boot reconcile이 overlay를 포함하며 일부만 존재하면 설정 오류로 중단한다. |
 | OPS-083 | 뉴스 검색은 run당 최대 1회·20건, 기본 5분 cache와 72시간 freshness를 사용한다. 공식 일 25,000회 한도 또는 비용 경보가 발생하면 신규 Agent run을 중지하고 DART·KRX·Broker·Guard는 유지한다. |
 | OPS-084 | NAVER News 운영 전 NAVER Cloud에서 NAVER API HUB 신청, News Search 권한, 비용·한도 알림을 설정한다. `401/403`, `429`, timeout·5xx를 각각 인증·한도·Provider 장애로 구분해 대응한다. |
+| OPS-085 | `sourced-handoff`는 키움 Compose overlay의 별도 장기 실행 service이며 `CRESTA_V7_SOURCED_HANDOFF_ENABLED`가 unset/false이면 sweep 없이 정상 종료한다. historical eligible Decision 처리 영향을 검토한 뒤에만 `.env`에서 true로 명시한다. |
+| OPS-086 | handoff 활성화 전 PostgreSQL migration head, exact-one execution/Approval/Order acceptance, MOCK target과 current Stage/Policy를 확인한다. worker는 Stage/Gate/Policy를 seed하지 않으며 LIVE endpoint·credential을 사용하지 않는다. |
+| OPS-087 | worker started/stopped, sweep attempted, candidate/completed/deferred/failed count와 unexpected tick failure를 비밀·Decision body·DB URL 없이 기록한다. DB 장애 후 Decision이 그대로 eligible인지와 복구 sweep을 확인한다. |
+| OPS-088 | Compose `migration` one-shot service만 `alembic upgrade head`를 실행한다. PostgreSQL health 뒤 시작하고 성공 종료 전 API와 모든 worker를 시작하지 않으며 실패 시 자동 downgrade/rollback 없이 운영자 개입을 요구한다. |
+| OPS-089 | API `/healthz`는 dependency mutation 없는 process liveness, `/readyz`는 PostgreSQL 연결과 `alembic_version=20260829_0044`를 읽기 전용 확인하는 readiness다. schema 부재·drift·DB 오류는 HTTP 503이고 주문·Agent·handoff·migration을 실행하지 않는다. |
+| OPS-090 | Redis는 현재 배포 topology의 cache/queue 준비 service지만 Phase 11A production Python의 authority source가 아니다. Compose startup은 Redis health를 기다리며 Redis 유실은 DB authority를 변경하지 않고 운영 restart/rebuild 대상으로 처리한다. |
+| OPS-091 | 모든 Compose service는 `json-file` driver의 `max-size=10m`, `max-file=5` 상한을 사용한다. 새 log stack은 도입하지 않고 secret, 전체 DB URL, credential, Decision body와 proof를 기록하지 않는다. |
+| OPS-092 | startup 순서는 PostgreSQL healthy → migration success 및 Redis healthy → API/workers → API ready → Frontend → gateway다. `depends_on` completion/health 조건과 application `/readyz`를 함께 사용한다. |
+| OPS-093 | PostgreSQL과 Redis는 host port를 publish하지 않고 각각 bind-mounted `data/postgres`, `data/redis`에 durable state/AOF를 둔다. gateway만 `127.0.0.1:7788`에 publish하며 외부 TLS는 host Nginx가 소유한다. |
+| OPS-094 | Phase 11A server preflight는 secret permission, Compose config, one-shot migration, `/readyz`, process status와 MOCK-safe env를 확인한다. local Docker 부재 시 image build/start는 `NOT_RUN_LOCAL`로 두고 Ubuntu에서 완료한다. |
+
+### 4.5 Phase 11A MOCK soak baseline
+
+Stage A는 sourced handoff OFF로 API/Frontend/PostgreSQL/Redis와 모든 worker의 uptime, restart count, CPU·memory·disk·log·DB connection/size를 관찰한다. Stage B는 current Stage를 SHADOW로 별도 검증한 뒤 handoff만 ON으로 전환해 DecisionExecution과 Order 0을 확인한다. Stage C는 검증된 MOCK authority에서 CREATED→BROKER_SEND→SUBMITTING→MOCK 결과와 reconciliation을 관찰한다. LIVE는 모든 단계에서 금지한다.
+
+soak fail 조건은 unexpected crash 또는 무제한 restart 증가, memory/DB connection leak, duplicate DecisionExecution/Order, blind resend, persistent reconciliation backlog, migration drift, uncontrolled log growth, LIVE call과 safety control OFF 상태의 authority 생성이다. 서버별 CPU/RAM 임계값은 실제 host baseline을 얻기 전 임의로 정하지 않는다.
+
+### 4.6 Phase 11A Ubuntu build·운영 절차
+
+사전 조건은 Ubuntu host, Docker Engine과 Compose plugin, `/home/totquf4171/cresta`, host Nginx/TLS, 충분한 disk, test된 PostgreSQL backup/restore 경로다. 실제 IP·추가 mount·경보 채널은 host preflight에서 기록하며 repository에 새 값으로 추정하지 않는다.
+
+1. 검토된 checkpoint를 `/home/totquf4171/cresta`에 clone 또는 fast-forward하고 branch/ref와 dirty state를 확인한다. 운영 ref는 review에서 확정한 immutable commit만 사용한다.
+2. `deploy/.env.example`을 `deploy/.env`로 복사한 뒤 `MOCK`, `LIVE=false`, `V7_SOURCED_HANDOFF_ENABLED=false`를 유지한다. 실제 secret은 `.env`에 넣지 않는다.
+3. `secrets/postgres_password`, `secrets/totp_encryption_key`와 필요한 MOCK/provider file만 준비하고 `sudo deploy/prepare-secrets.sh`를 실행한다.
+4. 다음 명령으로 구성과 이미지를 준비한다.
+
+```bash
+cd /home/totquf4171/cresta
+sudo deploy/boot-reconcile.sh --check
+sudo docker compose -f deploy/compose.yaml -f deploy/compose.kiwoom.yaml \
+  build api migration worker scheduler agent sourced-handoff frontend
+```
+
+5. migration만 먼저 실행하고 성공·head를 확인한다. 실패 시 runtime을 시작하지 않으며 자동 downgrade하지 않는다.
+
+```bash
+sudo docker compose -f deploy/compose.yaml -f deploy/compose.kiwoom.yaml \
+  up --no-deps migration
+sudo docker compose -f deploy/compose.yaml -f deploy/compose.kiwoom.yaml \
+  run --rm --no-deps migration alembic current
+```
+
+6. 전체 MOCK-safe stack을 시작하고 상태·liveness·readiness를 확인한다.
+
+```bash
+sudo deploy/boot-reconcile.sh --up
+sudo docker compose -f deploy/compose.yaml -f deploy/compose.kiwoom.yaml ps
+curl --fail --silent --show-error --max-time 5 http://127.0.0.1:7788/healthz
+sudo docker compose -f deploy/compose.yaml -f deploy/compose.kiwoom.yaml exec -T api \
+  python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3).read().decode())"
+```
+
+7. bounded logs와 restart 상태를 확인한다.
+
+```bash
+sudo docker compose -f deploy/compose.yaml -f deploy/compose.kiwoom.yaml \
+  logs --tail=200 migration api worker scheduler agent sourced-handoff
+sudo docker inspect --format '{{.Name}} restart={{.RestartCount}}' \
+  $(sudo docker compose -f deploy/compose.yaml -f deploy/compose.kiwoom.yaml ps -q)
+```
+
+일반 restart는 `docker compose ... restart <service>`, clean stop은 `docker compose ... stop`, stack 제거는 volume 삭제 옵션 없이 `docker compose ... down`을 사용한다. application rollback은 먼저 handoff OFF와 Console의 PAUSE_ENTRY로 신규진입을 중지하고, DB backup과 현재 schema head를 보존한 뒤 review된 이전 호환 image/commit을 checkout·build하여 같은 health 절차로 교체한다. DB migration은 application image와 함께 자동 downgrade하지 않는다. 이전 image가 current schema와 호환되지 않으면 서비스를 시작하지 않고 backup restore 또는 별도 승인된 forward correction을 사용한다.
+
+자동 handoff 긴급 중지는 `deploy/.env`의 `CRESTA_V7_SOURCED_HANDOFF_ENABLED=false`를 확인한 후 다음처럼 해당 service만 recreate한다.
+
+```bash
+sudo docker compose -f deploy/compose.yaml -f deploy/compose.kiwoom.yaml \
+  up -d --force-recreate sourced-handoff
+```
+
+이 flag는 새 Decision→Execution sweep만 멈춘다. `PAUSE_ENTRY`는 Console의 비상정지 동작으로 BUY authority를 차단하며, TradingGate는 Broker readiness/계좌 대조 상태다. 세 control을 서로 대체하거나 같은 권한으로 해석하지 않는다. 이미 `CREATED/SUBMITTING/UNKNOWN`인 주문은 flag 변경으로 삭제하지 않고 기존 Broker/reconciliation 절차로 처리한다.
+
+soak 동안 `docker compose ps`, `docker stats`, `docker system df`, PostgreSQL connection/DB size, Redis memory, container restart count, handoff sweep count/error, duplicate execution/order, UNKNOWN, reconciliation backlog, log directory 증가와 migration head를 매일 기록한다. Stage A→B→C 전환은 각 단계의 failure 0과 review 후에만 수행한다.
 
 ### 4.2 OpenDART 공시 수집 활성화
 

@@ -445,12 +445,16 @@ describe("execution policy settings", () => {
 
     await user.click(await screen.findByRole("button", { name: /전략·설정/ }));
     expect(await screen.findByText("거래 캘린더 운영 휴장")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("운영 휴장 날짜"), "2026-08-13");
+    const marketDateInput = screen.getByLabelText("운영 휴장 날짜");
+    const marketDate = marketDateInput.getAttribute("min");
+    expect(marketDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    await user.type(marketDateInput, marketDate!);
+    expect(marketDateInput).toBeValid();
     await user.type(screen.getByLabelText("운영 휴장 사유"), "거래소 임시 휴장 공지");
     await user.type(screen.getByLabelText("운영 휴장 출처"), "KRX notice 2026-test");
     await user.click(screen.getByRole("button", { name: "운영 휴장 등록" }));
     expect(await screen.findByText(/운영 휴장이 활성화/)).toBeInTheDocument();
-    expect(await screen.findByText("2026-08-13")).toBeInTheDocument();
+    expect(await screen.findByText(marketDate!)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "해제" }));
     expect(await screen.findByText(/과거 평가 이력은 그대로 유지/)).toBeInTheDocument();
     expect(await screen.findByText("해제됨")).toBeInTheDocument();
@@ -459,6 +463,7 @@ describe("execution policy settings", () => {
     expect(createCall?.[1]).toEqual(expect.objectContaining({
       headers: expect.objectContaining({ "X-CSRF-Token": "csrf-calendar" }),
     }));
+    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual(expect.objectContaining({ market_date: marketDate }));
   });
 
   it("registers a provider after confirmation and successful model discovery", async () => {

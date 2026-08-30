@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app import worker as worker_module
 from app.broker.kiwoom import (
+    AccountFundsSnapshotData,
     AccountVerification,
     BrokerAccountSnapshot,
     KiwoomOrderAcknowledgement,
@@ -49,6 +50,27 @@ class SnapshotClient:
             fills=(),
             positions=(),
             observed_at=datetime.now(UTC),
+        )
+
+    def get_account_funds(self, *, query_type: str) -> AccountFundsSnapshotData:
+        return AccountFundsSnapshotData(
+            "KIWOOM",
+            "KIWOOM_MOCK_PRIMARY",
+            "MOCK",
+            "kt00001",
+            query_type,
+            1_000_000,
+            900_000,
+            800_000,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            datetime.now(UTC),
         )
 
     def place_order(self, request: KiwoomOrderRequest) -> KiwoomOrderAcknowledgement:
@@ -246,8 +268,11 @@ def _queue_order(session_factory: sessionmaker[Session]) -> str:
             symbol="005930",
             market="KRX",
             side="BUY",
-            action="USER_APPROVED",
+            action="MOCK_CONNECTION_TEST",
             requested_quantity=1,
+            source_type="BROKER_DIAGNOSTIC",
+            source_id="worker-poll-order",
+            authority_key="diagnostic:worker-poll-order",
             correlation_id="corr-worker-order",
         )
         db.add(intent)

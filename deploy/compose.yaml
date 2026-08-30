@@ -1,5 +1,11 @@
 name: cresta
 
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -20,6 +26,7 @@ services:
     mem_limit: 3g
     cpus: 1.5
     networks: [backend]
+    logging: *default-logging
 
   redis:
     image: redis:7-alpine
@@ -35,6 +42,23 @@ services:
     mem_limit: 768m
     cpus: 0.5
     networks: [backend]
+    logging: *default-logging
+
+  migration:
+    build:
+      context: ../backend
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    env_file: [.env]
+    environment:
+      CRESTA_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend]
+    logging: *default-logging
 
   api:
     build:
@@ -48,8 +72,8 @@ services:
       - totp_encryption_key
       - postgres_password
     depends_on:
-      postgres:
-        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     healthcheck:
@@ -57,7 +81,7 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).read()"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3).read()"
       interval: 10s
       timeout: 5s
       retries: 6
@@ -65,6 +89,7 @@ services:
     mem_limit: 1g
     cpus: 1.0
     networks: [backend]
+    logging: *default-logging
 
   frontend:
     build:
@@ -86,6 +111,7 @@ services:
     mem_limit: 512m
     cpus: 0.5
     networks: [backend]
+    logging: *default-logging
 
   nginx:
     image: nginx:1.27-alpine
@@ -108,6 +134,7 @@ services:
     mem_limit: 256m
     cpus: 0.25
     networks: [backend]
+    logging: *default-logging
 
 secrets:
   postgres_password:

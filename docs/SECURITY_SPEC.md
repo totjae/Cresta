@@ -110,6 +110,9 @@ Argon2id 초기 최소값은 memory 64 MiB, iterations 3, parallelism 1로 한�
 | SEC-063 | 비상정지 활성화는 로그인된 세션에서 즉시 가능하게 하되, 비상정지 해제는 TOTP 재인증과 재동기화를 모두 요구한다. |
 | SEC-064 | 인증·인가 실패로 요청이 거부되면 주문이나 설정 변경이 일부라도 적용되어서는 안 된다. |
 | SEC-065 | Web MOCK 주문 시험은 대상 ID에 결합된 TOTP 재인증 증명을 주문 생성 transaction에서 1회 소비하고, 성공 시 사용자·종목·유형·수량을 감사하되 TOTP·proof 원문은 기록하지 않는다. |
+| SEC-066 | Approval approve는 session user와 Approval owner가 일치하고 expected version을 통과해야 하며 `APPROVE_ORDER`와 `<approval_id>:<expected_version>`에 결합된 미사용·미만료 reauth proof를 주문 transaction에서 원자 소비한다. |
+| SEC-067 | Approval reject는 owner·CSRF·Idempotency-Key·expected version을 요구하되 TOTP reauth는 요구하지 않는다. 다른 사용자의 Approval ID는 조회·승인·거절할 수 없다. |
+| SEC-068 | proof 원문은 Approval, OrderIntent, Order, AuditLog에 저장하지 않는다. Approval에는 소비한 proof ID만 보존하고 transaction rollback 시 proof 소비도 rollback한다. |
 
 ### 3.8 감사와 개인정보 최소화
 
@@ -184,3 +187,4 @@ Argon2id 초기 최소값은 memory 64 MiB, iterations 3, parallelism 1로 한�
 - `SEC-DEV-002`: `SEC-061`~`SEC-065`, `SEC-081`, `SEC-086`의 행동별 재인증 요구는 서비스 완성 후 위험 분석을 거쳐 선택적으로 재도입할 때까지 보류한다. 이 절이 해당 요구사항보다 우선한다.
 - `SEC-DEV-003`: 재인증 기반시설과 감사 스키마는 향후 재도입을 위해 유지할 수 있으나 현재 Console의 로그인 이후 흐름에서는 호출하지 않는다.
 - `SEC-DEV-004`: TOTP 제거가 세션 소유권, CSRF, 변경 사유, 상태 전이, 낙관적 잠금, 원자성, 비밀 원문 비노출 또는 Guard 검사를 완화하지 않는다.
+- 위 개발단계 예외는 Phase 10 sourced execution authority가 구현되기 전의 역사적 임시 정책이다. Phase 10D의 Approval approve에는 `SEC-066`~`SEC-068`, Phase 10E 이후의 `APPROVAL_ONLY`·`MOCK_AUTOMATIC` stage 상향에는 `SEC-061`~`SEC-062`의 대상 결합 one-time 재인증이 우선하며 이 예외로 생략할 수 없다. 구현 전에는 해당 authority를 활성화하지 않는다.

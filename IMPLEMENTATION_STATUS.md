@@ -1,5 +1,377 @@
 # Cresta 구현 상태
 
+### 2026-08-31 Cresta v2 Phase 11A.1 Frontend Test Baseline Cleanup 완료
+
+- 운영 휴장 component 시험의 고정 입력 날짜 `2026-08-13`이 현재 KST의 허용 최소 날짜보다 과거가 되어 native HTML date validation의 `rangeUnderflow`로 form submit 자체가 차단됐다. 명세와 production 구현은 모두 KST 오늘부터 730일 이내만 허용하므로 production bug나 비동기 race가 아니라 날짜 의존 stale test fixture로 판정했다.
+- production 코드는 변경하지 않고 시험이 렌더링된 `min` 날짜를 사용하도록 최소 교정했다. 입력 validity, 생성 성공 메시지·행, 해제 성공·이력, CSRF, 무재인증과 실제 POST `market_date`를 유지·검증하며 timeout, sleep, skip, xfail은 추가하지 않았다.
+- focused 1/1, frontend 전체 19/19, typecheck, production build와 backend 전체 757/757이 PASS했다. 전체 Ruff와 `git diff --check`도 PASS다. deployment topology·runtime, trading semantics와 migration은 변경하지 않았고 head는 `20260829_0044`, LIVE는 absent다. Phase 11A.1은 `COMPLETE`이며 checkpoint commit readiness는 `YES`다.
+
+### 2026-08-31 Cresta v2 Phase 11A Deployment & Operational Readiness 완료
+
+- production-like Compose topology를 PostgreSQL, Redis, one-shot migration, API, frontend, Nginx, Kiwoom broker worker, scheduler, agent, sourced-handoff로 명시했다. migration만 `alembic upgrade head`를 소유하고 API·worker는 `service_completed_successfully` 뒤 시작한다. API readiness는 PostgreSQL 연결과 exact Alembic head `20260829_0044`를 확인하며 liveness와 분리했다.
+- PostgreSQL·Redis는 외부 port를 publish하지 않고 bind persistence를 유지한다. Redis는 cache/queue 성격의 비권위 dependency로 문서화했다. 모든 Compose service에 `json-file` 10 MiB × 5 bounded logging을 적용하고 gateway만 `127.0.0.1:7788`에 노출했다. `.env.example`은 Settings 전체의 비밀 제외 inventory와 MOCK/SHADOW/handoff OFF 안전 기본값을 제공한다.
+- local test-only PostgreSQL 17.11의 격리 schema에서 fresh one-shot migration→0044, API `/readyz`, 실제 Uvicorn startup/shutdown, scheduler·agent·sourced-handoff process lifecycle과 handoff OFF idle, broker missing-config fail-fast를 검증했다. SQLite backend는 757/757, focused deployment·worker는 모두 PASS했고 Ruff와 diff 검사는 PASS했다. frontend typecheck와 production build는 PASS했으며 19개 UI test 중 18개 PASS, 기존 async 운영 휴장 override test 1개는 동일하게 실패했다.
+- 로컬 Docker CLI가 없어 Compose 실제 config/build/up와 Linux container SIGTERM은 `NOT_RUN_LOCAL / SERVER_PREFLIGHT_REQUIRED`다. 대신 모든 Compose/overlay YAML parse와 topology·migration gate·logging·port·secret static contract를 통과했다. 실제 서버 배포와 multi-day soak는 수행하지 않았고 runbook에 Ubuntu preflight, start/stop/restart/rollback, 로그·restart 관찰, Stage A~C soak와 fail 조건을 기록했다.
+- migration 추가는 없고 head는 `20260829_0044`다. LIVE endpoint·credential·account·order와 production DB는 사용하지 않았고 commit/push/branch 변경도 수행하지 않았다. Phase 11A는 repository readiness 기준 `COMPLETE`, checkpoint commit과 server build readiness는 `YES`, Phase 11B는 `NOT_STARTED`다.
+
+### 2026-08-30 Cresta v2 Phase 10G.2 Production Sourced Handoff / Final MOCK System Acceptance 완료
+
+- 기존 `cresta-worker` 별도 process/signal convention에 `sourced-handoff`를 추가하고 Kiwoom Compose overlay의 독립 service로 연결했다. `CRESTA_V7_SOURCED_HANDOFF_ENABLED`는 Pydantic boolean, default `false`이며 malformed 값은 startup validation failure다. disabled process는 DB sweep 없이 stop signal을 기다리고 enabled process만 기존 agent poll cadence로 bounded `reconcile_sourced_entry_executions()`를 실행한다.
+- Finalizer/Arbiter에는 execution callback을 추가하지 않았다. committed sourced TRADING/ENTRY Decision만 별도 session의 다음 sweep에서 보이며 worker는 eligibility/action/stage/policy를 재구현하거나 Stage/Gate/Policy를 seed하지 않는다. exact-one은 PostgreSQL partial unique/canonical identity/unique-loser recovery가 보장하고 worker는 DecisionExecution authority까지만 인계하며 MOCK broker submit은 기존 Broker worker만 담당한다.
+- 실제 local test-only PostgreSQL 17.11에서 기존 10G.1 69건과 runtime acceptance 11건을 함께 재실행해 80/80 PASS, FAIL 0, NOT_RUN 0을 확인했다. activation OFF, WAIT/REJECT/UNKNOWN, SHADOW, manual Approval과 automatic full MOCK broker E2E, 10회 반복 sweep, dual worker/restart exact-one, Finalizer uncommitted/commit/rollback boundary, DB outage recovery, fixed-stop 및 전체 기존 concurrency regression이 통과했다. 종료 후 `pg10g1_*` schema는 0개다.
+- 별도 lifecycle unit test는 default/malformed setting, disabled no-sweep, enabled failure isolation/retry와 graceful stop을 검증했다. SQLite backend 751/751, 전체 Ruff와 `git diff --check`가 PASS했다. migration은 없고 head는 `20260829_0044` 그대로다. LIVE endpoint/credential/account/order는 사용하지 않았고 production DB·Stage seed·commit/push도 수행하지 않았다. Phase 10과 Phase 10G.2는 `COMPLETE`다.
+
+### 2026-08-30 Cresta v2 Phase 10G.1 FINAL PostgreSQL Production Acceptance 완료
+
+- Phase 10G.1A/B/C correction 이후 실제 local test-only PostgreSQL 17.11의 `127.0.0.1 / cresta_acceptance`에서 acceptance 69건 전체를 제외 없이 최종 재실행해 69 PASS, FAIL 0, NOT_RUN 0을 확인했다. 실행별 격리 schema/search_path를 사용했고 종료 후 `pg10g1_*` schema는 0개다.
+- fresh→0044, 0040→0041→0042→0043→0044와 실제 PostgreSQL catalog의 FK/CHECK/partial unique/index/predicate/nullability/ON DELETE/BIGINT 및 `order_events.event_type varchar(64)`, `audit_logs.result varchar(64)`가 PASS했다.
+- Finalizer/Gate/Stage/sourced concurrency·TOCTOU·ambiguity, typed Guard/financial, Approval create·sequential stale·approve↔approve·approve↔reject CAS, reauth, authority-key, fixed-stop, SKIP LOCKED/fencing, 모든 pre-send race, BROKER_SEND atomicity/DB retry, ambiguous send/reconciliation, source dispatch와 PostgreSQL MOCK E2E A~G가 모두 PASS했다. Approval raw `StaleDataError` leak와 duplicate authority/Broker call은 0이다.
+- PostgreSQL과 분리한 SQLite backend 748/748, 전체 Ruff와 `git diff --check`도 PASS했다. migration/production code를 추가 변경하지 않았고 scheduler/handoff/Finalizer direct wiring, production Stage seed, LIVE와 production DB는 사용하지 않았다. Phase 10G.1은 `COMPLETE`, Phase 10G.2 readiness는 `YES`다.
+
+### 2026-08-30 Cresta v2 Phase 10G.1C Approval Optimistic CAS Error Normalization 완료
+
+- Phase 10G.1의 유일한 blocker인 sourced Approval approve↔approve 및 approve↔reject PostgreSQL optimistic-CAS loser 오류 계약을 최소 교정했다. 기존 canonical 계약 `ApprovalError / APPROVAL_VERSION_CONFLICT / HTTP 409 / retryable=false`를 그대로 재사용했고 새 오류·state·authority·proof semantics를 만들지 않았다.
+- sourced approve preflight가 Approval을 identity map에 적재한 뒤 locking query가 stale version 객체를 재사용해 commit-time Approval UPDATE에서 `StaleDataError`가 발생한 것이 원인이었다. shared mutation helper는 Approval 객체만 먼저 flush하고 그 좁은 boundary의 `StaleDataError`만 전체 transaction rollback 후 canonical conflict로 변환한다. 이후 commit의 OperationalError·IntegrityError·다른 versioned entity 오류는 원형 그대로 전파한다.
+- 실제 PostgreSQL 17.11 approve↔approve와 approve↔reject 경쟁은 각각 exactly-one winner, canonical loser, raw `StaleDataError` 0, Approval version 2와 state별 OrderIntent/Order/proof/Guard/audit exact side effect를 통과했다. 관련 PostgreSQL Approval/reauth 7건과 focused Approval/Phase 10D 22건이 PASS했다.
+- sequential stale와 rollback-before-mapping, unrelated OperationalError non-normalization을 확인했고 SQLite backend 748/748, 전체 Ruff와 `git diff --check`가 PASS했다. migration/ORM schema, scheduler/handoff, LIVE와 production DB는 변경하지 않았다. Phase 10G.1 final rerun readiness는 `YES`다.
+
+### 2026-08-30 Cresta v2 Phase 10G.1 PostgreSQL Production Acceptance Full Rerun — INCOMPLETE
+
+- local test-only PostgreSQL 17.11의 `127.0.0.1 / cresta_acceptance`, 실행별 격리 schema/search_path와 repository/Alembic head `20260829_0044`를 사용했다. fresh→0044, 0040→0041→0042→0043→0044, 실제 catalog의 FK/CHECK/partial unique/index/predicate/nullability/ON DELETE/BIGINT 및 0043/0044 `varchar(64)` capacity는 모두 PASS했다. 비밀·전체 DSN, production DB와 LIVE는 사용하지 않았다.
+- PostgreSQL acceptance 69건 중 67건이 PASS했다. Finalizer/Gate/Stage/sourced exact-one과 concurrency·TOCTOU·ambiguity, typed Guard invalid FK matrix, financial selection/freshness, Approval concurrent create, reauth double-consume/rollback, decision·stop authority key, fixed-stop concurrency, SKIP LOCKED, lease fencing, CREATED/send races, Stage/PAUSE/expiry races, BROKER_SEND atomicity/DB retry, ambiguous send/reconciliation, invalid source dispatch와 MOCK E2E A~G가 PASS했다.
+- Approval CAS의 `APPROVE(expected=1)`↔`APPROVE(expected=1)` 및 `APPROVE(expected=1)`↔`REJECT(expected=1)` 두 실제 PostgreSQL 경쟁에서 loser가 결정론적 `ApprovalError` stale-version 결과로 닫히지 않고 `_approve_sourced()` commit에서 SQLAlchemy `StaleDataError`를 외부로 누출했다. winner의 optimistic version update와 exact-one DB 제약은 작동하지만 API/service 오류 계약을 만족하지 않으므로 Phase 10G.1은 완료하지 않는다.
+- 요청된 validation-only 경계에 따라 `backend/app/approvals.py`, ORM과 migration을 수정하지 않았다. 후속 correction은 sourced approve/reject commit 경계에서 `StaleDataError` rollback 및 canonical stale-version `ApprovalError` 변환을 명시·구현하고 두 경쟁 시험을 재실행해야 한다.
+- PostgreSQL과 분리한 SQLite backend 746건, 전체 Ruff와 `git diff --check`는 PASS했다. production scheduler/handoff/Finalizer direct wiring은 활성화하지 않았고 기존 dirty worktree를 reset/restore/clean하지 않았다. Phase 10G.2 readiness는 `NO`다.
+
+### 2026-08-29 Cresta v2 Phase 10G.1B PostgreSQL Audit Result Capacity Correction 완료
+
+- `audit_logs.result`에 실제 영속 가능한 server-owned exact result를 inventory한 결과 unique 93개, 최장 35자이며 모두 64자 이하다. additive `20260829_0044`는 0043 이후 해당 column만 `varchar(24)→varchar(64)`로 확대하고 ORM을 일치시켰다. `AUTOMATIC_AUTHORITY_REVOKED`(27)와 `APPROVAL_AUTHORITY_REVOKED`(26)를 포함한 literal과 authority semantics는 변경하지 않았다.
+- downgrade는 24자를 초과하는 row가 있으면 명시적으로 거부해 schema/data를 보존한다. 실제 local test-only PostgreSQL 17.11에서 fresh→0044, 0043→0044, catalog 64, inventory 93개 전체 insert, safe downgrade/re-upgrade와 long-result refusal이 PASS했다.
+- automatic/manual revocation에서 exact event/audit, Order INVALIDATED, DecisionExecution FAILED_SAFE, manual Approval `INVALIDATED / EXECUTION_AUTHORITY_REVOKED`, OrderIntent 불변과 Broker 0회를 확인했다. injected commit failure는 event/audit/Order/execution partial state를 모두 0으로 rollback했다. PostgreSQL Phase-focused 10건과 SQLite backend 746건, 전체 Ruff 및 `git diff --check`가 PASS했다.
+- Phase 10G.1 full concurrency matrix는 실행하지 않았지만 알려진 0043/0044 capacity blocker는 모두 교정돼 full rerun readiness는 `YES`다. 0039~0043, scheduler/handoff/LIVE는 변경하지 않았고 commit/push하지 않았다.
+
+### 2026-08-29 Cresta v2 Phase 10G.1A PostgreSQL Schema Capacity Correction 완료
+
+- additive `20260829_0043`은 0042 이후 `order_events.event_type`만 `varchar(32)→varchar(64)`로 확대했고 ORM도 64로 일치시켰다. exact 35자 `ORDER_AUTHORITY_REVOKED_BEFORE_SEND`는 rename/축약하지 않았으며 기존 row backfill도 없다. downgrade는 32자를 초과하는 row가 있으면 명시적으로 거부해 schema/data를 보존한다.
+- 실제 local test-only PostgreSQL 17.11에서 fresh→0043, 0040→0041→0042→0043, catalog 64, short/exact event insert, safe downgrade/re-upgrade, long-event downgrade refusal을 포함한 Phase-focused 10건이 PASS했다. PAUSE_ENTRY automatic/manual Approval 회수에서 event, `CREATED→INVALIDATED`, `DecisionExecution FAILED_SAFE`, Approval `INVALIDATED`, OrderIntent 불변과 Broker 0회를 확인했다.
+- SQLite backend 743건은 PASS했고 전체 Ruff와 `git diff --check`도 PASS했다. 0039~0042, event/authority semantics, scheduler/handoff/LIVE는 변경하지 않았고 commit/push하지 않았다.
+- correction 범위 밖의 기존 `audit_logs.result varchar(24)`는 `AUTOMATIC_AUTHORITY_REVOKED` 같은 24자 초과 exact result를 PostgreSQL에서 거부한다. 이번 Phase의 PAUSE_ENTRY focused regression과 0043 완료를 막지는 않지만, 전체 Phase 10G.1 재실행 전에 별도 additive capacity correction이 필요하므로 rerun readiness는 `NO`다.
+
+### 2026-08-29 Cresta v2 Phase 10G.1 PostgreSQL Production Acceptance — INCOMPLETE
+
+- 이전 환경 blocker가 해소돼 비밀 미출력 환경 검사를 통과했다. 대상은 `127.0.0.1`의 test-only `cresta_acceptance`, 실제 server는 PostgreSQL `17.11`, user도 전용 `cresta_acceptance`다. 운영 DB·LIVE 계좌·production scheduler는 사용하지 않았고 실행별 격리 schema와 고정 `search_path`만 사용했다.
+- repository/Alembic head `20260828_0042`, fresh→0042와 0040→0041→0042, 실제 catalog의 0040~0042 FK/CHECK/partial unique/index/BIGINT/nullability/ON DELETE 및 key capacity를 확인했다. catalog 계약 대부분은 일치했지만 규범 `ORDER_AUTHORITY_REVOKED_BEFORE_SEND`는 35자인 반면 `order_events.event_type`은 PostgreSQL `varchar(32)`다.
+- 이 mismatch 때문에 semantic pre-send revocation의 OrderEvent insert가 `StringDataRightTruncation`으로 rollback되고 order가 `CREATED`에 남는다. fail-closed로 Broker 호출은 0이지만 EXE-232/275, DB-223/245, ORD-053, STM-038의 원자 `CREATED→INVALIDATED` 계약을 만족하지 못한다. exact event 이름을 보존하려면 새 additive migration과 ORM column 확대가 필요하므로 0039~0042 수정·새 migration 금지 조건에 따라 production correction을 하지 않았다.
+- blocker 비종속 PostgreSQL acceptance 17건은 PASS했다. fresh/incremental migration, catalog의 나머지 항목, ACTIVE partial unique, 실제 `FOR UPDATE SKIP LOCKED`, lease fencing, Finalizer concurrent exact-one, sourced Decision concurrent exact-one, WAIT/REJECT/UNKNOWN/SHADOW, manual Approval+outer rollback, automatic BUY CREATED, fixed-stop exact-one+rollback을 포함한다. event capacity와 그 revocation에 의존하는 automatic/manual/unclassified pre-send 4건은 FAIL이다.
+- Approval/reauth/OrderIntent/fixed-stop의 별도 concurrent winner matrix, Gate/Stage service activation race, CREATED 상태 경합, stage·PAUSE_ENTRY·expiry race, ambiguous-send/reconciliation concurrency는 schema blocker 확인 뒤 실행을 중단해 `NOT_RUN`이다. 따라서 Phase 10G.1은 `INCOMPLETE`, Phase 10G.2 readiness는 `NO`다.
+- PostgreSQL과 분리한 기존 SQLite backend 741건은 PASS했고 전체 Ruff와 `git diff --check`도 PASS했다. SQLite 결과를 PostgreSQL 증거로 사용하지 않았다.
+- 이번 착수에서는 production Python, tests, migration 0039~0042, scheduler/Finalizer/startup wiring, Stage seed와 LIVE를 변경하지 않았고 기존 dirty worktree를 보존했다. 전체 Ruff와 `git diff --check`는 PASS했다.
+
+### 2026-08-29 Cresta v2 Phase 10F Broker Pre-Send Authority / Unsent Revocation 완료
+
+- Active Broker worker의 CREATED claim 뒤 Order→Intent→typed source를 추적하고 DECISION_EXECUTION/STOP_TRIGGER의 persisted source, frozen/current stage·action·Risk Policy, Decision expiry, PAUSE_ENTRY BUY, Approval, exact financial evidence, current market/position, strict MOCK와 conflict를 `SUBMITTING` 직전에 재검증한다. Activation Gate와 Broker financial refresh는 조회하지 않는다.
+- authority PASS는 typed `BROKER_SEND` Guard와 최종 lease/fencing/gate 확인, `VALIDATING→SUBMITTING`을 한 transaction으로 먼저 commit한 뒤 외부 MOCK call을 수행한다. network 동안 row lock을 유지하지 않으며 기존 ACK/REJECTED/UNKNOWN, gate close, reconciliation과 no-blind-resend lifecycle을 보존했다.
+- semantic authority 상실은 Broker 호출 0, `CREATED→INVALIDATED`, 결정론적 `ORDER_AUTHORITY_REVOKED_BEFORE_SEND` event/audit로 끝낸다. sourced execution은 `FAILED_SAFE / EXECUTION_AUTHORITY_REVOKED_BEFORE_SEND`, manual Approval은 `INVALIDATED / EXECUTION_AUTHORITY_REVOKED`다. Decision·AgentRun·OrderIntent와 immutable order terms는 변경하지 않는다.
+- fixed-stop 회수는 trigger를 `FULFILLED`로 남기지 않고 `EXIT_PENDING`으로 되돌리며 RiskEvent ACTIVE를 유지한다. 자기 Order는 reserved/conflict 계산에서 제외하고 current available managed quantity가 기존 수량보다 작으면 축소하지 않고 회수한다. PAUSE_ENTRY는 risk-reduction SELL을 차단하지 않는다.
+- null/unknown, LEGACY_EXECUTION의 증명되지 않은 grant와 BROKER_IMPORTED CREATED는 fail-closed한다. 기존 MOCK connection test는 typed privileged `BROKER_DIAGNOSTIC` 1주 source identity로 교정했고 import projection도 BROKER_IMPORTED provenance를 저장한다. internal unsent reconciliation helper는 idempotent 수동 foundation만 제공하며 자동 활성화하지 않았다.
+- Phase 10F focused 32건, sender 13건, worker/lease 6건과 Phase 10E~9E 직접 회귀가 통과했고 backend 전체 741건, 전체 Ruff와 `git diff --check`가 PASS했다. SQLite는 PASS, PostgreSQL은 `NOT_RUN`이다. migration/ORM/0041/0042, scheduler, Finalizer hook, LIVE, commit/push는 변경하지 않았다.
+
+### 2026-08-29 Cresta v2 Phase 10E MOCK_AUTOMATIC / Fixed-Stop Authority 완료
+
+- sourced BUY의 effective MOCK_AUTOMATIC+AUTOMATIC에서 Phase 10D complete frozen/current PRE_ORDER Guard를 재사용하고 current Stage/mode를 Order 직전에 다시 확인한다. strict MOCK authority가 모두 유효할 때 Approval 없이 `approval_id=null` DECISION_EXECUTION `ordauth-` OrderIntent와 MOCK TradingOrder CREATED를 한 transaction으로 정확히 하나 만든다.
+- frozen/current Risk Policy를 각각 Guard에 적용하고 server-owned entry sizing도 두 policy의 restrictive minimum을 사용한다. stage downgrade는 Order 0, mode downgrade는 아직 resource가 없을 때만 manual Approval path로 축소하며 same authority retry와 rollback은 중복·부분 상태를 남기지 않는다.
+- fixed-stop은 process Settings stage와 implicit safe-default AUTOMATIC 권한을 제거했다. exact-one ACTIVE v7 Stage와 exact-one explicit versioned fixed-stop action policy를 사용하고, typed STOP_TRIGGER Guard와 current position version·managed/available/reserved quantity를 재검사한다.
+- fixed-stop SHADOW는 evidence-only/Order 0, APPROVAL_ONLY는 synthetic Approval 없이 EXIT_PENDING/Order 0, MOCK_AUTOMATIC+AUTOMATIC+strict MOCK+Guard PASS만 STOP_TRIGGER `ordauth-` OrderIntent와 MOCK SELL CREATED를 만든다. PAUSE_ENTRY는 risk-reduction SELL을 차단하지 않고 retry/recovery는 initial authority 하나만 재사용한다.
+- Phase 10E focused 11건과 직접 영향 회귀 41건, Phase 10C.2 재검증 13건 및 backend 전체 pytest 100%가 통과했다. 전체 Ruff와 `git diff --check`도 통과했다. SQLite migration 회귀는 PASS이며 PostgreSQL은 `NOT_RUN`이다.
+- Broker submission/pre-send authority, CREATED 후 unsent revocation, production sourced sweep/Finalizer handoff, scheduler, LIVE와 production Stage seed는 여전히 열지 않았다. 0041/0042와 ORM/migration은 변경하지 않았고 commit/push도 수행하지 않았다.
+
+### 2026-08-28 Cresta v2 Phase 10D Guard Completeness / Manual Approval Authority 완료
+
+- sourced BUY를 APPROVAL_ONLY와 MOCK_AUTOMATIC까지 확장하고 PRE_ORDER 및 APPROVAL_REVALIDATION Guard에 current session/status/quote/active-order, frozen/current Risk Policy minimum, account funds와 exact BUY capacity freshness·cash-only 100% authority를 연결했다. stale/missing 금융 증거의 Broker refresh는 authority transaction 밖에서 수행하고 저장된 exact context를 transaction 안에서 다시 선택한다.
+- APPROVAL_ONLY의 AUTOMATIC은 `FAILED_SAFE / AUTOMATIC_NOT_ALLOWED_IN_APPROVAL_ONLY`, MOCK_AUTOMATIC의 AUTOMATIC은 `FAILED_SAFE / MOCK_AUTOMATIC_NOT_IMPLEMENTED`로 닫았다. 두 stage의 MANUAL_APPROVAL은 exact-one PENDING Approval을 만들며 SHADOW 권한은 종전대로 주문 0을 유지한다.
+- sourced approve는 owner, PENDING/version CAS, expiry, full source lineage, current stage, PAUSE_ENTRY, price deviation, Guard 및 `<approval_id>:<expected_version>` 결합 `APPROVE_ORDER` one-time proof를 재검사한다. proof 소비, APPROVAL_REVALIDATION Guard, OrderIntent, CREATED TradingOrder, Approval/DecisionExecution 전이와 audit를 한 transaction으로 처리하고 rollback 시 부분 상태를 남기지 않는다.
+- `order-authority-key-v1` canonical identity와 same-authority retry/reuse 및 immutable-term conflict fail-closed를 구현했다. Approval API는 approve/reject의 필수 `expected_version`, approve 전용 필수 `reauth_proof`, 조회 응답의 `version`을 노출한다. legacy APPROVAL_ONLY+AUTOMATIC BUY/SELL 직접 주문 P0 경로도 FAILED_SAFE로 닫았다.
+- focused 10건과 backend 전체 회귀 100%가 통과했고 전체 Ruff 및 `git diff --check`가 통과했다. SQLite migration 회귀는 PASS, PostgreSQL은 환경 부재로 `NOT_RUN`이다.
+- `MOCK_AUTOMATIC + AUTOMATIC`, fixed-stop 변경, Broker pre-send/send, scheduler/sweep/Finalizer hook, LIVE, production stage seed와 새 migration은 구현하지 않았다. 0041/0042는 변경하지 않았고 commit/push도 수행하지 않았다.
+
+### 2026-08-28 Cresta v2 Phase 10D.2 Guard Freshness / Order Authority Identity 계약 완료 — SPEC_ONLY
+
+- 이전 Phase 10D resume audit의 두 semantic blocker를 규범 명세로 닫았다. versioned Risk Policy에 `account_funds_stale_seconds=30`(1..300)과 `order_capacity_stale_seconds=10`(1..60)을 추가하고 legacy valid payload default, quote TTL 독립성, frozen/current minimum과 malformed-current fail-closed를 GRD-107~116·CFG-121~126으로 확정했다.
+- Phase 10D.1B `received_at`을 server successful Broker response receipt/normalization UTC로 유지한다. inclusive TTL, future timestamp 거부, NULL-vs-zero, exact-context capacity, network-outside-transaction refresh와 short-transaction reselect, Approval 시 blind reuse 금지 및 Guard evidence provenance를 확정했다. cash는 buying power가 아니며 margin leverage는 열지 않았다.
+- `order-authority-key-v1` exact four-field material(`schema_version`, `source_type`, `source_id`, `approval_id`), sorted compact UTF-8 JSON/explicit null, SHA-256와 `ordauth-<64 lowercase hex>`를 EXE-263~273의 단일 기준으로 확정했다. manual DECISION_EXECUTION은 execution+Approval, future automatic은 approval null이며 price·quantity·policy·stage 등 mutable revalidation terms는 제외한다.
+- authority key와 request hash/TradingOrder idempotency·client order/fencing을 분리하고 same material retry reuse, same key conflicting immutable terms fail-closed, policy/stage 변화의 no-new-authority, no guessed backfill을 ORD-055~060·DB-242~244에 연결했다. 기존 128자 column이 72자 key를 수용하므로 migration은 필요하지 않다.
+- T-V2-EXE-AUTH-017~035에 요청된 A~S 경계·결정성·충돌 계획을 추가했다. Phase 10B authority ordering, exact-one DecisionExecution/Approval/initial Order authority, Phase 10D.1B append-only persistence/exact selector와 LIVE 부재는 변경하지 않았다.
+- 이 단계는 SPEC_ONLY다. production Python, ORM, migration, API/Guard/Approval/Order/Broker/scheduler, test code를 변경하거나 실행하지 않았다. 두 semantic blocker는 해소되어 Phase 10D 구현 재개가 가능하지만 implementation 자체는 아직 완료되지 않았다.
+
+### 2026-08-28 Cresta v2 Phase 10D 재개 검토 — INCOMPLETE (two normative authority contracts missing)
+
+- Phase 10D.1B의 `AccountFundsSnapshot`, exact request-bound `OrderCapacitySnapshot`, selector와 `20260828_0042`가 존재하므로 이전 buying-power persistence blocker는 해소됐다. sourced execution·Approval·reauth·OrderIntent/TradingOrder 경계도 다시 조사했다.
+- 새 P0 semantic blocker 1: Phase 10B 문서는 `order_intents.authority_key`를 stable initial authority identity로 요구하고 unique foundation을 제공하지만, DECISION_EXECUTION manual-approved OrderIntent의 canonical material, schema discriminator/prefix, serialization과 hash 규칙을 정의하지 않는다. 원 Phase 10D 및 이번 resume 요청은 exact definition이 없으면 임의 builder를 만들지 말고 INCOMPLETE로 종료하도록 명시한다. execution ID, Approval ID 또는 ad-hoc hash 중 하나를 구현 편의로 선택하지 않았다.
+- 새 P0 semantic blocker 2: `GUARD_RISK_SPEC`, `CONFIGURATION_SPEC`, `DECISION_EXECUTION_SPEC`와 `RiskPolicyPayload`에는 AccountFunds/OrderCapacity freshness threshold가 없다. 현재 `quote_stale_seconds`는 시장시세 전용이며 이를 금융 authority TTL로 재사용하거나 하드코딩한 초 값을 추가하면 명세 없는 위험 정책이 된다. 따라서 missing과 stale을 authoritative하게 구분해 Phase 10D Guard를 완료할 수 없다.
+- 이 두 계약이 없으면 APPROVAL_REVALIDATION 성공 transaction의 typed OrderIntent를 생성하거나 account/capacity freshness PASS를 주장할 수 없으므로 complete PRE_ORDER/Approval code를 부분적으로 열지 않았다. 특히 legacy `APPROVAL_ONLY + AUTOMATIC` 경로, sourced higher-stage path, Approval API/CAS/reauth, fixed-stop, worker/pre-send와 scheduler는 변경하지 않았다.
+- 재개 조건은 (1) DECISION_EXECUTION initial OrderIntent `authority_key` exact canonical contract, (2) account funds와 exact capacity 각각의 freshness threshold 및 policy provenance/default/허용범위 확정이다. 이후 같은 Phase 10D continuation에서 network-outside-transaction capacity refresh, full Guard, manual Approval transaction과 전체 acceptance를 구현한다.
+
+### 2026-08-28 Cresta v2 Phase 10D.1B Kiwoom Financial Adapter & Authority Projection 완료
+
+- `KiwoomMockClient`에 계좌 검증을 재사용하는 read-only `kt00001`/`kt00010` Adapter와 server-owned canonical DTO를 추가했다. `kt00001` reconciliation 정책은 explicit `qry_tp=3`이고 `kt00010`은 symbol/side/price 및 실제 supplied optional request context에 결합한다.
+- signed zero-padded integer만 허용하는 strict normalizer를 공유한다. authoritative zero, missing/null/blank, signed negative를 구별하고 decimal/comma/alphabetic/non-string은 structured invalid response로 거부한다. amount 음수는 보존하고 capacity quantity 음수는 거부한다.
+- 별도 append-only `account_funds_snapshots`와 `order_capacity_snapshots` ORM 및 additive migration `20260828_0042`를 추가했다. `BIGINT`, nullable financial fields, server UTC `received_at`, source/account/environment provenance와 selector index를 사용하며 backfill은 없다. evidence가 있으면 destructive downgrade를 거부한다.
+- latest funds selector는 exact broker/account/environment, capacity selector는 exact broker/account/environment/symbol/side/price와 nullable io amount/requested quantity/expected buy price 전체를 맞춘 뒤 `received_at DESC, id DESC`로 선택한다. persisted freshness boolean이나 cross-context fallback은 없다.
+- reconciliation은 성공한 `kt00001`을 기존 주문·체결·포지션 projection transaction에 append한다. 금융 조회 실패는 새 row를 만들거나 이전 금융 증거를 수정하지 않으며 기존 계좌 projection은 계속 처리하고 비밀 없는 failure code만 run summary에 기록한다.
+- `query_and_persist_order_capacity()`는 network read/normalize 뒤 짧은 append transaction으로 매 성공 관측을 새 row로 저장한다. Guard, sourced execution, Approval, OrderIntent/TradingOrder, fixed-stop, Broker pre-send와 scheduler는 변경하지 않았다.
+- OFFICIAL_SCHEMA_FIXTURE 기반 normalization/adapter, missing-vs-zero, exact selector, append semantics, failure preservation, 0041→0042/빈 backfill/destructive downgrade 시험을 추가했다. 실제 MOCK credential/fixture/call과 PostgreSQL 환경은 없어 실행하지 않았다.
+- Phase-focused 71건과 지정 Phase 10C.2/10C.1/9E 및 broker/worker/reconciliation 회귀가 통과했고, 최종 backend 전체 687건, 전체 Ruff와 `git diff --check`가 통과했다. SQLite migration 검증은 PASS, PostgreSQL은 `NOT_RUN`이다.
+
+### 2026-08-28 Cresta v2 Phase 10D.1A Kiwoom Broker Financial Source Contract 검증 완료
+
+- 2026-08-28 키움 공식 REST API guide와 키움증권 공식 GitHub의 `kiwoom/_data/kiwoom_api_spec.json`을 대조해 account financial source를 확정했다. 세 TR은 모두 `POST /api/dostk/acnt`이고 공식 MOCK domain은 `https://mockapi.kiwoom.com`이다.
+- `kt00001`은 `qry_tp`(`3` 추정/`2` 일반)만 받는 account-level 예수금 상세 조회다. canonical 후보는 `entr`(예수금), `pymn_alow_amt`(출금가능금액), `ord_alow_amt`(주문가능금액), margin-band별 `20/30/40/50/60/100stk_ord_alow_amt`, `d1_entra`/`d2_entra`, `d1_pymn_alow_amt`/`d2_pymn_alow_amt`다. 금액은 원 단위, optional String, 좌측 zero-padding과 부호를 포함하므로 zero·missing·negative를 서로 구분해야 한다.
+- 원 요청의 TR 대응을 정정했다. `kt00009`는 주문인출가능금액이 아니라 `계좌별주문체결현황요청`이며 financial authority source가 아니다. 실제 `주문인출가능금액요청`은 `kt00010`이다.
+- `kt00010`은 `stk_cd`, `trde_tp`(1 매도/2 매수), `uv`가 필수이고 `io_amt`, `trde_qty`, `exp_buy_unp`가 optional인 주문 시뮬레이션이다. response의 `profa_20/30/40/50/60/100ord_alow_amt`·동일 band `*_alowq`, `ord_alowa`(주문가능현금), `wthd_alowa`, `entr` 등은 그 request context에 결합한다. 따라서 이를 account-wide `available_buying_power` 하나로 flatten하지 않는다.
+- 권장 모델은 Option B다. `AccountFundsSnapshot`에는 broker/account/environment, `entr`, generic `ord_alow_amt`, `pymn_alow_amt`, D+1/D+2 funds, source API/query type와 server `received_at`을 보존한다. 별도 `OrderCapacitySnapshot`에는 broker/account/environment, symbol, side, requested price/optional quantity·expected price, margin-band별 amount/quantity, `ord_alowa`, source API와 `received_at`을 함께 보존한다. 공식 response에 broker observation timestamp가 없으므로 `received_at`은 broker timestamp가 아닌 server observation time이다.
+- BUY Guard는 account funds만으로 충분하지 않다. account-level generic ceiling과 exact intended BUY context의 `kt00010` capacity를 모두 확인하고, Cresta의 cash-only 정책에서는 100% margin amount/quantity와 requested notional/quantity를 비교하는 보수적 계약을 Phase 10D.1B 명세·구현에서 확정해야 한다. response field 누락·빈 문자열·parse 실패는 unknown이고, 공식적으로 signed인 값은 음수라는 이유만으로 malformed 처리하지 않는다.
+- 로컬 shell에는 `CRESTA_KIWOOM_*` 설정과 `.env`가 없고 Docker CLI도 없어 MOCK credential을 안전하게 사용할 수 없었다. 따라서 MOCK 호출·fixture는 생성하지 않았으며 LIVE/주문 API는 호출하지 않았다. 공식 schema가 exact field semantics를 제공하므로 source contract는 verified로 종료하되, Phase 10D.1B focused test fixture는 공식 example과 이후 확보할 redacted MOCK response를 구분한다.
+
+### 2026-08-28 Cresta v2 Phase 10D.1 착수 검토 — INCOMPLETE (verified broker financial source contract required)
+
+- 현행 `KiwoomMockClient.get_account_snapshot()`은 `ka10075` open orders, `ka10076` fills, `kt00018` positions만 조회하고 `BrokerAccountSnapshot` DTO는 이 세 collection과 `observed_at`만 가진다. `ka00001`은 설정 계좌와 token 계좌의 식별 일치 검증에만 쓰이며 cash 또는 available buying power를 반환하는 repository contract가 아니다. ORM과 reconciliation projection에도 broker/account/environment별 financial snapshot은 없다.
+- 2026-08-28 키움 REST API 공식 가이드에서 `kt00001`(예수금상세현황요청)과 `kt00010`(주문인출가능금액요청) TR의 존재까지는 확인했다. 그러나 repository에는 두 TR의 정확한 요청 조건, MOCK 지원 여부, raw response field 이름·단위·부호 규칙, `kt00010` 값이 account-wide인지 종목·가격·주문조건별인지에 관한 검증된 adapter 계약이나 fixture가 없다. 따라서 어느 값을 canonical `cash`와 `available_buying_power`로 채울지 authoritative하게 확정할 수 없다.
+- Phase 10D.1 blocker rule에 따라 검증되지 않은 raw field를 추정하거나 `cash`, 0, risk-policy 금액으로 buying power를 합성하지 않았다. production Python·ORM·migration·test code를 변경하지 않았고 0041도 그대로 보존했다. persistence만 추가해도 source authority가 생기지 않으므로, 먼저 공식 response 계약과 MOCK 실제 응답 fixture를 확보해 adapter normalization을 확정해야 한다.
+- 후속 재개 조건은 (1) cash source TR/field, (2) account-wide order-available amount의 source TR/field와 산정 조건, (3) request/account/environment provenance, (4) missing·malformed·negative·unavailable semantics, (5) broker 관측시각 또는 server receipt-time provenance를 공식 문서와 redacted MOCK 응답으로 검증하는 것이다. 그 뒤 0041 이후 additive migration, nullable financial projection, monotonic `observed_at` update와 focused tests를 구현한다.
+
+### 2026-08-28 Cresta v2 Phase 10D 착수 검토 — INCOMPLETE (authoritative buying-power persistence blocker)
+
+- Phase 10D의 필수 `GRD-099`, `GRD-102`, `EXE-242`는 BUY PRE_ORDER와 APPROVAL_REVALIDATION에서 current authoritative buying power, freshness와 requested notional 비교를 요구한다. 그러나 현행 ORM/0041에는 account cash·buying power projection이 없고 `BrokerAccountSnapshot`도 open orders·fills·positions·observed_at만 제공한다. reconciliation 역시 orders/fills/positions만 영속화한다.
+- 따라서 현행 DB만으로 missing/stale/current buying power를 구별하거나 Approval transaction에서 같은 authoritative evidence를 재검증할 수 없다. 이를 닫으려면 0041 이후 additive account-authority snapshot persistence와 broker account snapshot normalization/reconciliation 범위 확장이 필요하지만, Phase 10D 요청은 새 migration, 0041 수정과 Broker 변경을 모두 금지한다.
+- 원문의 semantic representation blocker 규칙에 따라 Phase 10D production Python·ORM·migration·test 변경을 시작하지 않았다. 불완전한 Guard를 complete authority로 연결하거나 Risk Policy 금액을 buying power로 대체하지 않았으며 Phase 10C.2 SHADOW 경계는 그대로 유지한다.
+- 동시에 확인된 후속 구현 gap은 Approval API request의 필수 `expected_version`/reauth proof 부재, service owner/CAS 미검증, `create_approval()` 내부 commit, sourced APPROVAL_REVALIDATION의 잘못된 legacy subject와 `create_order()` IntegrityError 내부 rollback이다. 이들은 persistence blocker가 해소된 후 Phase 10D 구현에서 함께 닫아야 한다.
+
+### 2026-08-28 Cresta v2 Phase 10C.2 Sourced Decision Execution Orchestrator Foundation 완료
+
+- legacy `route_trading_decision()`과 분리된 server-owned `execute_sourced_entry_decision()`을 추가했다. Phase 9 persisted historical lineage validator를 그대로 재사용하며 current Activation Gate를 재검사하거나 Finalizer transaction/hook에서 실행하지 않는다.
+- `entry-execution-identity-v1`의 policy-independent key와 0041 partial unique를 사용해 sourced Decision당 exact-one lifecycle을 lookup-first/create/requery로 처리한다. WAIT/REJECT/UNKNOWN은 stage·execution/risk policy 조회 없이 nullable provenance의 persistent NO_ACTION으로 끝나며 terminal audit도 정확히 한 번 남긴다.
+- BUY는 source validation과 expiry를 stage보다 먼저 검사하고 current `V7_ENTRY_EXECUTION_STAGE` exact-one selector의 PASS provenance를 freeze한다. 부재·invalid·ambiguous·expired는 `FAILED_SAFE / EXECUTION_STAGE_UNAVAILABLE`, selector DB failure는 rollback/retry로 분리했다. higher-authority stage는 terminalize하거나 legacy router로 fallback하지 않고 Phase 10D/10E까지 deferred error로 남긴다.
+- SHADOW에서 versioned Execution/Risk Policy를 freeze하고 frozen/current action-mode minimum을 적용한다. DISABLED는 Guard 없이 종료하고 MANUAL_APPROVAL/AUTOMATIC은 기존 BUY PRE_ORDER rule helper를 통해 typed `DECISION_EXECUTION` Guard를 저장해 PASS=`SHADOW_RECORDED`, BLOCK=`GUARD_BLOCKED`로 끝낸다. Approval, OrderIntent, TradingOrder와 Broker authority는 모두 0이다.
+- deterministic candidate scan 기반 `reconcile_sourced_entry_executions()`는 수동 호출 helper로만 제공한다. startup/scheduler/periodic activation은 연결하지 않았다. Decision/AgentRun은 변경하지 않으며 Decision API nullable execution projection을 보정했다.
+- Phase 10C.2 focused 13건, 관련 회귀 185건을 포함한 backend 전체 668건, Ruff와 `git diff --check`가 통과했다. 실제 PostgreSQL concurrent winner/loser, partial unique/typed FK/locking·TOCTOU는 Phase 10G `OPEN_BACKLOG`이며 SQLite 결과로 대체 주장하지 않는다.
+- current BUY Guard는 기존 규칙 재사용 범위이고 buying power, active/UNKNOWN order completeness, phase별 frozen/current Risk Policy intersection은 아직 production-complete authority가 아니다. legacy APPROVAL_ONLY automatic direct-order 위험은 변경하지 않았고 Phase 10D 대상이다.
+
+### 2026-08-28 Cresta v2 Phase 10C.1 Execution Persistence / Stage Control-plane Foundation 완료
+
+- additive Alembic `20260828_0041`을 `20260827_0040` 위에 추가했다. sourced DecisionExecution discriminator, policy-independent `v7exe-<sha256>` identity foundation, sourced-only partial unique, nullable NO_ACTION/pre-selection FAILED_SAFE와 frozen stage ID/hash conditional representation을 구현했다. 기존 migration과 legacy execution key/row는 수정·backfill하지 않았다.
+- `V7_ENTRY_EXECUTION_STAGE`의 strict `execution-stage-control-v1` Pydantic contract, canonical hash, stage별 structured evidence set, DRAFT→VALIDATED→ACTIVE lifecycle, exact current selector와 `PASS/ABSENT/INVALID/AMBIGUOUS/EXPIRED/DB_RETRYABLE_FAILURE` 분류를 구현했다. SHADOW/APPROVAL_ONLY/MOCK_AUTOMATIC 및 action mode minimum helper를 추가했으며 production ACTIVE stage seed는 없다.
+- GuardEvaluation에 nullable StopTrigger FK와 typed subject CHECK를 추가하고 fixed-stop 저장을 실제 `stop_triggers.id` 참조로 교정했다. migration은 유효한 historical STOP_TRIGGER subject만 deterministic하게 옮기며 orphan이면 중단한다. legacy APPROVAL subject branch는 Phase 10D 전까지 보존한다.
+- OrderIntent에 exact source enum, typed source/Guard/Approval/policy/stage provenance, stage hash와 partial-unique authority key를 추가했다. Approval의 기존 proof/order 문자열을 실제 RESTRICT FK로 정합화하고 TradingOrder `INVALIDATED` 상태를 추가했다. 신규 semantics가 존재하면 0041 downgrade를 거부한다.
+- Phase 10C.1 focused 14건과 backend 전체 655건, Ruff, Alembic head/0040→0041/round-trip/downgrade guard 및 `git diff --check`가 통과했다. 인증·CSRF 기반 stage draft/validate/activate/current/history API와 stage activation 후 execution handoff 0건을 확인했다. SQLite FK-on fixed-stop 회귀를 확인했으며 실제 PostgreSQL DDL/partial unique/FK/concurrent insert는 `OPEN_BACKLOG`이다.
+- `alembic check`에서 0041 신규 객체 drift는 발견되지 않았지만 기존 agent_runs basis/fusion unique 표현, emergency_stops FK ondelete, indicator snapshot unique index와 market-context index 이름의 pre-existing metadata drift가 남아 있어 별도 schema-alignment backlog로 기록한다. Phase 10C.1 migration에 unrelated repair를 섞지 않았다.
+- Finalizer handoff, sourced execution row 자동 생성/sweep, initial BUY Guard/SHADOW routing, Approval runtime authority, MOCK automatic, fixed-stop stage routing, broker pre-send, scheduler와 LIVE는 구현하거나 활성화하지 않았다. 기존 APPROVAL_ONLY automatic/fixed-stop runtime은 여전히 UNSAFE이며 각각 Phase 10D/10E 대상이다.
+
+### 2026-08-27 Cresta v2 Phase 10B Execution Authority Contract Finalization 완료
+
+- Phase 10A의 semantic gap을 `entry-execution-identity-v1`과 `sourced-entry-execution-v1`로 닫았다. sourced Decision당 policy/stage와 무관한 `v7exe-<sha256>` authoritative lifecycle 정확히 하나, WAIT/REJECT/UNKNOWN persistent NO_ACTION, full Phase 9 lineage validation과 Decision/AgentRun 불변을 확정했다.
+- current ExecutionStage는 `SYSTEM / MOCK / V7_ENTRY_EXECUTION_STAGE`의 strict `execution-stage-control-v1` ConfigurationVersion으로 정하고 selected ID/hash/stage를 DecisionExecution에 freeze한다. stage와 action mode는 frozen/current minimum만 적용하며 자동 promotion, missing/invalid default와 LIVE target을 금지했다.
+- SHADOW/APPROVAL_ONLY/MOCK_AUTOMATIC×DISABLED/MANUAL_APPROVAL/AUTOMATIC matrix를 확정했다. APPROVAL_ONLY+AUTOMATIC은 `FAILED_SAFE / AUTOMATIC_NOT_ALLOWED_IN_APPROVAL_ONLY`, fixed-stop은 APPROVAL_ONLY에서 synthetic Approval 없이 EXIT_PENDING이며 automatic SELL은 MOCK_AUTOMATIC에만 허용한다.
+- Decision expiry와 PAUSE_ENTRY는 BUY broker submission 직전까지 authority이고, pre-send revocation은 unsent Order `INVALIDATED`와 `ORDER_AUTHORITY_REVOKED_BEFORE_SEND` event로 종료한다. SUBMITTING 이후에는 existing UNKNOWN/reconciliation/order lifecycle을 유지한다.
+- Guard phase를 PRE_ORDER/APPROVAL_REVALIDATION/BROKER_SEND로 고정하고 full BUY input, frozen/current Risk Policy intersection, DecisionExecution/StopTrigger typed subject를 확정했다. StopTrigger ID를 Guard execution FK에 넣는 현행 misuse는 Phase 10C.1 P0 migration blocker다.
+- Approval owner/expected-version CAS/Approval-version-bound one-time APPROVE_ORDER proof, no helper commit, typed OrderIntent source/provenance와 source별 broker validator를 확정했다. migration 전 unclassified CREATED는 source를 추측하지 않고 runtime INVALIDATED로 닫는다.
+- EXE-221~260, GRD-098~106, DB-214~230, CFG-112~120, PRD-048~050과 API/SEC/ORD/STM 연계 계약 및 T-V2-EXE-AUTH-001~016 계획을 추가했다. Phase 10B는 SPEC-ONLY이며 production Python·ORM·migration·test code·scheduler·Execution handoff·Approval/Order/Broker 구현은 변경하지 않았다.
+
+### 2026-08-27 Cresta v2 Phase 9E Finalizer / Activation Production Acceptance 및 Phase 9 종료
+
+- production-style SQLite 전체 경로에서 exact ACTIVE+OPEN Gate admission, Gate ID/hash freeze, upstream 7, DecisionContext, C/B/A Provider execution, provider-less ENTRY_ARBITER, live Gate revalidation과 Finalizer를 BUY/WAIT/REJECT/UNKNOWN 네 action으로 종합 재검증했다. 네 action은 exact sourced Decision과 `SUCCEEDED` lifecycle로 보존되고 Gate denial은 Decision action으로 변환되지 않는다.
+- no Gate/CLOSED/INVALID admission, actual Policy/Scout·Decision Route/Model/Prompt snapshot mismatch, Gate mid-pipeline isolation과 frozen provenance 불변, Finalizer-time CLOSED/SUPERSEDED/INVALID/DB retryable, source expiry·stage/output/Context/C/B/A corruption, write-boundary expiry/Gate 변화와 identity conflict를 재검증했다.
+- Phase 9E acceptance에서 sourced API가 persisted Arbiter row/hash만 검사하고 실제 Context/C/B/A 행을 끝까지 재검증하지 않던 correctness gap을 발견했다. historical completed-at 기준의 lock-free source validator를 API read path에 최소 연결해 current Gate/Policy/Route/Prompt 선택 없이 persisted run→Context→C/B/A→Arbiter chain과 exact immutable Decision을 검증하고 하위 lineage corruption을 fail-closed하도록 수정했다.
+- exact seven-field finalization identity의 결정성·lineage sensitivity, retryable failure 뒤 exact-one recovery, opportunistic/idle reconciliation 중복 안전과 ambiguous retry, strict audit taxonomy를 확인했다. `ACTIVATION_GATE_DB_RETRYABLE_FAILURE`는 pre-run admission, `FINALIZATION_DB_RETRYABLE_FAILURE`는 Finalizer non-terminal retry로 분리돼 유지된다.
+- sourced WAIT/REJECT/UNKNOWN을 실제 기존 execution router에 전달해 모두 `NO_ACTION`이고 GuardEvaluation·Approval·OrderIntent·TradingOrder가 0임을 검증했다. Finalizer 자체는 DecisionExecution을 만들지 않으며 BUY도 자동 실행되지 않고 Decision execution/config field는 null이다.
+- Phase 9E focused 19건, Phase 3~9/migration 0040/Decision API·Execution/legacy 집중 회귀와 backend 전체 641건이 통과했고 전체 Ruff와 `git diff --check`를 통과했다. migration 0040, ORM schema, scheduler, Execution handoff, production Gate seed는 변경하지 않았다.
+- local PostgreSQL test DSN·service·Docker CLI·PostgreSQL secret이 없어 PostgreSQL 검증은 `NOT_RUN`이다. Phase 9 application/runtime Finalization·Activation 계층은 CLOSED이며 migration 0039→0040, CHECK/nullability, Gate/run locking, concurrent admission/Finalizer, source partial unique와 TOCTOU는 별도 production validation `OPEN_BACKLOG`로 유지한다.
+
+### 2026-08-27 Cresta v2 Phase 9D Server-owned Decision Finalizer 완료
+
+- 별도 provider-less `decision_finalizer` service에 exact `entry-finalization-identity-v1` canonical builder, `v7fin-` evaluation identity, authoritative TRADING/ENTRY source validator와 immutable `sourced-entry-decision-v1` Decision builder를 구현했다. C/B/A와 ENTRY_ARBITER의 frozen Context·stage·output hash·status/action·policy·validity lineage를 Finalizer boundary에서 다시 검증하며 consensus나 confidence/risk를 재계산하지 않는다.
+- Finalizer는 frozen/current Activation Gate를 live evidence와 DB-authoritative time으로 확인하고 insert flush 뒤 source expiry와 Gate를 다시 확인한다. PASS만 Decision을 commit하고 CLOSED/SUPERSEDED는 `CANCELLED`, invalid/source/identity failure는 `FAILED`, DB retryable failure는 `RUNNING`을 유지하며 exact `finalization-audit-v1` AuditLog와 completed_at 규칙을 적용한다.
+- lookup-first exact comparator, run/source/evaluation uniqueness와 IntegrityError rollback/relookup으로 same identity retry, ambiguous commit recovery와 concurrent insert loser recovery foundation을 구현했다. Decision insert, success audit와 run `SUCCEEDED` transition은 한 transaction이며 post-flush failure와 write-boundary Gate/expiry 변화는 partial row 없이 rollback한다.
+- Arbiter commit과 분리된 동일 reconciliation helper를 opportunistic post-Arbiter 및 idle/crash recovery에 연결했다. DIAGNOSTIC은 Finalizer 대상에서 제외하고 Arbiter action 네 종류의 정상 output은 run `SUCCEEDED`, `CONFLICTED/TIMED_OUT/FAILED`는 exact `ENTRY_ARBITER_*` failure로 별도 종료한다.
+- production-style SQLite E2E에서 BUY/WAIT/REJECT/UNKNOWN을 exact Decision action/reason/validity와 legacy nullable field null로 보존하고 sourced list/detail API lineage 및 UNKNOWN round-trip을 확인했다. Finalization 중 LlmInvocation/Provider 추가 0건이며 BUY에서도 DecisionExecution·Approval·OrderIntent·TradingOrder·Broker 0건이다. 기존 Execution no-action 분류에는 `UNKNOWN`만 최소 추가했다.
+- Phase 9D focused 26건, Phase 9C.1~9D·Phase 4~8·legacy Decision/Execution 집중 회귀와 backend 전체 622건이 통과했고 전체 Ruff와 `git diff --check`를 통과했다. migration, ORM schema, scheduler, Execution integration은 변경하지 않았고 0040을 유지했다. PostgreSQL migration/locking/exact-one/concurrent insert/TOCTOU/ambiguous-commit 실환경 검증은 Phase 9E backlog다.
+
+### 2026-08-27 Cresta v2 Phase 9C.2 TRADING Admission / Runtime Propagation 완료
+
+- 공개 API와 scheduler에 purpose 선택 surface를 추가하지 않고 internal/server-owned `create_v7_upstream_trading_run`을 구현했다. admission은 `purpose=TRADING` Scout input, 일곱 Scout/C/B/A route snapshot, 세 ACTIVE PolicyProfile map, 현재 exact-one ACTIVE+OPEN Gate를 한 transaction에서 선택하고 upstream 7 stage만 생성한다.
+- 실제 선택한 Policy/Route/Model/Prompt와 DAG·Context·Result·Arbiter·consensus contract를 `VersionSnapshot`으로 재구성해 Gate snapshot/hash와 exact 비교한다. Gate 부재/CLOSED/invalid/DB retryable, snapshot mismatch, identity provenance mismatch는 partial input/run/stage 없이 fail-closed하며 strict `finalization-audit-v1` admission audit을 별도 transaction에 남긴다.
+- AgentRun에 Gate ConfigurationVersion ID와 full payload hash를 freeze하고 같은 TRADING identity는 exact Gate/Policy/Route일 때만 재사용한다. Gate가 바뀐 같은 identity는 기존 run을 수정하지 않고 `ACTIVATION_GATE_SUPERSEDED`로 거부하며 DIAGNOSTIC input/run identity와 Gate NULL provenance는 분리해 유지한다.
+- DecisionContext freeze, frozen Policy resolver, C/B/A materialization·Provider execution, Arbiter reconciliation/execution이 `purpose=TRADING`을 보존하도록 확장했다. admission 뒤에는 frozen Gate 구조/hash만 검증하고 current Gate를 다시 선택하지 않으므로 mid-pipeline supersede·CLOSED 뒤에도 evaluation은 ArbiterResult까지 완료되며 frozen Gate와 semantic inputs는 불변이다.
+- production-style SQLite E2E에서 normal/superseded/CLOSED Gate 모두 upstream→Context→C/B/A→ENTRY_ARBITER를 통과했다. Gate는 LLM messages와 Arbiter input에 노출되지 않았고 Decision·DecisionExecution·Approval·OrderIntent·TradingOrder·Broker side effect는 0, run은 Finalizer 대기 `RUNNING` 상태를 유지했다.
+- Phase 9C.2 focused 16건, Context promotion regression 포함 35건, Phase 4~9 및 legacy Decision/Execution 집중 회귀가 통과했다. workspace basetemp로 backend 전체 596건, Ruff와 `git diff --check`를 통과했다. migration은 추가·수정하지 않았고 0040을 유지했다. PostgreSQL exact-one/row-lock/TOCTOU/concurrent admission은 미검증이다.
+- Decision Finalizer, live finalization Gate revalidation, terminal lifecycle/reconciliation, scheduler, Execution/Approval/Order/Broker 연결은 구현하지 않았으며 Phase 9D로 유지한다.
+
+### 2026-08-27 Cresta v2 Phase 9C.1 Decision Persistence / Activation Gate Foundation 완료
+
+- additive Alembic `20260827_0040`으로 Decision schema version 길이를 32로 확대하고 `UNKNOWN`, exact 아홉 nullable legacy field, nullable execution outcome, legacy/sourced conditional CHECK와 destructive downgrade guard를 구현했다. 기존 0039와 legacy row는 수정·backfill하지 않았다.
+- Decision ORM과 server-owned representation validator가 source all-or-none, `sourced-entry-decision-v1`, TRADING/ENTRY/VALID, 네 action, exact null/execution/config 계약을 보존한다. 기존 legacy 생성/API는 non-null Scout/Core representation과 `DecisionResponse`를 유지한다.
+- Decision API에 `SourcedEntryDecisionResponse` union과 strict schema/source discriminator를 추가했다. sourced branch는 legacy Scout/Core를 parse하지 않고 canonical Arbiter output에서 source run/stage/hash, Context, consensus pattern과 ordered C/B/A lineage를 read-time resolve한다.
+- `activation-gate-v1` exact Pydantic/domain schema, canonical UTC JSON, snapshot/payload SHA-256, full acceptance evidence/artifact/freshness 검증, DB-backed PolicyProfile/Route/Model/Prompt target verifier를 구현했다. ConfigurationVersion `V7_ENTRY_ACTIVATION` DRAFT→VALIDATED→ACTIVE control plane과 ACTIVE+OPEN selector, CLOSED/INVALID/DB_RETRYABLE_FAILURE 분류 및 frozen Gate PASS/SUPERSEDED verifier를 제공한다.
+- production Gate/Policy/Route seed, purpose=TRADING admission/run 생성, Gate freeze/propagation, Decision Finalizer, scheduler·Execution·Approval·Order·Broker 연결은 구현하지 않았다.
+- SQLite focused/migration 17건, legacy Decision/Configuration 회귀 59건과 전체 backend 580건을 통과했고 Ruff와 `git diff --check`도 통과했다. PostgreSQL migration DDL/CHECK와 concurrent lifecycle은 환경 부재로 미검증이다.
+
+### 2026-08-27 Cresta v2 Phase 9B Activation Gate / Decision Finalizer Contract Finalization 완료
+
+- Phase 9A gap을 바탕으로 `activation-gate-v1`의 exact nine-field payload, nested version snapshot·Policy/일곱 Route map·safety evidence, OPEN/CLOSED·MOCK, null/list/time canonicalization, snapshot/payload SHA-256과 admission freeze/live revalidation을 CFG-104~111로 확정했다.
+- `entry-finalization-identity-v1`의 exact seven-field material과 `v7fin-` identity, source run/Context/C/B/A/Arbiter application validation, all-four action preservation, separate reconciliation trigger와 12-step atomic transaction을 AI-276~286, MAO-256~262, DB-205~213으로 확정했다.
+- sourced persistence/API discriminator를 `sourced-entry-decision-v1`로 정했다. confidence·aggregate risk·representative model/prompt·legacy Scout/Core·latency·execution/config는 null, Arbiter reason과 `validation_status=VALID`는 authoritative value이며 sentinel을 금지한다. legacy API는 그대로 유지하고 sourced response는 read-time lineage를 사용한다.
+- 기존 AgentRun enum으로 DIAGNOSTIC success, TRADING finalization, Gate denial, invalid Gate/source/identity failure와 retryable DB failure의 state/error/completed_at을 고정했다. exact AuditLog action/result와 `finalization-audit-v1` metadata를 사용하며 terminal Decision 부재를 정상적으로 설명한다.
+- Phase 9 acceptance를 기존 T-V2-ACT/DB-FIN/DB-GATE/DB-MIG/EXE에 연결하고 canonical Gate, purpose 분리, 네 action/null payload, idempotency/race/expiry/audit/recovery/API/lifecycle/Execution 0건 계획 시험을 추가했다.
+- 이 단계는 **SPEC_ONLY**다. production Python, ORM, migration, test code, Activation Gate, TRADING admission, Decision Finalizer, scheduler, Execution integration을 구현하거나 변경하지 않았고 commit/push하지 않았다. 구현은 Phase 9C/9D, production closure는 Phase 9E 범위다.
+
+### 2026-08-26 Cresta v2 Phase 8D ENTRY_ARBITER Production Acceptance 완료
+
+- production-style v7 DIAGNOSTIC 전체 경로를 Market/Input부터 upstream 7 stage, DecisionContext freeze, C/B/A Provider worker execution, Arbiter reconciliation·provider-less worker execution과 canonical `entry-consensus-v1`까지 all-BUY와 mandatory-UNKNOWN으로 재검증했다. fixture가 DecisionAgentResult나 ArbiterResult/hash를 직접 삽입하지 않으며 실제 worker path가 생성한다.
+- `T-V2-ARB-017~029`를 추가해 27개 success action truth table, C/B/A 각 role의 다섯 valid non-success 15개 case, structural corruption, pre/post expiry, UNKNOWN 성공과 stage failure 분리, canonical hash, crash recovery, fencing, internal failure, provider-less·authority·Finalizer boundary를 독립 추적했다.
+- Context/result identity·hash·status/action·validity 변화는 canonical input/output hash에 반영되고 query/completion order는 semantic consensus를 바꾸지 않는다. confidence·entry/risk score와 Agent reason은 Arbiter input/Result에 없고, current ACTIVE Policy supersession 뒤에도 frozen Result provenance만 사용하며 terminal output JSON/hash가 불변임을 확인했다.
+- 동일 run에 DecisionContext 1개, C/B/A stage/result 각 1개, ENTRY_ARBITER 1개가 남고 ordered stage IDs/output hashes/status/actions, Context ID/hash, consensus policy, validity와 Arbiter output hash만으로 Finalizer-ready lineage를 재구성할 수 있다. Arbiter 성공 뒤에도 Decision·Approval·OrderIntent·TradingOrder·Broker·Finalizer·Activation·Execution side effect는 0건이다.
+- Phase 8D acceptance 39개, Phase 3B~8D 집중 회귀, v1~v6 Agent/LLM/provider/control-plane 집중 회귀 98개와 backend 전체 571개가 통과했다. 전체 Ruff와 `git diff --check`도 통과했다. 알려진 Starlette `httpx` deprecation warning 1개만 유지된다.
+- production correctness gap과 spec deviation은 발견되지 않아 Phase 8D production code 변경은 없다. PostgreSQL 환경 부재로 migration 0039, Context/Policy/admission/C/B/A/Arbiter concurrent materialization·exact-one locking·claim/reclaim/fencing/completion은 미검증 backlog로 유지한다.
+- Decision Finalizer, Activation Gate, v7 TRADING, production scheduler migration, Decision·Approval·Order·Broker·Execution 연결과 migration은 추가하지 않았다. ENTRY_ARBITER 계층은 이 범위에서 CLOSED다.
+
+### 2026-08-26 Cresta v2 Phase 8C ENTRY_ARBITER Implementation 완료
+
+- strict `entry-arbiter-input-v1`, normalized C/B/A input item, `entry-consensus-v1`, 여섯 `DecisionPattern`과 pattern/action/server reason 1:1 validation을 구현했다. exact schema는 extra field를 거부하며 canonical C/B/A order, Context ID/hash, stage ID/output hash/status/action, policy와 validity만 보존한다.
+- persisted C/B/A `decision-agent-result-v1`을 same-run/context, terminal state, canonical output hash, strict schema, role/type, state/status, frozen Policy provenance와 Context 동일 validity로 다시 검증한다. valid non-success 다섯 상태는 정상 `MANDATORY_UNKNOWN/UNKNOWN` input이고 structural corruption·pre-materialization expiry는 Arbiter stage를 만들지 않는다.
+- 별도 arbiter-stage reconciliation이 canonical input/hash로 `ENTRY_ARBITER`를 원자적·멱등 materialize하며 C/B/A 세 role AND dependency를 저장한다. same hash는 stage를 재사용하고 mismatch는 기존 row를 수정하지 않고 conflict로 종료한다.
+- v7 logical/materializable/executable 11-role registry에서 ENTRY_ARBITER를 활성화하고 일반 `DEPENDENCY_OK`와 분리된 terminal structured-result eligibility, 기존 worker claim/lease/fencing과 explicit provider-less dispatch를 연결했다. route/invocation/Prompt/Model/Provider/network/web/tool/live/Broker는 모두 사용하지 않는다.
+- claim/completion에서 Context·C/B/A identities/hashes/results, input hash, expiry와 null route/invocation을 다시 검증한다. post-materialization mismatch는 output 없는 `CONFLICTED`, expiry는 `TIMED_OUT`, injected evaluator failure는 `FAILED`, stale fencing completion은 write 0건이다. 정상 UNKNOWN consensus도 stage는 `SUCCEEDED`이며 canonical ArbiterResult/output hash를 남긴다.
+- Phase 8C 집중 32개, Phase 3B~7E 집중 회귀 125개, v1~v6 Agent/LLM 집중 회귀 68개와 backend 전체 532개가 통과했다. 전체 Ruff와 `git diff --check`를 통과했으며 SQLite에서 production C/B/A→Arbiter BUY 및 structured non-success E2E를 검증했다.
+- PostgreSQL Arbiter concurrent reconciliation/materialization/claim/reclaim/fencing과 exact-one locking은 환경 부재로 미검증이다. migration, Finalizer, Activation Gate, v7 TRADING, scheduler, Decision·Approval·Order·Broker 연결은 추가하지 않았다.
+
+### 2026-08-25 Cresta v2 Phase 8B ENTRY_ARBITER Contract Finalization 완료
+
+- `entry-arbiter-input-v1`의 exact Context ID/hash, `consensus-policy-v1`, C/B/A ordered stage ID/output hash/status/action와 validity field 및 canonical JSON/SHA-256 stage input hash를 AI-266~275, DB-197~204로 확정했다.
+- `entry-consensus-v1`은 Context ID/hash, ordered `input_result_ids/input_results`, action, policy, 여섯 decision pattern, pattern별 server-owned reason 하나와 Context 동일 `valid_until`만 보존한다. confidence·score·PolicyProfile·Prompt·Model·Provider와 runtime timestamp는 금지했다.
+- 유효한 non-success DecisionAgentResult는 정상 `MANDATORY_UNKNOWN/UNKNOWN` consensus input이며 Arbiter stage는 `SUCCEEDED`다. 구조 오류·cross-run/context·materialization 전 만료는 stage를 만들지 않고, 이후 mismatch는 output 없는 `CONFLICTED`, expiry는 `TIMED_OUT`, evaluator internal failure는 `FAILED`로 확정했다.
+- C/B/A commit 뒤 별도 arbiter-stage reconciliation, 세 role AND dependency와 Arbiter-specific terminal structured-result eligibility, 기존 worker claim/lease/fencing의 provider-less 전용 dispatch, claim/completion integrity 재검증과 순서 독립 idempotency를 MAO-246~255로 확정했다.
+- 기존 `T-V2-ARB-001~004`를 현행 계약으로 갱신하고 `T-V2-ARB-005~016`을 추가해 structural failure, expiry/fencing, dependency, provider-less, authority, lineage와 regression acceptance를 계획했다.
+- 이 단계는 명세 전용이다. Python production/test code, migration, Arbiter·Finalizer·Activation·v7 TRADING·scheduler를 구현하거나 변경하지 않았다.
+
+### 2026-08-25 Cresta v2 Phase 7E Three-Agent Production E2E Acceptance 완료
+
+- production-style v7 DIAGNOSTIC 전체 경로를 Market/Input부터 upstream 7 stage, DecisionContext freeze, C/B/A reconciliation·worker Provider execution과 세 `decision-agent-result-v1`까지 재검증했다. fixture가 Decision Agent output을 직접 삽입하지 않으며 실제 worker dispatch가 결과를 생성한다.
+- 세 Agent payload의 resolved DecisionContext canonical section과 ID/hash가 동일하고, 각 payload에는 자기 frozen Policy 하나와 자기 Route/Prompt/Model provenance만 존재함을 확인했다. 세 stage의 dependency는 Candidate Audit 하나뿐이며 `A→C→B` 역순 실행에서도 role별 canonical input hash가 변하지 않았다.
+- BUY/WAIT/REJECT 네 success 조합, role별 `INSUFFICIENT_DATA/TIMED_OUT/FAILED/INVALID_OUTPUT/CONFLICTED`, 세 mixed-result E2E를 검증했다. 모든 non-success는 `UNKNOWN/0/null`, 모든 권위 terminal stage는 canonical output JSON/hash를 보존한다.
+- Phase 7E에서 발견한 correctness gap 하나를 최소 수정했다. invocation 시작 뒤 lease가 만료된 Decision Agent를 일반 recovery가 처리할 때 null output으로 terminalize하던 경로를 `TIMED_OUT/UNKNOWN + DECISION_AGENT_CLAIM_OUTCOME_UNKNOWN` structured result/hash 저장으로 바꿨다. 해당 stage는 재호출되지 않으며 stale completion도 덮어쓰지 못한다.
+- model FAILOVER fixture에서 primary 요청 실패 뒤 fallback model 성공을 실제 두 `LlmInvocation`으로 검증했다. Result는 primary requested profile, fallback actual provider/model, `fallback_used=true`를 보존하고 fallback path와 provenance 변화가 canonical hash에 반영된다.
+- Context/Scout/EvidenceBundle/Candidate Audit, Policy, Prompt와 stage input corruption, Context expiry, Policy·Route·Prompt supersession, fencing, evidence namespace와 reason allowlist를 재검증했다. 정상 supersession은 frozen run을 바꾸지 않고 실제 corruption만 `CONFLICTED/UNKNOWN`으로 폐기한다.
+- 동일 run에서 정확히 C/B/A stage/result 각 1개와 완전한 Context·Policy·Route·Prompt·model lineage/output hash가 남아 후속 Arbiter가 추가 table 없이 결정론적으로 조회할 수 있다. terminal 이후 reconciliation과 다른 Agent 완료는 기존 output JSON/hash를 변경하지 않는다.
+- C/B/A all-BUY를 포함한 모든 case에서 ENTRY_ARBITER·Decision·Approval·OrderIntent·TradingOrder·Broker·외부 도구 호출은 0건이다. Arbiter, Finalizer, Activation Gate, v7 TRADING과 scheduler는 구현하지 않았다.
+- Phase 7E 집중 21개, Phase 7E+7D 집중 42개, Phase 3B~7E·LLM control-plane/provider·v1~v6 집중 회귀 224개와 backend 전체 500개가 통과했다. Ruff와 `git diff --check`도 통과했다.
+- SQLite에서 순차 E2E, transaction-state, recovery/fencing, supersession과 idempotency를 검증했다. PostgreSQL migration 0039, Context/Policy/admission/materialization/claim 동시성, concurrent reclaim/completion과 Provider-call transaction boundary는 계속 미검증 backlog다. Decision Agent layer는 이 범위에서 CLOSED다.
+
+### 2026-08-25 Cresta v2 Phase 7D Decision Agent Execution Runtime 완료
+
+- `CONSERVATIVE_DECISION`, `BALANCED_DECISION`, `AGGRESSIVE_DECISION`을 v7 materializable/executable role로 활성화하고 production worker에서 Scout/Core와 분리된 Decision Agent 전용 dispatch로 연결했다. `ENTRY_ARBITER`는 계속 materialize·claim·execute하지 않는다.
+- claim commit 뒤 frozen DecisionContext·자기 PolicyProfile·7-route snapshot·Prompt·requested ModelProfile과 canonical `decision-agent-input-v1`을 준비하고, 별도 짧은 invocation transaction을 commit한 후 row lock과 DB transaction 없이 Provider를 호출한다. 완료는 stage/run 최소 row lock을 다시 획득하는 별도 transaction에서 수행한다.
+- Provider request는 canonical Decision Agent input과 `decision-agent-model-output-v1` JSON Schema만 사용하고 tool policy `NONE`, allowed tools 빈 목록으로 고정했다. 요청/실제 provider·model, fallback, usage, latency, raw response hash와 제한된 model output capture를 기존 `LlmInvocation`에 보존한다.
+- strict model output/status/action/confidence/score/reason/evidence 검증 뒤 server-owned `decision-agent-result-v1`을 canonical JSON/SHA-256으로 저장한다. timeout은 `TIMED_OUT`, 명확한 Provider failure는 `FAILED`, schema/reason/evidence 위반은 `INVALID_OUTPUT`, frozen provenance 불일치는 `CONFLICTED`이며 모두 `UNKNOWN/0/null` structured result와 output hash를 남긴다.
+- completion 직전에 Context canonical hash·same-run·expiry, frozen Policy ID/hash/sequence/role, frozen Route/Prompt/Model과 stage input hash를 재검증한다. Policy 또는 route의 후속 lifecycle supersession 자체는 기존 run을 바꾸지 않으며 Context expiry는 성공 응답을 `TIMED_OUT/UNKNOWN`으로 폐기한다. lease owner·expiry·fencing token이 달라진 stale worker는 invocation/result/stage를 덮어쓰지 않는다.
+- C/B/A는 Candidate Audit만 공통 dependency로 가지며 다른 Decision Agent output·Policy·Prompt를 입력에서 읽지 않는다. BUY result를 포함해 Decision·Approval·TradingOrder·Broker·ExecutionStage·Activation Gate·Arbiter resource를 만들지 않는다.
+- Phase 7D 집중 16개, Phase 3B~7D·LLM control-plane·v1~v6 집중 회귀 198개와 backend 전체 474개가 통과했다. Ruff와 `git diff --check`도 통과했다.
+- SQLite에서 canonical execution, transaction boundary 관찰, structured failure, completion race와 stale fencing write 차단을 검증했다. PostgreSQL migration 0039, Decision Agent claim/fencing 동시성, network-call transaction 분리와 concurrent completion/reclaim은 환경 부재로 미검증 backlog에 유지한다. migration, production seed, scheduler, Arbiter, Finalizer, Activation Gate, v7 TRADING과 주문 실행은 추가하지 않았다.
+
+### 2026-08-25 Cresta v2 Phase 7C Decision Agent Foundation 완료
+
+- `decision-agent-input-v1`, `decision-agent-stage-input-v1`, `decision-agent-model-output-v1`, `decision-agent-result-v1` strict Pydantic/domain 계약과 status/action/confidence/score, verified evidence subset, model/server reason allowlist 검증을 구현했다.
+- C/B/A 공통 role↔agent type registry, 여섯 required semantic Policy parameter validator, frozen/SUPERSEDED own-policy resolver와 cross-role fail-closed를 구현했다. 실제 profile별 threshold 값은 production configuration에 남기고 코드에 넣지 않았다.
+- schema/Prompt/Route/assignment control-plane이 C/B/A를 지원하며 Decision Agent WEB_SEARCH, Prompt threshold 숫자, role/prompt mismatch를 차단한다. production Prompt/Route/Model row를 seed하지 않았다.
+- 신규 v7 admission은 Scout 4개+C/B/A 3개의 정확히 7개 route snapshot을 원자 freeze하고 upstream 7 stage만 만든다. historical 4-route run은 변경하지 않으며 C/B/A provenance가 없으면 materialization 대상이 아니다.
+- final logical 11-role registry, Phase 7C materializable 10-role set과 executable upstream 7-role set을 분리했다. C/B/A stage는 committed Context 뒤 별도 reconciliation에서 Candidate Audit 단일 dependency로 원자적·멱등 생성되지만 claim/Provider 실행은 차단되고 ENTRY_ARBITER는 생성·claim·실행되지 않는다.
+- immutable DecisionContext resolver, own Policy/Route/Prompt/Model resolver, canonical Provider input/hash와 stage input/hash builder를 구현했다. exact partial retry는 복구하고 stored hash/provenance mismatch는 기존 stage를 수정하지 않고 conflict로 종료한다.
+- Phase 7C 집중 12개, Phase 5/6 포함 v7 집중 45개, Phase 3B/3C·LLM control-plane·v1~v6 회귀 98개와 backend 전체 458개가 통과했다. Ruff와 `git diff --check`도 통과했다.
+- PostgreSQL migration 0039, DecisionContext/Policy snapshot/v7 admission/C/B/A materialization의 PostgreSQL 동시성은 환경 부재로 계속 미검증이다. 이번 Phase에서 migration, Provider 호출, DecisionAgentResult runtime 저장, completion transaction split, Arbiter, Finalizer, Activation Gate와 거래 resource는 구현하지 않았다.
+
+### 2026-08-25 Cresta v2 Phase 7B Decision Agent Contract Finalization 완료
+
+- AI-256~265, MAO-236~245, DB-191~196으로 `decision-agent-input-v1`, strict PolicyProfile, `decision-agent-stage-input-v1`, model/result 분리, status·score·evidence·reason·failure matrix와 completion revalidation을 확정했다.
+- 신규 v7 admission의 일곱 route freeze, historical 네-route run 보존, committed Context 뒤 C/B/A atomic reconciliation, Candidate Audit 직접 dependency와 세 role 병렬 dispatch, claim/network/completion transaction 분리를 명세했다.
+- C/B/A는 frozen input만 평가하며 외부 검색·Broker·거래·Arbiter 권한이 없다. Phase 7에서는 Arbiter가 logical registry에만 있고 materialize·execute되지 않는다.
+- `TEST_PLAN.md`에 Phase 7C foundation, 7D execution, 7E acceptance/revalidation 계획 시험 `T-V2-DA-*` 22개를 등록해 요청된 26개 acceptance scenario를 개별 또는 table-driven 조합으로 모두 포함했다.
+- 이 단계는 명세 전용이다. Python/Pydantic/runtime/API/route/prompt provisioning/migration/test code는 변경하거나 실행하지 않았고 Decision Agent·Arbiter·Finalizer도 실행하지 않았다.
+
+### 2026-08-25 Cresta v2 Phase 6 News / Market / Position Risk Scout v7 Acceptance 완료
+
+- 기존 News·Market·Position Risk의 route resolution, Provider 호출, `AgentScoutModelOutput` schema, reason allowlist, verified evidence subset, UNRATED candidate 저장, server-owned fallback과 `AgentAssessmentV2` normalization을 v7 production worker에서 재사용·재검증했다. 새 Scout runtime, persistence 또는 migration은 추가하지 않았다.
+- v7 네 Scout Provider payload에 stage `input_hash`의 정확한 `scout-role-input-v1` material을 공통 전달하고, 역할별 payload/reference는 실제 입력만 남겼다. News에는 Technical indicator·position을, Market에는 indicator·position을 전달하지 않으며 PolicyProfile과 다른 Scout output은 모든 role hash 밖에 유지한다.
+- web search는 News와 Market의 명시적으로 활성화된 route에만 허용하고 Technical·Position Risk·Core route에는 admission 방어 검사를 적용했다. 검색 결과는 run의 `UNRATED EvidenceItem` candidate로만 저장하며 현재 immutable EvidenceBundle에 편입하지 않고, verified allowlist 밖 candidate ID·URL을 `evidence_refs`로 반환하면 output을 거부한다.
+- Market Scout는 실행 직전 frozen MarketContext의 ID, payload hash, quality와 `valid_until`을 현재 row와 재대조한다. 누락은 기존 server-owned `INSUFFICIENT_DATA/UNKNOWN`, 변조·quality conflict·expiry는 Provider 호출 전 `CONFLICTED/UNKNOWN`과 null score로 fail-closed 한다.
+- v7 ENTRY의 Position Risk는 stage를 유지하면서 Provider·web search·추가 외부 조회 없이 explicit `NOT_APPLICABLE/UNKNOWN`, null score와 `OPEN_POSITION_NOT_FOUND`를 기록한다. stage 부재는 Context freeze 실패이며 frozen position provenance 변경은 Position role hash 변경으로 드러난다. Provider가 적용되는 기존 v6 POSITION 경로의 schema 실패도 기존 fail-closed 의미를 유지한다.
+- Phase 6의 20개 acceptance ID를 parametrized 집중시험 17개로 구현했다. Phase 3B/3C·4C·5·6 및 기존 Agent Runtime/외부 Provider/v6 회귀 89개와 backend 전체 443개가 통과했다. Ruff와 `git diff --check`도 통과했다. PostgreSQL migration 0039, concurrent Context freeze, PolicyProfile transaction snapshot과 concurrent v7 admission은 환경 부재로 계속 미검증이다.
+
+### 2026-08-25 Cresta v2 Phase 5 Technical Scout v7 Acceptance 완료
+
+- 기존 v6 Technical Scout의 route resolution, Provider invocation, `AgentScoutModelOutput` schema 검증, reason-code allowlist, evidence subset 검증과 `AgentAssessmentV2` server normalization을 v7 production path에서 재사용·재검증했다. Technical Scout는 투자 행동이나 주문 권한을 만들지 않고 entry quality assessment만 기록한다.
+- v7 Technical Provider payload에 stage `input_hash`의 정확한 `scout-role-input-v1` material을 포함해 `scout-input-v2`, EvidenceBundle, route/input-contract와 Indicator provenance를 실제 전달 입력에서 직접 재현할 수 있게 했다. PolicyProfile, 다른 Scout output, MarketContext·position 전용 data와 Decision Agent 이후 data는 Technical material에 포함하지 않는다.
+- stage 실행 직전에 frozen MarketSnapshot/IndicatorSnapshot identity·hash·calculator provenance를 현재 참조와 다시 대조한다. Indicator 누락은 Provider 호출 없이 `INSUFFICIENT_DATA/UNKNOWN`과 null score, admission 이후 변조·불일치는 `CONFLICTED/UNKNOWN`과 null score로 fail-closed 한다.
+- Technical route는 web search를 admission에서 방어적으로 거부하고 `web_search_enabled`를 route version snapshot/hash에 고정해 실행 시 재검증한다. 정상 v7 request는 tool policy `NONE`, allowed tools 빈 목록이며 추가 시세·뉴스·외부 API를 요청하지 않는다.
+- Phase 5 집중시험 10개, Phase 4C upstream, Phase 3A~3C, 기존 Agent Runtime/외부 output/worker/v6 Core 회귀와 backend 전체 426개가 통과했다. Ruff와 `git diff --check`도 통과했다. PostgreSQL migration 0039 및 기존 locking/concurrency 항목은 환경 부재로 계속 미검증이다.
+
+### 2026-08-25 Cresta v2 Phase 4C v7 Upstream Runtime 완료
+
+- production `scout-input-v2` builder가 MarketSnapshot, IndicatorSnapshot, 선택적 MarketContextSnapshot과 공통 server configuration provenance를 canonical JSON/hash로 고정한다. Market·indicator·context 유효 경계의 최솟값을 사용하며 필수 source 누락·불일치·만료는 admission 전에 fail-closed 한다. PolicyProfile은 input과 DecisionContext 밖에 유지한다.
+- `agent-dag-v7` DIAGNOSTIC/ENTRY 전용 admission이 input, 네 Scout route snapshot, C/B/A PolicyProfile map, AgentRun과 Intel·Verifier·네 Scout·Candidate Audit 7개 stage를 한 transaction에서 생성한다. CORE, C/B/A Decision Agent와 ENTRY_ARBITER stage는 만들거나 실행하지 않고 기존 v1~v6 stage plan·route·Core finalization은 유지한다.
+- v7 Scout는 `AgentAssessmentV2`와 server-owned input path를 사용한다. ENTRY에 열린 position이 없으면 Position Risk는 Provider 호출 없이 명시적 `NOT_APPLICABLE/UNKNOWN`을 기록한다. Scout stage input hash는 EvidenceBundle, route, input snapshot과 역할별 indicator/context/position provenance를 포함한 `scout-role-input-v1` material로 claim·execute 시 검증한다.
+- v7 Verifier는 configuration snapshot의 `dart_lookback_days`, `krx_lookback_days`, `naver_news_lookback_hours`로 `evidence-freshness-policy-v1` item validity와 최소 `valid_until`을 계산해 `evidence-verifier-v2`를 기록한다. Candidate Audit은 provider-free 기존 로직을 재사용해 `evidence-candidate-audit-v2` provenance와 candidate-set hash를 기록하며 EvidenceBundle을 변경하지 않는다.
+- Candidate Audit commit 뒤 별도 worker reconciliation transaction이 eligible run의 DecisionContext를 freeze한다. 같은 manifest retry는 중복을 만들지 않고 conflict는 기존 Context를 보존한 채 fail-closed 한다. Context 완료 후 AgentRun은 `RUNNING` checkpoint를 유지하며 CORE lookup이나 terminal finalization을 수행하지 않는다.
+- Phase 4C 집중시험 7개와 Phase 3A~3C·Agent Runtime·worker·v1~v6 finalization 회귀가 통과했다. backend 전체 416개, Ruff와 `git diff --check`가 통과했다. SQLite runtime logic만 검증했으며 PostgreSQL migration 0039, row locking/concurrent freeze, PolicyProfile transaction snapshot과 v7 admission concurrent conflict는 환경 부재로 계속 미검증이다.
+
+### 2026-08-25 Cresta v2 Phase 4B v7 Upstream Runtime 계약 확정
+
+- Phase 4A에서 기존 Intel/Evidence/네 Scout/Candidate Audit과 AgentAssessmentV2는 대부분 재사용 가능하지만 v7 contract registry, production `scout-input-v2`, Verifier/Audit v7 envelope, route set, role input hash, admission·checkpoint·Context reconciliation 연결이 없음을 확인했다. 기존 finalization의 CORE 전제와 4 Scout+CORE route 전제도 v7 gap으로 기록했다.
+- Phase 4B는 최종 11-stage `agent-dag-v7`을 유지하면서 Phase 4 실행 범위를 upstream 7 stage와 server-owned DecisionContext Freeze로 한정했다. upstream stage만 materialize하고 C/B/A Decision Agent·ENTRY_ARBITER·CORE를 만들거나 실행하지 않으며 Context 성공 후 AgentRun은 `RUNNING` checkpoint를 유지한다.
+- `scout-input-v2`, `evidence-verifier-v2`, `evidence-candidate-audit-v2`, `evidence-freshness-policy-v1`, `scout-role-input-v1`, DAG별 route-required set, atomic diagnostic admission과 Candidate Audit commit 후 별도 reconciliation 계약을 AI-251~255, MAO-221~235, DB-183~190으로 확정했다.
+- Evidence freshness는 기존 `dart_lookback_days`, `krx_lookback_days`, `naver_news_lookback_hours`의 versioned configuration snapshot만 사용하며 새 숫자 TTL을 만들지 않는다. usable verified evidence 또는 필수 validity provenance가 없으면 v7 Context는 fail-closed 한다.
+- Phase 4B는 명세와 계획 시험만 갱신했다. Python·SQLAlchemy·Alembic·테스트 코드·API/UI·Decision Agent·Arbiter·Finalizer·production scheduler를 변경하거나 구현하지 않았고 runtime 시험은 실행하지 않았다.
+
+### 2026-08-25 Cresta v2 Phase 3C PolicyProfile Admission / Version Freeze 완료
+
+- system-owned ConfigurationVersion category `V7_ENTRY_POLICY_CONSERVATIVE`, `V7_ENTRY_POLICY_BALANCED`, `V7_ENTRY_POLICY_AGGRESSIVE`와 `policy-schema-v1` payload 계약을 구현했다. `scope=SYSTEM`, 첫 target `MOCK`, category↔agent type, canonical payload/hash, ACTIVE lifecycle과 validation/activation timestamp를 fail-closed 검증한다.
+- v7 ENTRY `DIAGNOSTIC` admission은 세 ACTIVE profile을 같은 transaction에서 잠금·선택하고 `CONSERVATIVE → BALANCED → AGGRESSIVE` 순서의 `policy-version-map-v1` canonical JSON/hash를 AgentRun 신규 provenance 컬럼에 INSERT 시 함께 고정한다. 누락·중복·schema/payload/type/hash/target 불일치 시 AgentRun을 만들지 않는다.
+- 동일 input/DAG/ENTRY slot 재시도는 현재 선택 map이 최초 저장 map과 완전히 같을 때만 기존 run을 반환한다. ACTIVE policy가 교체되면 기존 run을 변경하거나 새 policy로 재해석하지 않고 conflict 처리하며, 새 input identity의 run은 새 ACTIVE map을 사용한다. 저장 ID/hash로 과거 `SUPERSEDED` profile provenance를 검증·복원할 수 있다.
+- PolicyProfile map은 DecisionContext manifest/hash와 분리했고 v7 stage·Provider·Arbiter·Finalizer·Activation Gate·TRADING admission·scheduler/API를 구현하지 않았다. 기존 v1~v6 diagnostic과 POSITION advisory admission은 변경하지 않았다.
+- Phase 3C 집중시험 18개와 Phase 3A/3B·AgentRun·worker·ConfigurationVersion 관련 회귀 62개가 통과했다. 전체 backend 409개와 Ruff·`git diff --check` 통과를 확인했으며 SQLite selection/version semantics만 검증했다. PostgreSQL migration 0039와 DecisionContext locking/concurrency는 환경 부재로 계속 미검증이고 기존 Alembic drift는 변경하지 않았다.
+
+### 2026-08-25 Cresta v2 Phase 3B DecisionContext Freeze 완료
+
+- `freeze_decision_context(session, run_id)` server-owned transaction이 `agent-dag-v7 + ENTRY + DIAGNOSTIC/TRADING` run을 잠그고 `scout-input-v2`, 같은-run EvidenceBundle·Verifier, 네 Scout, Candidate Audit과 선택적 MarketContext를 DB에서 직접 선택·검증한다. 호출자가 reference ID/hash를 주입하는 API는 만들지 않았다.
+- `decision-context-v1` canonical reference manifest는 공용 canonical JSON/SHA-256 helper를 재사용하고 raw input/evidence/stage output과 PolicyProfile map을 복사하지 않는다. run/input/evidence/market/scout 유효시각의 최솟값을 Context `valid_until`으로 고정한다.
+- 같은 run과 같은 manifest/hash의 반복 freeze는 기존 Context를 반환하고 다른 material은 `DECISION_CONTEXT_FREEZE_CONFLICT`로 fail-closed 한다. Context update/replacement path와 freeze용 AgentStage/LlmInvocation은 만들지 않았다.
+- v7 C/B/A Decision Agent stage claim은 committed·미만료·hash-consistent DecisionContext가 없으면 건너뛴다. v1~v6 claim은 기존 동작을 유지하며 Decision Agent Provider 실행, Arbiter, Finalizer, PolicyProfile selection, Activation Gate와 scheduler migration은 구현하지 않았다.
+- Phase 3B 집중시험 14개, Phase 3A persistence 8개와 기존 worker 3개, backend 전체 386개 및 Ruff·`git diff --check`가 통과했다. SQLite는 순차 idempotency/unique/claim 의미를 검증했지만 `FOR UPDATE SKIP LOCKED` 실제 동시성 및 PostgreSQL은 환경 부재로 미검증이다. 기존 Alembic drift는 동일하며 새 drift는 없다.
+
+### 2026-08-25 Cresta v2 Phase 3A Persistence Schema / ORM Foundation 완료
+
+- Alembic `20260825_0039`가 `decision_contexts` 1:1 reference manifest, AgentRun v7 nullable policy/gate provenance와 `TRADING` purpose, 네 v7 stage role, 세 Decision Agent route/prompt role, Decision source run/stage/output hash lineage를 추가했다.
+- DB는 Context run unique와 기본 FK, Decision source all-or-none, source run/stage별 partial unique, 역사적 role allowlist와 `ON DELETE RESTRICT` lineage를 강제한다. Context same-run·manifest/hash, v7 admission policy/gate validity와 Finalizer role/run/hash 검증은 Phase 3B service 책임으로 남겼다.
+- 기존 v1~v6 Core stage, POSITION `TRADING_ADVISORY` basis/fusion lineage와 legacy Decision은 rewrite/backfill 없이 보존하며 source/provenance 신규 필드는 NULL이다. v7 Context·run·role·route/prompt·source lineage가 존재하면 downgrade를 명시적으로 거부한다.
+- Phase 3A 집중시험 8개, backend 전체 372개와 Ruff가 통과했다. SQLite에서 빈 DB 및 legacy fixture upgrade와 upgrade→downgrade→upgrade, destructive downgrade guard를 검증했다. 실제 PostgreSQL migration은 실행 환경 부재로 미검증이며 Phase 3B는 시작하지 않았다.
+
+### 2026-08-25 Cresta v2 Phase 2 Domain/Persistence 계약 확정
+
+- Phase 2A에서 현재 ORM, Agent Runtime persistence, ENTRY/POSITION/POSITION advisory Decision lineage와 migration 이력을 역설계했다.
+- Phase 2B에서 새 DecisionRun·EvidenceSet을 만들지 않고 기존 AgentRun을 v7 evaluation root로 확장하며, AgentRun당 하나의 별도 immutable `decision_contexts` reference manifest를 두는 mapping을 결정했다.
+- Phase 2C에서 `docs/DATABASE_SPEC.md` DB-157~182를 persistence 단일 기준으로 확정했다. DecisionAgentResult와 ArbiterResult는 기존 AgentStageRun output을 사용하고 PolicyProfile 3종과 Activation Gate는 system-owned ConfigurationVersion을 재사용한다.
+- finalized v7 ENTRY Decision은 기존 Decision에 nullable source AgentRun·exact ENTRY_ARBITER stage/output hash lineage를 추가하고 기존 `evaluation_request_id` unique를 finalization idempotency로 재사용하도록 확정했다.
+- v7 최초 slice는 admission부터 `DIAGNOSTIC`이고 ArbiterResult에서 종료한다. activation 이후 production run만 admission부터 `TRADING`이며 DIAGNOSTIC 결과 승격은 금지한다. Activation Gate와 ExecutionStage는 독립이다.
+- Phase 2는 문서·계약만 완료했다. Python·SQLAlchemy·Alembic·DB·API/UI·테스트 코드는 변경하지 않았고 migration도 생성하지 않았으며 runtime은 검증하지 않았다. Phase 3 persistence 기반 구현을 대기한다.
+
+### 2026-08-25 Cresta v2 ENTRY 의사결정 아키텍처 Phase 1 문서 정합성 보완
+
+- 2026-08-23 Phase 0 정적 역설계를 바탕으로 작성한 Phase 1 명세의 신규 ENTRY 목표 구조를 `Scout → shared immutable DecisionContext → Conservative/Balanced/Aggressive Decision Agent → Deterministic Arbiter → ArbiterResult → Decision Finalizer → purpose=TRADING, decision_kind=ENTRY Decision → 기존 Execution Orchestrator`로 정합화했다.
+- v7 최초 구현은 `SHADOW/DIAGNOSTIC`이며 `ArbiterResult`에서 종료한다. Decision Finalizer를 통한 TRADING Decision 생성은 별도 activation gate 이후에만 허용한다.
+- 현재 ENTRY 신규매수 판단은 외부 LLM Agent가 아니라 `deterministic-mock-v2`가 생성하며, 기존 외부 ENTRY Agent run은 `DIAGNOSTIC/SHADOW`로 실제 BUY에 사용되지 않는다는 현행 상태를 유지한다.
+- Cresta v2 1차 전환은 ENTRY 판단에 한정한다. 기존 POSITION의 `deterministic-position-v1`, `TRADING_ADVISORY`, `position-agent-fusion-v1` 흐름은 유지한다.
+- 기존 `agent-dag-v1`~`agent-dag-v6`, Core 계약과 과거 구현·시험 기록은 소급 변경하지 않는다.
+- Phase 1은 명세와 계획 시험 작성만 완료했다. 코드·DB migration·API/UI 변경과 runtime 검증은 수행하지 않았다.
+- Phase 0에서 확인된 ExecutionStage 우선순위, 승인 후 stage downgrade, Broker 송신 직전 stage/provenance 재검사, 진단 주문 분리와 FIXED_STOP stage 우회 결함은 EXE-200~213과 계획 회귀시험으로 명문화했으며 아직 수정·검증되지 않았다.
+- 단, Phase 0에서 APPROVAL_ONLY+AUTOMATIC 우회, APPROVAL_ONLY의 FIXED_STOP 자동 주문, stage downgrade 후 Approval/CREATED 주문 재검사 누락을 확인했으며 EXE-200~213 기준으로 재설계·회귀수정 예정이다.
+
 ### 2026-08-22 Console 상단 키움 상태 일치
 
 - Console 상단의 `Paper Gate` 표시를 제거하고 시스템 상태 화면과 동일한 인증 Broker endpoint에서 `KIWOOM_MOCK_PRIMARY` worker·gate 상태를 조회하도록 통일했다. 연결된 환경에서 legacy Paper `STARTING`이 키움 gate 상태처럼 보이던 불일치를 제거했다.
@@ -216,9 +588,10 @@
 | 시장데이터·Watch | `docs/MARKET_DATA_SPEC.md` | 구현 중 | 감시 종목·키움 `0B`·`0D`, 1분봉과 v2 VWAP·SMA5·상대 거래량·실현 변동성·고점 하락률·spread 영속화 로컬 검증 완료; 체결강도와 v2 실제 장중 수신 미검증 |
 | Scout·Core AI 계약 | `docs/AI_DECISION_SPEC.md` | 구현 중 | 불변 `scout-input-v1`, ENTRY `deterministic-mock-v2`, POSITION `deterministic-position-v1`, 외부 Provider DIAGNOSTIC 판단과 `agent-server-input-v1` 포지션 파생값을 로컬 검증 완료; scheduler 연속운전·실서버 POSITION 검증 대기 |
 | 다중 에이전트 오케스트레이션 | `docs/MULTI_AGENT_ORCHESTRATION_SPEC.md` | 구현 중 | Agent Runtime v6의 Intel·Verify·4개 Scout·Candidate Auditor·Core, 서버 입력과 불완전 Scout의 결정론적 Core 축소 구현; v6 로컬 회귀 완료, 실서버 검증 대기 |
+| Cresta v2 ENTRY Decision Architecture | `docs/AI_DECISION_SPEC.md`, `docs/MULTI_AGENT_ORCHESTRATION_SPEC.md`, `docs/SYSTEM_DESIGN.md`, `docs/DECISION_EXECUTION_SPEC.md`, `docs/DATABASE_SPEC.md` | Phase 10F Broker pre-send 완료 | Phase 3~9 Decision/Finalizer와 0041 foundation 위에 exact-one sourced handoff, complete BUY Guard, manual/automatic CREATED authority와 typed Broker pre-send/unsent revocation 구현. production handoff/PostgreSQL은 Phase 10G 대기 |
 | LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | 40개 Provider template, 35개 단일-key 등록, Native·OpenAI-compatible Adapter, 모델 동기화·역할·Prompt·FAIL_STOP/단일 FAILOVER·service tier·웹 검색·호출 이력 구현; OpenAI·LLM Gateway 실제 SHADOW 호출 검증 완료, 복합 인증 5종·가격 기반 비용 집계 미구현 |
-| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | 구현 중 | 분봉·v2 지표·Scout 입력, LLM Foundation·Agent Runtime v6, Evidence·Market Context, venue 평가·적격 상태·캘린더 override·승인(`order_id`/`result_code`)·position origin provenance·Risk Guard 원장과 제한된 구조화 응답 이력을 `20260813_0035`까지 구현; Ubuntu PostgreSQL도 `0035` 적용 확인 |
-| 판단 실행·승인 | `docs/DECISION_EXECUTION_SPEC.md` | 구현 중 | DIAGNOSTIC/TRADING 경계, scheduler 인계, 멱등 SHADOW execution, 전체 BUY Guard, `APPROVAL_ONLY` BUY/PARTIAL_SELL/FULL_SELL 승인·자동 주문, FIXED_STOP 자동 매도와 승인 시 최신 snapshot·포지션 재평가 구현; TAKE_PROFIT·비상정지는 후속 |
+| DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | Phase 10C.1 SQLite 검증 완료·PostgreSQL 대기 | 현행 head `20260828_0041`; sourced execution discriminator/partial unique, stage provenance, typed Guard/OrderIntent provenance, Approval FK와 INVALIDATED foundation 구현. PostgreSQL DDL/FK/locking/concurrency 검증 대기 |
+| 판단 실행·승인 | `docs/DECISION_EXECUTION_SPEC.md` | Phase 10F Broker pre-send 완료 | sourced manual/automatic BUY와 fixed-stop의 live stage/mode/policy/financial/position `BROKER_SEND` Guard, strict MOCK, SUBMITTING commit 및 unsent INVALIDATED 회수 구현. scheduler/production handoff/PostgreSQL은 Phase 10G 대기 |
 | 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 선택형 DART·KRX overlay 감지 부팅 조정 unit 구현; 2026-08-05 기본·키움 재부팅 복구 통과, 신규 source overlay 재부팅 인수시험·백업·경보·복구훈련 미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 역사적 검토 | 2026-08-06 Foundation·Agent Runtime v1 착수 게이트 기록이며 현재 상태는 이 문서를 기준으로 한다. |
 | Backend·Docker 골격 | `docs/SYSTEM_DESIGN.md`, `docs/OPERATIONS_RUNBOOK.md` | 검증 완료 | API source UID `10001` 소유권·PostgreSQL·Redis·API·Frontend·gateway 기동과 HTTPS/내부 health 실서버 확인 |
@@ -334,12 +707,12 @@
 
 - Guard 전체 노출·예수금·일일진입·spread와 손절 trigger 완성
   - 고정 손절 trigger SHADOW 구현 완료(`StopTrigger` + `risk_events` + 매도 Guard, 주문 0건)
-  - **FIXED_STOP 자동 매도 주문 연결 완료**(`APPROVAL_ONLY`에서 `FULFILLED` → SELL `CREATED` 주문, Cresta-managed position만)
-  - **승인형 BUY 주문 생성 완료**(`MANUAL_APPROVAL` → `Approval(PENDING)` → 승인 시 `CREATED` 주문; `AUTOMATIC` → 직접 `CREATED`)
+  - FIXED_STOP APPROVAL_ONLY direct SELL P0는 Phase 10E에서 EXIT_PENDING/Order 0으로 교체했고 validated MOCK_AUTOMATIC+explicit AUTOMATIC에서만 CREATED를 허용한다.
+  - BUY manual Approval의 owner/CAS/target-bound one-time reauth/current-stage 재검사는 Phase 10D에서 완료했고 sourced automatic MOCK CREATED는 Phase 10E에서 완료했다.
   - **전체 Risk Guard 완료**(#2): 일일손실(REALIZED_PLUS_UNREALIZED)·종목/전체 노출·일일진입·연속손실·spread·연결위험·활성손실이벤트 BUY 차단, risk_events scope별 영속, ENTRY_HALT
   - 비상정지 전체(EMERGENCY_LIQUIDATE)·호가단위 보정은 후속
 - 기능별 `AUTOMATIC/MANUAL_APPROVAL/DISABLED` 실행 권한 적용
-  - BUY `MANUAL_APPROVAL`/`AUTOMATIC`, FIXED_STOP `AUTOMATIC` 적용 완료(stage 게이트)
+  - normative `V7_ENTRY_EXECUTION_STAGE` control-plane은 sourced/Approval/fixed-stop CREATED authority와 Broker worker pre-send 재검사·unsent revocation까지 적용됐다. production handoff와 PostgreSQL acceptance는 Phase 10G 대기
 - 승인 카드, 만료·거절, 재평가와 원자 OrderIntent·TradingOrder 생성
   - 승인 카드·만료·거절·가격편차·position version 무효화·원자 주문 생성 완료
 - 외부 AI 결과가 실패·불완전·만료일 때 신규매수 fail-closed

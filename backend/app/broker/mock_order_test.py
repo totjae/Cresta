@@ -84,6 +84,9 @@ def create_mock_order_test(
         side="BUY",
         action="MOCK_CONNECTION_TEST",
         requested_quantity=1,
+        source_type="BROKER_DIAGNOSTIC",
+        source_id=payload.test_request_id,
+        authority_key=idempotency_key,
         correlation_id=correlation_id,
     )
     db.add(intent)

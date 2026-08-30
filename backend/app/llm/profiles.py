@@ -56,14 +56,23 @@ ROLES = {
     "MARKET_SECTOR_SCOUT",
     "POSITION_RISK_SCOUT",
     "CORE",
+    "CONSERVATIVE_DECISION",
+    "BALANCED_DECISION",
+    "AGGRESSIVE_DECISION",
 }
-ASSIGNMENT_ROLES = (
+LEGACY_ASSIGNMENT_ROLES = (
     "TECHNICAL_SCOUT",
     "NEWS_DISCLOSURE_SCOUT",
     "MARKET_SECTOR_SCOUT",
     "POSITION_RISK_SCOUT",
     "CORE",
 )
+DECISION_AGENT_ROLES = (
+    "CONSERVATIVE_DECISION",
+    "BALANCED_DECISION",
+    "AGGRESSIVE_DECISION",
+)
+ASSIGNMENT_ROLES = (*LEGACY_ASSIGNMENT_ROLES, *DECISION_AGENT_ROLES)
 
 
 class LlmProfileError(Exception):
@@ -898,6 +907,14 @@ def create_route(
 ) -> LlmRoleRoute:
     if role not in ROLES:
         raise LlmProfileError("ROLE_UNSUPPORTED")
+    if role in DECISION_AGENT_ROLES and web_search_enabled:
+        raise LlmProfileError("WEB_SEARCH_ROLE_UNSUPPORTED")
+    if role in DECISION_AGENT_ROLES and output_schema_version.strip() != (
+        "decision-agent-model-output-v1"
+    ):
+        raise LlmProfileError("ROUTE_OUTPUT_SCHEMA_INVALID")
+    if role in DECISION_AGENT_ROLES and prompt_profile_id is None:
+        raise LlmProfileError("PROMPT_REQUIRED")
     get_model(db, user.id, primary_model_profile_id)
     if failure_policy not in {"FAIL_STOP", "FAILOVER"}:
         raise LlmProfileError("ROUTE_FAILURE_POLICY_INVALID")
@@ -988,6 +1005,12 @@ def validate_route(
     model = get_model(db, user.id, route.primary_model_profile_id)
     provider = get_provider(db, user.id, model.provider_profile_id)
     fallback_models = [get_model(db, user.id, item) for item in _fallback_model_ids(route)]
+    if route.role in DECISION_AGENT_ROLES and (
+        route.web_search_enabled
+        or route.prompt_profile_id is None
+        or route.output_schema_version != "decision-agent-model-output-v1"
+    ):
+        raise LlmProfileError("ROLE_ASSIGNMENT_NOT_READY")
     if route.prompt_profile_id:
         try:
             prompt = get_prompt(db, owner_id=user.id, prompt_id=route.prompt_profile_id)
@@ -1128,7 +1151,11 @@ def effective_generation_parameters(
 def _assignment_routes(
     db: Session, *, owner_id: str, route_ids: dict[str, str], lock: bool = False
 ) -> list[LlmRoleRoute]:
-    if set(route_ids) != set(ASSIGNMENT_ROLES):
+    selected_roles = tuple(route_ids)
+    if frozenset(selected_roles) not in {
+        frozenset(LEGACY_ASSIGNMENT_ROLES),
+        frozenset(ASSIGNMENT_ROLES),
+    }:
         raise LlmProfileError("ROLE_ASSIGNMENT_SET_INCOMPLETE")
     query = select(LlmRoleRoute).where(LlmRoleRoute.id.in_(route_ids.values()))
     if lock:
@@ -1136,7 +1163,8 @@ def _assignment_routes(
     routes = list(db.scalars(query))
     by_id = {route.id: route for route in routes}
     selected: list[LlmRoleRoute] = []
-    for role in ASSIGNMENT_ROLES:
+    ordered_roles = tuple(role for role in ASSIGNMENT_ROLES if role in route_ids)
+    for role in ordered_roles:
         route = by_id.get(route_ids[role])
         if (
             route is None
@@ -1181,7 +1209,7 @@ def activate_assignments(
             select(LlmRoleRoute)
             .where(
                 LlmRoleRoute.owner_id == user.id,
-                LlmRoleRoute.role.in_(ASSIGNMENT_ROLES),
+                LlmRoleRoute.role.in_(route_ids),
                 LlmRoleRoute.state == "ACTIVE",
             )
             .with_for_update()
@@ -1205,7 +1233,7 @@ def activate_assignments(
         action="LLM_ROLE_ASSIGNMENTS_ACTIVATED",
         target=target_id,
         correlation_id=correlation_id,
-        metadata={"route_ids": route_ids, "roles": list(ASSIGNMENT_ROLES)},
+        metadata={"route_ids": route_ids, "roles": list(route_ids)},
     )
     db.commit()
     for route in selected:

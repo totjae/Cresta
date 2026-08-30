@@ -18,24 +18,61 @@ SELL remains automatic and calls ``create_order`` from ``stop_trigger``.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import ROUND_DOWN, Decimal
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
+from app.agents.decision_finalizer import (
+    DecisionFinalizationError,
+    validate_persisted_sourced_entry_decision,
+)
+from app.auth.service import ReauthProofError, consume_reauth_proof
+from app.broker.kiwoom import KiwoomMockClient
 from app.config import Settings
+from app.emergency_stop import active_pause_entry
+from app.execution_authority import (
+    ActionMode,
+    ExecutionStage,
+    effective_action_mode,
+    effective_execution_stage,
+    order_authority_key,
+)
+from app.execution_policy import active_policy, policy_payload
+from app.execution_stage import (
+    EvidenceLoader,
+    ExecutionStageValidationPolicy,
+    StageResolutionStatus,
+    resolve_current_execution_stage,
+)
+from app.financial_authority import (
+    build_buy_financial_context,
+    configured_financial_client,
+    financial_guard_rules,
+    refresh_financial_evidence_if_needed,
+)
 from app.guard import blocking_code, persist_guard_evaluation, rule
 from app.models import (
     Approval,
     AuditLog,
+    ConfigurationVersion,
     Decision,
     DecisionExecution,
     MarketSnapshot,
     MarketStreamState,
     User,
 )
-from app.order_creation import OrderCreationError, OrderRequest, create_order
+from app.order_creation import (
+    OrderAuthority,
+    OrderCreationError,
+    OrderRequest,
+    create_order,
+)
+from app.risk_policy import active_risk_policy, risk_policy_payload
 
 APPROVAL_WINDOW_SECONDS = 60
 
@@ -45,6 +82,22 @@ class ApprovalError(Exception):
         super().__init__(code)
         self.code = code
         self.status_code = status_code
+
+
+def _commit_approval_versioned_mutation(db: Session, approval: Approval) -> None:
+    """Commit one Approval CAS mutation without leaking its ORM stale error.
+
+    Flushing only ``approval`` makes this catch specific to the Approval
+    optimistic-version UPDATE. Errors from the later transaction commit,
+    including other versioned entities and retryable database failures, retain
+    their original type.
+    """
+    try:
+        db.flush([approval])
+    except StaleDataError:
+        db.rollback()
+        raise ApprovalError("APPROVAL_VERSION_CONFLICT", 409) from None
+    db.commit()
 
 
 def _utc(value: datetime) -> datetime:
@@ -120,6 +173,14 @@ def create_approval(
     acts. Does not create an order.
     """
     current = now or datetime.now(UTC)
+    existing = db.scalar(
+        select(Approval).where(Approval.execution_id == execution.id)
+    )
+    if existing is not None:
+        if existing.decision_id != decision.id or existing.user_id != user.id:
+            raise ApprovalError("APPROVAL_AUTHORITY_CONFLICT")
+        execution.approval_id = existing.id
+        return existing
     snapshot = db.get(MarketSnapshot, decision.input_snapshot_id)
     from app.risk_policy import active_risk_policy, risk_policy_payload
 
@@ -178,8 +239,6 @@ def create_approval(
             ),
         )
     )
-    db.commit()
-    db.refresh(approval)
     return approval
 
 
@@ -299,6 +358,349 @@ def _evaluate_approval(
     )
 
 
+def _invalidate_sourced_approval(
+    db: Session,
+    *,
+    approval: Approval,
+    execution: DecisionExecution,
+    code: str,
+    correlation_id: str,
+    expired: bool = False,
+) -> None:
+    approval.state = "EXPIRED" if expired else "INVALIDATED"
+    approval.result_code = code
+    approval.version += 1
+    execution.state = "EXPIRED" if expired else "INVALIDATED"
+    execution.result_code = code
+    db.add(
+        AuditLog(
+            actor_type="SYSTEM",
+            actor_id=approval.user_id,
+            action="SOURCED_APPROVAL_INVALIDATED",
+            target=approval.id,
+            result=code,
+            correlation_id=correlation_id,
+            metadata_json=json.dumps(
+                {"execution_id": execution.id}, sort_keys=True, separators=(",", ":")
+            ),
+        )
+    )
+    _commit_approval_versioned_mutation(db, approval)
+
+
+def _approve_sourced(
+    db: Session,
+    *,
+    approval_id: str,
+    user: User,
+    settings: Settings,
+    correlation_id: str,
+    idempotency_key: str,
+    expected_version: int,
+    reauth_proof: str | None,
+    current: datetime,
+    stage_evidence_loader: EvidenceLoader | None,
+    stage_validation_policy: ExecutionStageValidationPolicy | None,
+    financial_client: KiwoomMockClient | None,
+    before_commit: Callable[[], None] | None,
+) -> Approval:
+    # Preflight financial refresh occurs before the authority transaction.
+    preview = db.get(Approval, approval_id)
+    if preview is None:
+        raise ApprovalError("APPROVAL_NOT_FOUND", 404)
+    preview_execution = db.get(DecisionExecution, preview.execution_id)
+    preview_decision = db.get(Decision, preview.decision_id)
+    if preview_execution is None or preview_decision is None:
+        raise ApprovalError("SOURCE_AUTHORITY_INVALID")
+    preview_snapshot = _latest_snapshot_for_approval(db, preview_decision)
+    preview_price = _marketable_buy_price(preview_snapshot)
+    preview_scope = json.loads(preview.scope_snapshot_json)
+    preview_quantity = int(preview_scope.get("quantity") or 0)
+    frozen_risk_version = (
+        db.get(ConfigurationVersion, preview_execution.risk_policy_version_id)
+        if preview_execution.risk_policy_version_id
+        else None
+    )
+    current_risk_version = active_risk_policy(db, user.id)
+    try:
+        frozen_risk = risk_policy_payload(frozen_risk_version)
+        current_risk = risk_policy_payload(current_risk_version)
+        if frozen_risk_version is None or current_risk_version is None or preview_price is None:
+            raise ValueError("risk/price unavailable")
+        financial_context = build_buy_financial_context(
+            symbol=preview_decision.symbol,
+            price=preview_price,
+            quantity=preview_quantity,
+            frozen_policy=frozen_risk,
+            current_policy=current_risk,
+        )
+        refresh_financial_evidence_if_needed(
+            db,
+            client=financial_client or configured_financial_client(settings),
+            context=financial_context,
+            now=current,
+        )
+    except (ValidationError, ValueError, TypeError):
+        financial_context = None
+
+    approval = db.scalar(
+        select(Approval).where(Approval.id == approval_id).with_for_update()
+    )
+    if approval is None:
+        raise ApprovalError("APPROVAL_NOT_FOUND", 404)
+    if approval.user_id != user.id:
+        raise ApprovalError("APPROVAL_OWNER_MISMATCH", 403)
+    if approval.version != expected_version:
+        raise ApprovalError("APPROVAL_VERSION_CONFLICT", 409)
+    if approval.state == "APPROVED":
+        return approval
+    if approval.state != "PENDING":
+        raise ApprovalError("APPROVAL_NOT_PENDING", 409)
+    execution = db.get(DecisionExecution, approval.execution_id)
+    decision = _load_decision(db, approval)
+    if execution is None or execution.contract_version != "sourced-entry-execution-v1":
+        raise ApprovalError("SOURCE_AUTHORITY_INVALID")
+    if _utc(approval.expires_at) <= current or _utc(decision.valid_until) <= current:
+        _invalidate_sourced_approval(
+            db,
+            approval=approval,
+            execution=execution,
+            code="APPROVAL_EXPIRED",
+            correlation_id=correlation_id,
+            expired=True,
+        )
+        raise ApprovalError("APPROVAL_EXPIRED")
+    try:
+        validate_persisted_sourced_entry_decision(db, decision=decision)
+    except DecisionFinalizationError:
+        _invalidate_sourced_approval(
+            db,
+            approval=approval,
+            execution=execution,
+            code="SOURCE_AUTHORITY_INVALID",
+            correlation_id=correlation_id,
+        )
+        raise ApprovalError("SOURCE_AUTHORITY_INVALID") from None
+
+    stage_resolution = resolve_current_execution_stage(
+        db,
+        now=current,
+        evidence_loader=stage_evidence_loader,
+        policy=stage_validation_policy,
+    )
+    if stage_resolution.status is StageResolutionStatus.DB_RETRYABLE_FAILURE:
+        db.rollback()
+        raise ApprovalError("EXECUTION_STAGE_DB_RETRYABLE_FAILURE", 503)
+    if stage_resolution.status is not StageResolutionStatus.PASS:
+        _invalidate_sourced_approval(
+            db,
+            approval=approval,
+            execution=execution,
+            code="EXECUTION_STAGE_UNAVAILABLE",
+            correlation_id=correlation_id,
+        )
+        raise ApprovalError("EXECUTION_STAGE_UNAVAILABLE")
+    assert stage_resolution.payload is not None
+    effective_stage = effective_execution_stage(
+        ExecutionStage(str(execution.stage)), stage_resolution.payload.stage
+    )
+    current_execution_version = active_policy(db, user.id)
+    try:
+        current_execution_policy = policy_payload(current_execution_version)
+        effective_mode = effective_action_mode(
+            ActionMode(str(execution.mode)), current_execution_policy.buy
+        )
+    except (ValidationError, ValueError, TypeError):
+        effective_mode = ActionMode.DISABLED
+    if effective_stage is ExecutionStage.SHADOW or effective_mode is not ActionMode.MANUAL_APPROVAL:
+        _invalidate_sourced_approval(
+            db,
+            approval=approval,
+            execution=execution,
+            code=(
+                "EXECUTION_STAGE_DOWNGRADED"
+                if effective_stage is ExecutionStage.SHADOW
+                else "ACTION_MODE_DOWNGRADED"
+            ),
+            correlation_id=correlation_id,
+        )
+        raise ApprovalError(approval.result_code or "APPROVAL_INVALIDATED")
+    if active_pause_entry(db, execution.account_alias) is not None:
+        _invalidate_sourced_approval(
+            db,
+            approval=approval,
+            execution=execution,
+            code="EMERGENCY_STOP_ACTIVE",
+            correlation_id=correlation_id,
+        )
+        raise ApprovalError("EMERGENCY_STOP_ACTIVE")
+
+    current_risk_version = active_risk_policy(db, user.id)
+    try:
+        frozen_risk_version = db.get(ConfigurationVersion, execution.risk_policy_version_id)
+        if frozen_risk_version is None or current_risk_version is None:
+            raise ValueError("risk policy unavailable")
+        frozen_risk = risk_policy_payload(frozen_risk_version)
+        current_risk = risk_policy_payload(current_risk_version)
+    except (ValidationError, ValueError, TypeError):
+        _invalidate_sourced_approval(
+            db,
+            approval=approval,
+            execution=execution,
+            code="RISK_POLICY_UNAVAILABLE",
+            correlation_id=correlation_id,
+        )
+        raise ApprovalError("RISK_POLICY_UNAVAILABLE") from None
+    snapshot = _latest_snapshot_for_approval(db, decision)
+    price = _marketable_buy_price(snapshot)
+    scope = json.loads(approval.scope_snapshot_json)
+    quantity = int(scope.get("quantity") or 0)
+    from app.decision_execution import buy_pre_order_guard_rules
+
+    rules = buy_pre_order_guard_rules(
+        db, decision, user, settings, current_risk, current, snapshot=snapshot
+    )
+    reference_price = Decimal(str(scope["reference_price"])) if scope.get("reference_price") else None
+    rules.append(rule("PRICE_DEVIATION_EXCEEDED", _price_deviation_ok(
+        reference_price, price, min(frozen_risk.max_price_deviation_pct, current_risk.max_price_deviation_pct)
+    )))
+    if financial_context is None or price is None:
+        rules.append(rule("FINANCIAL_CONTEXT_INVALID", False))
+    else:
+        try:
+            financial_context = build_buy_financial_context(
+                symbol=decision.symbol,
+                price=price,
+                quantity=quantity,
+                frozen_policy=frozen_risk,
+                current_policy=current_risk,
+            )
+            rules.extend(financial_guard_rules(
+                db,
+                context=financial_context,
+                now=current,
+                frozen_risk_policy_id=frozen_risk_version.id,
+                current_risk_policy_id=current_risk_version.id,
+                frozen_policy=frozen_risk,
+                current_policy=current_risk,
+            ))
+        except ValueError:
+            rules.append(rule("FINANCIAL_CONTEXT_INVALID", False))
+    blocked = blocking_code(rules) if any(item["result"] == "BLOCKED" for item in rules) else None
+    guard = persist_guard_evaluation(
+        db,
+        execution_id=execution.id,
+        subject_type="DECISION_EXECUTION",
+        subject_id=execution.id,
+        rules=rules,
+        snapshot_id=snapshot.id if snapshot else None,
+        position_version=None,
+        execution_policy_version_id=execution.execution_policy_version_id,
+        risk_policy_version_id=execution.risk_policy_version_id,
+        halt_scope="ENTRY_HALT" if blocked else None,
+        valid_until=decision.valid_until,
+        now=current,
+        phase="APPROVAL_REVALIDATION",
+    )
+    if blocked:
+        execution.guard_evaluation_id = guard.id
+        _invalidate_sourced_approval(
+            db,
+            approval=approval,
+            execution=execution,
+            code=blocked,
+            correlation_id=correlation_id,
+        )
+        raise ApprovalError(blocked)
+    if reauth_proof is None:
+        db.rollback()
+        raise ApprovalError("REAUTH_PROOF_REQUIRED", 403)
+    try:
+        proof = consume_reauth_proof(
+            db,
+            user=user,
+            raw_proof=reauth_proof,
+            target_action="APPROVE_ORDER",
+            target_id=f"{approval.id}:{expected_version}",
+            now=current,
+        )
+    except ReauthProofError:
+        db.rollback()
+        raise ApprovalError("REAUTH_PROOF_INVALID", 403) from None
+    authority_key = order_authority_key(
+        source_type="DECISION_EXECUTION",
+        source_id=execution.id,
+        approval_id=approval.id,
+    )
+    request = OrderRequest(
+        symbol=decision.symbol,
+        market=decision.market,
+        side="BUY",
+        action="BUY",
+        order_type="LIMIT",
+        limit_price=price,
+        quantity=quantity,
+        idempotency_key=idempotency_key,
+        request_payload={
+            "environment": "MOCK",
+            "symbol": decision.symbol,
+            "market": decision.market,
+            "side": "BUY",
+            "action": "BUY",
+            "order_type": "LIMIT",
+            "limit_price": str(price),
+            "quantity": quantity,
+            "approval_id": approval.id,
+            "authority_key": authority_key,
+        },
+        correlation_id=correlation_id,
+    )
+    order = create_order(
+        db,
+        user=user,
+        request=request,
+        audit_action="SOURCED_APPROVAL_ORDER_CREATED",
+        now=current,
+        authority=OrderAuthority(
+            source_type="DECISION_EXECUTION",
+            source_id=execution.id,
+            decision_execution_id=execution.id,
+            stop_trigger_id=None,
+            guard_evaluation_id=guard.id,
+            approval_id=approval.id,
+            execution_policy_version_id=execution.execution_policy_version_id,
+            risk_policy_version_id=execution.risk_policy_version_id,
+            execution_stage_version_id=str(execution.execution_stage_version_id),
+            execution_stage_payload_hash=str(execution.execution_stage_payload_hash),
+            authority_key=authority_key,
+        ),
+    )
+    approval.state = "APPROVED"
+    approval.actor_id = user.id
+    approval.reauth_proof_id = proof.id
+    approval.order_id = order.id
+    approval.result_code = "ORDER_CREATED"
+    approval.version += 1
+    execution.state = "ORDER_CREATED"
+    execution.result_code = "ORDER_CREATED"
+    execution.guard_evaluation_id = guard.id
+    execution.order_intent_id = order.intent_id
+    db.add(AuditLog(
+        actor_type="USER",
+        actor_id=user.id,
+        action="SOURCED_APPROVAL_APPROVED",
+        target=approval.id,
+        result="ORDER_CREATED",
+        correlation_id=correlation_id,
+        metadata_json=json.dumps({"order_id": order.id, "authority_key": authority_key}, sort_keys=True, separators=(",", ":")),
+    ))
+    if before_commit is not None:
+        before_commit()
+    _commit_approval_versioned_mutation(db, approval)
+    db.refresh(approval)
+    return approval
+
+
 def approve(
     db: Session,
     *,
@@ -307,7 +709,13 @@ def approve(
     settings: Settings,
     correlation_id: str,
     idempotency_key: str,
+    expected_version: int = 1,
+    reauth_proof: str | None = None,
     now: datetime | None = None,
+    stage_evidence_loader: EvidenceLoader | None = None,
+    stage_validation_policy: ExecutionStageValidationPolicy | None = None,
+    financial_client: KiwoomMockClient | None = None,
+    before_commit: Callable[[], None] | None = None,
 ) -> Approval:
     """Approve a PENDING approval and create the CREATED order atomically.
 
@@ -316,9 +724,36 @@ def approve(
     Idempotent on ``idempotency_key`` via ``create_order``.
     """
     current = now or datetime.now(UTC)
+    preview = db.get(Approval, approval_id)
+    preview_execution = (
+        db.get(DecisionExecution, preview.execution_id) if preview is not None else None
+    )
+    if (
+        preview_execution is not None
+        and preview_execution.contract_version == "sourced-entry-execution-v1"
+    ):
+        return _approve_sourced(
+            db,
+            approval_id=approval_id,
+            user=user,
+            settings=settings,
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+            expected_version=expected_version,
+            reauth_proof=reauth_proof,
+            current=current,
+            stage_evidence_loader=stage_evidence_loader,
+            stage_validation_policy=stage_validation_policy,
+            financial_client=financial_client,
+            before_commit=before_commit,
+        )
     approval = db.scalar(select(Approval).where(Approval.id == approval_id).with_for_update())
     if approval is None:
         raise ApprovalError("APPROVAL_NOT_FOUND", 404)
+    if approval.user_id != user.id:
+        raise ApprovalError("APPROVAL_OWNER_MISMATCH", 403)
+    if approval.version != expected_version:
+        raise ApprovalError("APPROVAL_VERSION_CONFLICT", 409)
     if approval.state == "APPROVED":
         return approval
     if approval.state != "PENDING":
@@ -473,12 +908,17 @@ def reject(
     approval_id: str,
     user: User,
     correlation_id: str,
+    expected_version: int = 1,
     now: datetime | None = None,
 ) -> Approval:
     del now  # rejected approvals do not need a timestamp gate
     approval = db.scalar(select(Approval).where(Approval.id == approval_id).with_for_update())
     if approval is None:
         raise ApprovalError("APPROVAL_NOT_FOUND", 404)
+    if approval.user_id != user.id:
+        raise ApprovalError("APPROVAL_OWNER_MISMATCH", 403)
+    if approval.version != expected_version:
+        raise ApprovalError("APPROVAL_VERSION_CONFLICT", 409)
     if approval.state == "REJECTED":
         return approval
     if approval.state != "PENDING":
@@ -502,7 +942,7 @@ def reject(
             metadata_json="{}",
         )
     )
-    db.commit()
+    _commit_approval_versioned_mutation(db, approval)
     db.refresh(approval)
     return approval
 

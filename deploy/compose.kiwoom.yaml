@@ -1,3 +1,9 @@
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   api:
     secrets:
@@ -30,13 +36,14 @@ services:
       - kiwoom_mock_app_secret
       - kiwoom_mock_account_id
     depends_on:
-      postgres:
-        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     mem_limit: 512m
     cpus: 0.5
     networks: [backend]
+    logging: *default-logging
   scheduler:
     build:
       context: ../backend
@@ -48,13 +55,14 @@ services:
     secrets:
       - postgres_password
     depends_on:
-      postgres:
-        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     mem_limit: 256m
     cpus: 0.25
     networks: [backend]
+    logging: *default-logging
   agent:
     build:
       context: ../backend
@@ -69,13 +77,31 @@ services:
     secrets:
       - postgres_password
     depends_on:
-      postgres:
-        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     mem_limit: 256m
     cpus: 0.25
     networks: [backend]
+    logging: *default-logging
+  sourced-handoff:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    command: ["cresta-worker", "sourced-handoff"]
+    env_file: [.env]
+    environment:
+      CRESTA_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    mem_limit: 256m
+    cpus: 0.25
+    networks: [backend]
+    logging: *default-logging
 
 secrets:
   kiwoom_mock_app_key:

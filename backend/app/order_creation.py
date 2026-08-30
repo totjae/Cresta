@@ -62,6 +62,21 @@ class OrderRequest:
     correlation_id: str
 
 
+@dataclass(frozen=True)
+class OrderAuthority:
+    source_type: str
+    source_id: str
+    decision_execution_id: str | None
+    stop_trigger_id: str | None
+    guard_evaluation_id: str
+    approval_id: str | None
+    execution_policy_version_id: str | None
+    risk_policy_version_id: str | None
+    execution_stage_version_id: str
+    execution_stage_payload_hash: str
+    authority_key: str
+
+
 def _canonical(payload: dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
@@ -126,6 +141,7 @@ def create_order(
     request_ip: str | None = None,
     user_agent: str | None = None,
     now: datetime | None = None,
+    authority: OrderAuthority | None = None,
 ) -> TradingOrder:
     """Persist one ``OrderIntent`` + ``TradingOrder(status=CREATED)`` atomically.
 
@@ -145,6 +161,24 @@ def create_order(
             raise OrderCreationError("IDEMPOTENCY_CONFLICT")
         return existing
 
+    if authority is not None:
+        existing_intent = db.scalar(
+            select(OrderIntent).where(OrderIntent.authority_key == authority.authority_key)
+        )
+        if existing_intent is not None:
+            raced = db.scalar(select(TradingOrder).where(TradingOrder.intent_id == existing_intent.id))
+            if (
+                raced is not None
+                and raced.request_hash == fingerprint
+                and raced.symbol == request.symbol
+                and raced.side == request.side
+                and raced.order_type == request.order_type
+                and raced.limit_price == request.limit_price
+                and raced.requested_quantity == request.quantity
+            ):
+                return raced
+            raise OrderCreationError("ORDER_AUTHORITY_CONFLICT")
+
     intent = OrderIntent(
         account_alias=ACCOUNT_ALIAS,
         environment=ENVIRONMENT,
@@ -154,6 +188,21 @@ def create_order(
         action=request.action,
         requested_quantity=request.quantity,
         correlation_id=request.correlation_id,
+        source_type=authority.source_type if authority else None,
+        source_id=authority.source_id if authority else None,
+        decision_execution_id=authority.decision_execution_id if authority else None,
+        stop_trigger_id=authority.stop_trigger_id if authority else None,
+        guard_evaluation_id=authority.guard_evaluation_id if authority else None,
+        approval_id=authority.approval_id if authority else None,
+        execution_policy_version_id=(
+            authority.execution_policy_version_id if authority else None
+        ),
+        risk_policy_version_id=authority.risk_policy_version_id if authority else None,
+        execution_stage_version_id=(authority.execution_stage_version_id if authority else None),
+        execution_stage_payload_hash=(
+            authority.execution_stage_payload_hash if authority else None
+        ),
+        authority_key=authority.authority_key if authority else None,
     )
     db.add(intent)
     db.flush()
@@ -183,13 +232,11 @@ def create_order(
     )
     db.add(order)
     try:
-        db.flush()
+        with db.begin_nested():
+            db.flush()
     except IntegrityError:
-        db.rollback()
         raced = db.scalar(
-            select(TradingOrder).where(
-                TradingOrder.idempotency_key == request.idempotency_key
-            )
+            select(TradingOrder).where(TradingOrder.idempotency_key == request.idempotency_key)
         )
         if raced is not None and raced.request_hash == fingerprint:
             return raced

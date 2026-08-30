@@ -11,7 +11,9 @@ import httpx
 import pytest
 
 from app.broker.kiwoom import (
+    ACCOUNT_FUNDS_API_ID,
     ACCOUNT_PATH,
+    ORDER_CAPACITY_API_ID,
     KiwoomAdapterError,
     KiwoomCancelRequest,
     KiwoomMockClient,
@@ -20,9 +22,12 @@ from app.broker.kiwoom import (
     KiwoomOrderRejectedError,
     KiwoomOrderRequest,
     KiwoomReplaceRequest,
+    OrderCapacityRequest,
+    normalize_account_funds,
     normalize_basic_quote,
     normalize_open_order,
     normalize_position,
+    normalize_signed_integer,
 )
 from app.config import Settings
 
@@ -151,6 +156,46 @@ def snapshot_responses() -> list[FakeResponse]:
             },
         ),
     ]
+
+
+OFFICIAL_SCHEMA_FIXTURE_KT00001 = {
+    "entr": "0000010000",
+    "ord_alow_amt": "0000009000",
+    "pymn_alow_amt": "-0000000100",
+    "d1_entra": "0000008000",
+    "d1_buy_exct_amt": "0000001000",
+    "d1_sel_exct_amt": "0000000200",
+    "d1_pymn_alow_amt": "0000007000",
+    "d2_entra": "0000006000",
+    "d2_buy_exct_amt": "0000000300",
+    "d2_sel_exct_amt": "0000000400",
+    "d2_pymn_alow_amt": "0000005000",
+    "return_code": 0,
+}
+
+
+OFFICIAL_SCHEMA_FIXTURE_KT00010 = {
+    "ord_alowa": "0000700000",
+    "entr": "0000800000",
+    "wthd_alowa": "0000600000",
+    "nxdy_wthd_alowa": "0000500000",
+    "d2entra": "0000400000",
+    "profa_20ord_alow_amt": "0001000000",
+    "profa_20ord_alowq": "0000000014",
+    "profa_30ord_alow_amt": "0000900000",
+    "profa_30ord_alowq": "0000000012",
+    "profa_40ord_alow_amt": "0000850000",
+    "profa_40ord_alowq": "0000000011",
+    "profa_50ord_alow_amt": "0000800000",
+    "profa_50ord_alowq": "0000000010",
+    "profa_60ord_alow_amt": "0000750000",
+    "profa_60ord_alowq": "0000000009",
+    "profa_rdex_60ord_alow_amt": "0000720000",
+    "profa_rdex_60ord_alowq": "0000000008",
+    "profa_100ord_alow_amt": "0000700000",
+    "profa_100ord_alowq": "0000000007",
+    "return_code": 0,
+}
 
 
 def test_token_is_kst_parsed_memory_only_and_reused(tmp_path: Path) -> None:
@@ -634,3 +679,92 @@ def test_order_rate_limiter_waits_per_tr_with_injected_clock() -> None:
     limiter.wait("kt10001")
 
     assert sleeps == [1.0]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("0000010000", 10_000),
+        ("-0000010000", -10_000),
+        ("0000000000", 0),
+        ("0", 0),
+        (None, None),
+        ("", None),
+        ("   ", None),
+    ],
+)
+def test_financial_integer_normalization(raw: object, expected: int | None) -> None:
+    assert normalize_signed_integer(raw, "field") == expected
+
+
+@pytest.mark.parametrize("raw", ["abc", "1.0", "1,000", 1000])
+def test_financial_integer_normalization_rejects_noncanonical(raw: object) -> None:
+    with pytest.raises(KiwoomAdapterError, match="field"):
+        normalize_signed_integer(raw, "field")
+
+
+def test_kt00001_official_schema_fixture_and_server_context(tmp_path: Path) -> None:
+    now = datetime(2026, 8, 28, 4, 0, tzinfo=UTC)
+    http = FakeHttpClient(
+        [token_response("token"), account_response(), FakeResponse(200, OFFICIAL_SCHEMA_FIXTURE_KT00001)]
+    )
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http, clock=lambda: now)
+
+    data = client.get_account_funds(query_type="3")
+
+    assert data.deposit == 10_000
+    assert data.withdrawable_amount == -100
+    assert data.d2_withdrawable_amount == 5_000
+    assert data.account_alias == "KIWOOM_MOCK_PRIMARY"
+    assert data.environment == "MOCK"
+    assert data.received_at == now
+    call = http.calls[-1]
+    assert call["headers"]["api-id"] == ACCOUNT_FUNDS_API_ID
+    assert call["json"] == {"qry_tp": "3"}
+
+
+def test_kt00010_preserves_exact_optional_request_context(tmp_path: Path) -> None:
+    now = datetime(2026, 8, 28, 4, 1, tzinfo=UTC)
+    http = FakeHttpClient(
+        [token_response("token"), account_response(), FakeResponse(200, OFFICIAL_SCHEMA_FIXTURE_KT00010)]
+    )
+    client = KiwoomMockClient(configured_settings(tmp_path), http_client=http, clock=lambda: now)
+    request = OrderCapacityRequest("005930", "BUY", 70_000, -100, 7, 69_900)
+
+    data = client.query_order_capacity(request)
+
+    assert data.trade_type == "2"
+    assert data.orderable_cash == 700_000
+    assert data.margin_100_orderable_amount == 700_000
+    assert data.margin_100_orderable_quantity == 7
+    assert data.margin_20_orderable_amount == 1_000_000
+    call = http.calls[-1]
+    assert call["headers"]["api-id"] == ORDER_CAPACITY_API_ID
+    assert call["json"] == {
+        "stk_cd": "005930",
+        "trde_tp": "2",
+        "uv": "70000",
+        "io_amt": "-100",
+        "trde_qty": "7",
+        "exp_buy_unp": "69900",
+    }
+
+
+def test_financial_missing_is_not_zero_and_negative_quantity_is_invalid() -> None:
+    normalized = normalize_account_funds(
+        {"entr": "0"}, query_type="3", received_at=datetime(2026, 8, 28, tzinfo=UTC)
+    )
+    assert normalized.deposit == 0
+    assert normalized.generic_orderable_amount is None
+
+    bad = dict(OFFICIAL_SCHEMA_FIXTURE_KT00010)
+    bad["profa_100ord_alowq"] = "-0000000001"
+    with pytest.raises(KiwoomAdapterError, match="cannot be negative"):
+        from app.broker.kiwoom import normalize_order_capacity
+
+        normalize_order_capacity(
+            bad,
+            request=OrderCapacityRequest("005930", "BUY", 70_000),
+            trade_type="2",
+            received_at=datetime(2026, 8, 28, tzinfo=UTC),
+        )
