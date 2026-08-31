@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import threading
 import zipfile
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from app.config import Settings
+
+logger = logging.getLogger(__name__)
 
 DART_SOURCE_POLICY_VERSION = "opendart-list-v1"
 DART_VIEWER_BASE_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
@@ -165,6 +168,19 @@ def _resolve_corporation_code(
 ) -> str:
     cache_key = hashlib.sha256(api_key.encode()).hexdigest()
     with _corp_code_cache_lock:
+        obsolete = [
+            key
+            for key, (expires_at, _) in _corp_code_cache.items()
+            if key != cache_key or expires_at <= now
+        ]
+        for key in obsolete:
+            del _corp_code_cache[key]
+        if obsolete:
+            logger.debug(
+                "Agent cache eviction cache=dart_corp_code evicted=%s retained=%s",
+                len(obsolete),
+                len(_corp_code_cache),
+            )
         cached = _corp_code_cache.get(cache_key)
         if cached and cached[0] > now:
             corporation_code = cached[1].get(symbol)

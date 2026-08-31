@@ -1,5 +1,17 @@
 # Cresta 테스트 계획
 
+### Phase 11A.4D agent cache retention correction (2026-08-31)
+
+| ID | 요구사항 | 검증 | 결과 |
+| --- | --- | --- | --- |
+| T-V2-AGENT-11A4D-001 | KRX official-source cache retention | 여러 날짜·credential 교체 시 현재 lookback×2 이하, 과거 날짜 재조회 가능 | PASS — 30일 이동 후 매번 ≤4, 동일 창 hit, 과거 창·교체 credential refetch |
+| T-V2-AGENT-11A4D-002 | Naver official-source cache retention | 만료·과거 credential 제거, 현재 TTL cache hit와 서로 다른 query 의미 유지 | PASS — non-expired 유지, exact-key 비접근 expired global 제거, 30개 rolling query 최종 1 |
+| T-V2-AGENT-11A4D-003 | DART corp-code cache retention | lock 보호 하 현재 credential mapping 최대 1, 교체 후 과거 credential 재조회 | PASS — active hit, 20회 rotation 매번 1, 초기 credential 복귀 시 provider refetch |
+| T-V2-AGENT-11A4D-004 | safe observability | 실제 eviction만 DEBUG 기록, credential/query/payload 비노출 | PASS — cache name·evicted·retained만 기록, fake secret/query log 0 |
+| T-V2-AGENT-11A4D-005 | repository regression | provider/agent focused, backend full, Ruff, migration head, whitespace | PASS — cardinality 3/3, provider 25/25, agent focused 38/38, backend 761/761, Ruff/diff PASS, head 0044 |
+
+Naver의 retention bound는 현재 credential과 아직 만료되지 않은 TTL 항목 집합이다. 요구사항에 전체 사용자·query의 동시 cardinality 상한이 없으므로 임의 LRU/entry cap을 제품 계약으로 만들지 않는다. backend full 실행에서 PostgreSQL 전용 81건은 test DB 미사용 조건의 기존 skip이고 신규 skip은 없다. Stage A는 이 correction에서 재시작하지 않았으며, Python allocator 특성까지 포함한 실제 RSS/PSS 판단은 fresh agent redeploy·장기 관찰을 수행하는 다음 Phase에 남긴다.
+
 ### Phase 11A.4A fixed-stop correlation ID capacity correction (2026-08-31)
 
 | ID | 요구사항 | 검증 | 결과 |

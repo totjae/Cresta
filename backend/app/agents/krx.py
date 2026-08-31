@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -10,6 +11,8 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from app.config import Settings
+
+logger = logging.getLogger(__name__)
 
 KRX_SOURCE_POLICY_VERSION = "krx-stock-daily-v1"
 KRX_SERVICE_PAGE = (
@@ -21,6 +24,27 @@ KRX_MARKET_PATHS = (
 )
 _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 _daily_cache: dict[tuple[str, str, str], tuple[dict[str, Any], ...]] = {}
+
+
+def _evict_daily_cache(
+    *, credential_fingerprint: str, required_dates: frozenset[str]
+) -> None:
+    required_paths = {path for _, path in KRX_MARKET_PATHS}
+    obsolete = [
+        key
+        for key in _daily_cache
+        if key[2] != credential_fingerprint
+        or key[1] not in required_dates
+        or key[0] not in required_paths
+    ]
+    for key in obsolete:
+        del _daily_cache[key]
+    if obsolete:
+        logger.debug(
+            "Agent cache eviction cache=krx_daily evicted=%s retained=%s",
+            len(obsolete),
+            len(_daily_cache),
+        )
 
 
 class KrxCollectionError(RuntimeError):
@@ -126,13 +150,12 @@ def _parse_row(row: object, *, endpoint_path: str, symbol: str) -> KrxDailyMarke
 
 def _load_market_rows(
     client: httpx.Client,
-    settings: Settings,
     *,
     endpoint_path: str,
     base_date: str,
+    api_key: str,
+    credential_fingerprint: str,
 ) -> tuple[tuple[dict[str, Any], ...], bool]:
-    api_key = settings.load_krx_api_key()
-    credential_fingerprint = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
     cache_key = (endpoint_path, base_date, credential_fingerprint)
     cached = _daily_cache.get(cache_key)
     if cached is not None:
@@ -170,6 +193,16 @@ def collect_krx_daily_market(
     if len(symbol) != 6 or not symbol.isdigit():
         raise KrxCollectionError("KRX_SYMBOL_INVALID")
     kst_day = now.astimezone(ZoneInfo("Asia/Seoul")).date()
+    api_key = settings.load_krx_api_key()
+    credential_fingerprint = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    required_dates = tuple(
+        (kst_day - timedelta(days=days_ago)).strftime("%Y%m%d")
+        for days_ago in range(1, settings.krx_lookback_days + 1)
+    )
+    _evict_daily_cache(
+        credential_fingerprint=credential_fingerprint,
+        required_dates=frozenset(required_dates),
+    )
     dates_queried: list[str] = []
     requests_made = 0
     try:
@@ -179,15 +212,15 @@ def collect_krx_daily_market(
             follow_redirects=False,
             transport=transport,
         ) as client:
-            for days_ago in range(1, settings.krx_lookback_days + 1):
-                base_date = (kst_day - timedelta(days=days_ago)).strftime("%Y%m%d")
+            for base_date in required_dates:
                 dates_queried.append(base_date)
                 for expected_market, endpoint_path in KRX_MARKET_PATHS:
                     rows, requested = _load_market_rows(
                         client,
-                        settings,
                         endpoint_path=endpoint_path,
                         base_date=base_date,
+                        api_key=api_key,
+                        credential_fingerprint=credential_fingerprint,
                     )
                     requests_made += int(requested)
                     matches = [row for row in rows if str(row.get("ISU_CD", "")).strip() == symbol]

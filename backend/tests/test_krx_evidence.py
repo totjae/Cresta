@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
-from datetime import UTC, datetime
+import logging
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -92,6 +94,59 @@ def test_krx_adapter_matches_exact_symbol_and_caches_daily_market(
     assert len(requests) == 1
     assert requests[0].headers["AUTH_KEY"] == "a" * 40
     assert requests[0].url.params["basDd"] == "20260810"
+
+
+def test_krx_cache_retains_only_active_lookback_and_credential(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    requests: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.url.path, request.url.params["basDd"]))
+        return httpx.Response(200, json={"OutBlock_1": []})
+
+    settings = _settings(tmp_path, krx_lookback_days=2)
+    transport = httpx.MockTransport(handler)
+    start = datetime(2026, 8, 11, 1, tzinfo=UTC)
+    caplog.set_level(logging.DEBUG, logger=krx_module.__name__)
+
+    first = collect_krx_daily_market(
+        settings, symbol="005930", now=start, transport=transport
+    )
+    assert first.requests_made == 4
+    assert len(krx_module._daily_cache) == 4
+    assert collect_krx_daily_market(
+        settings, symbol="005930", now=start, transport=transport
+    ).requests_made == 0
+
+    for offset in range(1, 31):
+        collect_krx_daily_market(
+            settings,
+            symbol="005930",
+            now=start + timedelta(days=offset),
+            transport=transport,
+        )
+        assert len(krx_module._daily_cache) <= 4
+
+    before_historical_refetch = len(requests)
+    historical = collect_krx_daily_market(
+        settings, symbol="005930", now=start, transport=transport
+    )
+    assert historical.requests_made == 4
+    assert len(requests) == before_historical_refetch + 4
+
+    key_file = tmp_path / "krx_api_key"
+    key_file.write_text("b" * 40, encoding="utf-8")
+    rotated = collect_krx_daily_market(
+        settings, symbol="005930", now=start, transport=transport
+    )
+    active_fingerprint = hashlib.sha256(("b" * 40).encode()).hexdigest()
+    assert rotated.requests_made == 4
+    assert len(krx_module._daily_cache) == 4
+    assert {key[2] for key in krx_module._daily_cache} == {active_fingerprint}
+    assert "cache=krx_daily" in caplog.text
+    assert "a" * 40 not in caplog.text
+    assert "b" * 40 not in caplog.text
 
 
 def test_krx_adapter_searches_both_markets_and_returns_normal_empty(

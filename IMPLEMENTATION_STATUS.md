@@ -1,5 +1,13 @@
 # Cresta 구현 상태
 
+### 2026-08-31 Cresta v2 Phase 11A.4D Agent Cache Retention Correction 완료
+
+- Phase 11A.4C에서 agent RSS/PSS가 256 MiB limit 근처에 고정된 원인 후보 중 process-global official-source cache의 무제한 과거 세대 보존을 최소 교정한다. KRX daily cache는 현재 credential과 현재 `krx_lookback_days` 날짜 창의 KOSPI/KOSDAQ endpoint만 유지해 최대 `2 × lookback_days`(설정 상한 20)로 제한한다.
+- Naver news cache는 매 collection에서 만료 항목과 현재 credential이 아닌 항목을 제거한다. 아직 유효한 현재 credential의 서로 다른 query는 TTL 동안 유지하며, 명세에 없는 임의 LRU·query 수 cap·응답 truncation은 추가하지 않는다.
+- DART corp-code cache는 기존 lock 안에서 만료 항목과 현재 credential이 아닌 세대를 제거해 최대 1개 mapping만 유지한다. 교체되었거나 과거 날짜가 다시 필요하면 provider에서 재조회할 수 있으므로 source result·evidence·trading semantics는 변경하지 않는다.
+- eviction이 실제 발생한 경우에만 cache 이름·제거 수·잔여 수를 DEBUG로 남기며 credential fingerprint, query, provider payload와 secret은 기록하지 않는다. deterministic cardinality 3/3, provider focused 25/25, AgentWorker/runtime 포함 focused 38/38과 backend runnable 전체 761/761이 PASS했다. PostgreSQL 전용 81건은 test DB 미사용 조건의 기존 skip이며 신규 skip은 없다. 전체 Ruff와 `git diff --check`도 PASS하고 migration head는 `20260829_0044`다.
+- cache entry 제거가 Python allocator의 arena를 즉시 OS에 반환한다는 보장은 없고 unit test는 256 MiB 적합성을 증명하지 않는다. Stage A는 재시작하지 않았으며 fresh agent redeploy 이후 실제 RSS/PSS 재측정은 Phase 11A.4E의 필수 검증으로 남긴다. 서버·Compose·resource limit·DB·migration·trading authority는 변경하지 않았다.
+
 ### 2026-08-31 Cresta v2 Phase 11A.4A Fixed-Stop Correlation ID Capacity Correction 완료
 
 - Ubuntu Stage A에서 broker worker의 `stop-{ISO timestamp}` correlation ID가 37자로 생성되어 PostgreSQL `stop_triggers.correlation_id varchar(36)` 최초 flush를 43회 거부한 원인을 교정했다. SQLite는 `String(36)` 길이를 강제하지 않아 같은 오류를 검출하지 못했다.

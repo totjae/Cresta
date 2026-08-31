@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 import ipaddress
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ import httpx
 
 from app.config import Settings
 
+logger = logging.getLogger(__name__)
+
 NAVER_NEWS_SOURCE_POLICY_VERSION = "naver-api-hub-news-v1"
 NAVER_NEWS_PATH = "/search/v1/news"
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -22,6 +25,22 @@ _TAG_PATTERN = re.compile(r"<[^>]*>")
 _cache: dict[
     tuple[str, str], tuple[datetime, tuple[dict[str, Any], ...], int]
 ] = {}
+
+
+def _evict_cache(*, active_fingerprint: str, now: datetime) -> None:
+    obsolete = [
+        key
+        for key, (expires_at, _, _) in _cache.items()
+        if key[0] != active_fingerprint or expires_at <= now
+    ]
+    for key in obsolete:
+        del _cache[key]
+    if obsolete:
+        logger.debug(
+            "Agent cache eviction cache=naver_news evicted=%s retained=%s",
+            len(obsolete),
+            len(_cache),
+        )
 
 
 class NaverNewsCollectionError(RuntimeError):
@@ -173,9 +192,11 @@ def collect_naver_news(
         query_identity = symbol
     client_id, client_secret = settings.load_naver_news_credentials()
     fingerprint = hashlib.sha256(f"{client_id}\0{client_secret}".encode()).hexdigest()
+    now_utc = now.astimezone(UTC)
+    _evict_cache(active_fingerprint=fingerprint, now=now_utc)
     cache_key = (fingerprint, query_identity)
     cached = _cache.get(cache_key)
-    cache_hit = bool(cached and cached[0] > now.astimezone(UTC))
+    cache_hit = bool(cached and cached[0] > now_utc)
     if cache_hit:
         assert cached is not None
         rows, returned_count = cached[1], cached[2]
@@ -229,7 +250,7 @@ def collect_naver_news(
         rows = tuple(payload["items"])
         returned_count = len(rows)
         _cache[cache_key] = (
-            now.astimezone(UTC) + timedelta(seconds=settings.naver_news_cache_seconds),
+            now_utc + timedelta(seconds=settings.naver_news_cache_seconds),
             rows,
             returned_count,
         )

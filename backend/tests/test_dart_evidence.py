@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import io
+import logging
 import zipfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -108,6 +109,60 @@ def test_dart_adapter_filters_exact_symbol_and_paginates_without_exposing_key(
     assert all(request.url.params["crtfc_key"] == "d" * 40 for request in requests)
     list_requests = [request for request in requests if request.url.path == "/api/list.json"]
     assert all(request.url.params["corp_code"] == "00126380" for request in list_requests)
+
+
+def test_dart_cache_retains_one_active_credential_and_refetches_rotations(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    corp_code_requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal corp_code_requests
+        if request.url.path == "/api/corpCode.xml":
+            corp_code_requests += 1
+            return httpx.Response(200, content=_corp_code_zip())
+        return httpx.Response(200, json={"status": "013"})
+
+    settings = _settings(tmp_path)
+    transport = httpx.MockTransport(handler)
+    start = datetime(2026, 8, 11, 12, tzinfo=UTC)
+    caplog.set_level(logging.DEBUG, logger=dart_module.__name__)
+
+    collect_dart_disclosures(
+        settings, symbol="005930", now=start, transport=transport
+    )
+    collect_dart_disclosures(
+        settings,
+        symbol="005930",
+        now=start + timedelta(hours=1),
+        transport=transport,
+    )
+    assert corp_code_requests == 1
+    assert len(dart_module._corp_code_cache) == 1
+
+    key_file = tmp_path / "dart_api_key"
+    for index in range(20):
+        key_file.write_text(f"{index:040d}", encoding="utf-8")
+        collect_dart_disclosures(
+            settings,
+            symbol="005930",
+            now=start + timedelta(hours=index + 2),
+            transport=transport,
+        )
+        assert len(dart_module._corp_code_cache) == 1
+
+    before_refetch = corp_code_requests
+    key_file.write_text("d" * 40, encoding="utf-8")
+    collect_dart_disclosures(
+        settings,
+        symbol="005930",
+        now=start + timedelta(hours=23),
+        transport=transport,
+    )
+    assert corp_code_requests == before_refetch + 1
+    assert len(dart_module._corp_code_cache) == 1
+    assert "cache=dart_corp_code" in caplog.text
+    assert "d" * 40 not in caplog.text
 
 
 def test_dart_no_data_is_successful_empty_coverage(tmp_path: Path) -> None:

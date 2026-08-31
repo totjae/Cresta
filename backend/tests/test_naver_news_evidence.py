@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import hashlib
+import logging
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -119,6 +121,89 @@ def test_naver_news_filters_relevance_url_freshness_and_caches(
     assert requests[0].url.params["sort"] == "date"
     assert requests[0].headers["X-NCP-APIGW-API-KEY-ID"] == "client-id-123456"
     assert requests[0].headers["X-NCP-APIGW-API-KEY"] == "client-secret-1234567890"
+
+
+def test_naver_news_cache_globally_expires_and_rotates_credentials(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.params["query"])
+        return httpx.Response(200, json={"items": []})
+
+    settings = _settings(tmp_path, naver_news_cache_seconds=60)
+    transport = httpx.MockTransport(handler)
+    start = datetime(2026, 8, 11, 12, tzinfo=UTC)
+    caplog.set_level(logging.DEBUG, logger=news_module.__name__)
+
+    first = collect_naver_news(
+        settings,
+        symbol="005930",
+        company_name="first company",
+        now=start,
+        transport=transport,
+    )
+    assert first.cache_hit is False
+    assert collect_naver_news(
+        settings,
+        symbol="005930",
+        company_name="first company",
+        now=start + timedelta(seconds=30),
+        transport=transport,
+    ).cache_hit is True
+    collect_naver_news(
+        settings,
+        symbol="005930",
+        company_name="second company",
+        now=start + timedelta(seconds=30),
+        transport=transport,
+    )
+    assert len(news_module._cache) == 2
+
+    collect_naver_news(
+        settings,
+        symbol="005930",
+        company_name="third company",
+        now=start + timedelta(seconds=61),
+        transport=transport,
+    )
+    assert {key[1] for key in news_module._cache} == {
+        "second company",
+        "third company",
+    }
+
+    for index in range(30):
+        collect_naver_news(
+            settings,
+            symbol="005930",
+            company_name=f"rolling company {index}",
+            now=start + timedelta(seconds=122 + index * 61),
+            transport=transport,
+        )
+        assert len(news_module._cache) == 1
+
+    (tmp_path / "naver_client_id").write_text(
+        "rotated-client-id", encoding="utf-8"
+    )
+    (tmp_path / "naver_client_secret").write_text(
+        "rotated-client-secret", encoding="utf-8"
+    )
+    collect_naver_news(
+        settings,
+        symbol="005930",
+        company_name="rotated company",
+        now=start + timedelta(hours=1),
+        transport=transport,
+    )
+    active_fingerprint = hashlib.sha256(
+        b"rotated-client-id\0rotated-client-secret"
+    ).hexdigest()
+    assert len(news_module._cache) == 1
+    assert {key[0] for key in news_module._cache} == {active_fingerprint}
+    assert "cache=naver_news" in caplog.text
+    assert "rotated-client-id" not in caplog.text
+    assert "rotated company" not in caplog.text
 
 
 @pytest.mark.parametrize(
