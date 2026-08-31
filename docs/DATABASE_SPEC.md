@@ -11,6 +11,8 @@ Cresta의 사용자·설정·판단·주문·체결·포지션·위험·감사 �
 - 테이블, 키, 제약조건, 인덱스와 트랜잭션
 - migration, 보존, 백업과 민감정보
 
+PostgreSQL이 실행 중인 동안에는 계속 주문·실행 상태의 권위 원본이다. 다만 현재 `MOCK`/development 배포의 **장기 내구성 정책**은 별도이며, Phase 11A.2에서 runtime data 유실을 의도적으로 허용한다. 이 예외를 LIVE 내구성 정책으로 해석하지 않는다.
+
 ## 3. 상세 명세
 
 ### 3.1 공통 원칙
@@ -174,18 +176,20 @@ market_snapshots(symbol, market, observed_at desc)
 | --- | --- |
 | DB-060 | 모든 스키마 변경은 순서가 있는 migration으로 관리하고 운영 DB에서 자동 destructive migration을 실행하지 않는다. |
 | DB-061 | 애플리케이션 시작 시 DB schema version 호환성을 검사하고 불일치 시 거래 worker를 시작하지 않는다. |
-| DB-062 | 되돌릴 수 없는 migration은 사전 백업·복원 시험·명시적 운영 승인 절차를 요구한다. |
+| DB-062 | 현재 `MOCK`/development에서 되돌릴 수 없는 migration은 명시적 운영 승인과 fresh database 재구축 가능성 검증을 요구하지만 사전 백업·복원 시험을 deployment blocker로 요구하지 않는다. 향후 LIVE의 destructive migration·rollback 요구사항은 LIVE readiness에서 별도로 확정한다. |
 | DB-063 | 초기 관리자 생성과 시스템 기본 설정 seed는 반복 실행해도 중복 생성되지 않아야 한다. |
 | DB-064 | 파일에서 읽은 DB 비밀번호는 SQLAlchemy URL에서 percent-encoding하고, Alembic ConfigParser에 주입할 때 `%`를 이중 이스케이프한다. migration 오류에는 완성된 인증 URL이나 비밀번호를 출력하지 않는다. |
 
 ### 3.10 보존·백업
 
+현재 `MOCK`/development의 PostgreSQL·Redis와 Decision·Order·execution을 포함한 runtime history는 재생성 가능한 disposable operational data다. 유실 시 Git repository의 migration chain으로 fresh database를 만들고 runtime을 재시작한다. snapshot은 작업 편의를 위한 선택 사항이며 데이터 보존 보장이 아니다. 이 정책은 credential·password·API key를 Git에 넣거나 secret 취급을 완화하지 않는다.
+
 | ID | 요구사항 |
 | --- | --- |
-| DB-070 | 주문·체결·포지션·판단·설정·위험·감사 기록은 기본 5년 보존한다. 원본 tick은 시장데이터 명세의 단기 보존 정책을 따른다. |
-| DB-071 | 백업은 암호화하고 `/home/totquf4171/cresta/backups`에 두되 운영 DB와 동일 장애만으로 함께 소실되지 않도록 별도 복제본을 둔다. |
-| DB-072 | 백업 성공만 확인하지 않고 정기적으로 격리 환경에서 복원과 핵심 불변조건을 검증한다. |
-| DB-073 | 보존 삭제는 파티션 단위 승인 작업으로 수행하고 법적·감사 hold가 걸린 데이터는 제외한다. |
+| DB-070 | 현재 `MOCK`/development에는 주문·체결·포지션·Decision·execution·설정·위험·감사 runtime data의 최소 보존기간을 두지 않으며 데이터 유실을 허용한다. 향후 LIVE 보존기간과 hold 정책은 LIVE readiness에서 별도로 정의한다. |
+| DB-071 | 현재 `MOCK`/development의 백업은 선택 사항이다. `/home/totquf4171/cresta/backups`의 snapshot은 `OPTIONAL_PRE_DEPLOY_SNAPSHOT`이며 암호화·off-host 복제·존재 여부를 deployment blocker로 사용하지 않는다. |
+| DB-072 | 현재 `MOCK`/development 복구 기준은 fresh database에 전체 Alembic migration을 적용하고 runtime을 재시작하는 것이다. optional snapshot restore rehearsal은 완료 조건이 아니다. |
+| DB-073 | 보존 삭제와 법적·감사 hold 절차는 향후 LIVE 보존정책이 활성화될 때 함께 정의한다. 현재 MOCK data 삭제는 별도 승인된 운영 작업으로만 수행하며 일반 배포가 임의로 data directory를 지우지 않는다. |
 
 ## 4. 오류·예외 또는 경계 조건
 
@@ -200,12 +204,12 @@ market_snapshots(symbol, market, observed_at desc)
 - 부분체결·취소 경쟁 중에도 주문수량 불변조건과 포지션 수량이 유지된다.
 - Redis를 비운 뒤 DB와 키움 조회만으로 거래 상태를 복구할 수 있다.
 - 인증·Broker 비밀 원문이 DB dump에 존재하지 않는다.
-- migration과 암호화 백업 복원을 깨끗한 환경에서 재현할 수 있다.
+- 현재 MOCK/development에서 fresh database에 migration head를 적용하고 runtime을 재시작할 수 있다.
 
 ## 6. 미결정·보류 항목
 
 - 실제 거래량 기준 파티션 크기와 자동 보관 스케줄
-- 암호화 백업의 서버 외부 보관 매체
+- 향후 LIVE의 보존기간, 암호화 backup, off-host 매체, RPO/RTO와 restore drill
 
 ### 6.1 실행 권한 설정 저장 계약
 

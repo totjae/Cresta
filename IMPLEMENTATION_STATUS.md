@@ -1,5 +1,14 @@
 # Cresta 구현 상태
 
+### 2026-08-31 Cresta v2 Phase 11A.2 Disposable Runtime Data / Backup Policy Correction 완료
+
+- 사용자 승인에 따라 현재 `MOCK`/development의 PostgreSQL·Redis와 Decision·Order·execution history를 disposable operational data로 분류했다. 실행 중 PostgreSQL의 transaction authority는 유지하지만 장기 보존은 요구하지 않으며, 데이터 유실은 의도적으로 수용한다.
+- 현재 복구 source of truth는 Git repository와 migration chain이다. 복구 절차는 fresh PostgreSQL 생성 → Alembic head `20260829_0044` 적용 → runtime 재시작이며 backup·암호화·off-host copy·restore rehearsal은 deployment blocker가 아니다.
+- 서버의 `cresta-pre-v2-runtime-20260831-011222.dump`는 삭제하지 않고 `OPTIONAL_PRE_DEPLOY_SNAPSHOT`으로 분류했다. 향후 LIVE backup·retention·RPO/RTO는 이 Phase에서 삭제하거나 추정하지 않고 LIVE readiness의 명시적 미결정 항목으로 남겼다.
+- credential·password·API key의 Git commit 금지와 Docker secret/file permission 정책은 변경하지 않았다. production code, migration, DB, Compose, systemd와 running service는 변경하지 않았고 dependency도 갱신하지 않았다.
+- 서버는 `refactor/v2-runtime` transition checkout을 유지한다. reboot 시 `cresta-boot.service`가 현재 checkout의 Compose reconciliation·one-shot migration을 수행할 수 있으므로 다음 maintenance를 즉시 이어가며, 지연 시 `master` 복귀가 더 안전하다는 경고를 기록했다. 이번 Phase에서는 server branch를 변경하지 않았다.
+- 관련 명세·시험계획 정합성, migration head 불변과 `git diff --check`가 PASS했다. frontend npm audit high 1건은 정책과 무관한 OPEN risk이며 이번 Phase에서 수정하거나 migration/recreate blocker로 승격하지 않았다.
+
 ### 2026-08-31 Cresta v2 Phase 11A.1 Frontend Test Baseline Cleanup 완료
 
 - 운영 휴장 component 시험의 고정 입력 날짜 `2026-08-13`이 현재 KST의 허용 최소 날짜보다 과거가 되어 native HTML date validation의 `rangeUnderflow`로 form submit 자체가 차단됐다. 명세와 production 구현은 모두 KST 오늘부터 730일 이내만 허용하므로 production bug나 비동기 race가 아니라 날짜 의존 stale test fixture로 판정했다.
@@ -592,7 +601,7 @@
 | LLM Provider·Gateway | `docs/LLM_PROVIDER_GATEWAY_SPEC.md` | 구현 중 | 40개 Provider template, 35개 단일-key 등록, Native·OpenAI-compatible Adapter, 모델 동기화·역할·Prompt·FAIL_STOP/단일 FAILOVER·service tier·웹 검색·호출 이력 구현; OpenAI·LLM Gateway 실제 SHADOW 호출 검증 완료, 복합 인증 5종·가격 기반 비용 집계 미구현 |
 | DB 스키마·영속성 | `docs/DATABASE_SPEC.md` | Phase 10C.1 SQLite 검증 완료·PostgreSQL 대기 | 현행 head `20260828_0041`; sourced execution discriminator/partial unique, stage provenance, typed Guard/OrderIntent provenance, Approval FK와 INVALIDATED foundation 구현. PostgreSQL DDL/FK/locking/concurrency 검증 대기 |
 | 판단 실행·승인 | `docs/DECISION_EXECUTION_SPEC.md` | Phase 10F Broker pre-send 완료 | sourced manual/automatic BUY와 fixed-stop의 live stage/mode/policy/financial/position `BROKER_SEND` Guard, strict MOCK, SUBMITTING commit 및 unsent INVALIDATED 회수 구현. scheduler/production handoff/PostgreSQL은 Phase 10G 대기 |
-| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 선택형 DART·KRX overlay 감지 부팅 조정 unit 구현; 2026-08-05 기본·키움 재부팅 복구 통과, 신규 source overlay 재부팅 인수시험·백업·경보·복구훈련 미완료 |
+| 운영·장애복구 | `docs/OPERATIONS_RUNBOOK.md` | 구현 중 | 전 서비스 `unless-stopped`, core healthcheck와 선택형 source overlay 부팅 조정 unit 구현; 현재 MOCK runtime data는 disposable이며 optional snapshot은 배포 blocker가 아님. 향후 LIVE backup·retention과 경보·복구훈련은 미정/미완료 |
 | 구현 착수 준비도 | `docs/IMPLEMENTATION_READINESS_REVIEW.md` | 역사적 검토 | 2026-08-06 Foundation·Agent Runtime v1 착수 게이트 기록이며 현재 상태는 이 문서를 기준으로 한다. |
 | Backend·Docker 골격 | `docs/SYSTEM_DESIGN.md`, `docs/OPERATIONS_RUNBOOK.md` | 검증 완료 | API source UID `10001` 소유권·PostgreSQL·Redis·API·Frontend·gateway 기동과 HTTPS/내부 health 실서버 확인 |
 
@@ -725,7 +734,7 @@
 
 ### 6.6 6순위 — 운영 안정화와 제한 자동매매 준비
 
-- DART 포함 systemd boot profile, backup·restore drill, 경보와 운영 dashboard 완성
+- DART 포함 systemd boot profile, 경보와 운영 dashboard 완성; backup·restore drill은 향후 LIVE readiness에서 정책 확정 후 계획
 - 실제 장중 Watch 지표, 체결 event와 reconciliation 장애 주입 시험
 - 거래일별 손익·모델 판단·Guard 차단·주문 결과 review report
 - 실거래 credential과 권한은 별도 승인 전까지 추가하지 않음

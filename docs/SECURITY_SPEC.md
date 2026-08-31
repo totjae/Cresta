@@ -165,7 +165,7 @@ Argon2id 초기 최소값은 memory 64 MiB, iterations 3, parallelism 1로 한�
 
 ## 6. 미결정·보류 항목
 
-- 인증 감사 로그는 거래 감사와 함께 기본 5년 보존한다.
+- 현재 `MOCK`/development의 인증 감사 로그는 다른 PostgreSQL runtime data와 함께 disposable이며 최소 보존기간을 두지 않는다. 향후 LIVE의 인증·거래 감사 보존기간은 운영 명세와 LIVE readiness에서 별도로 확정한다.
 - RFC 6238 호환 TOTP 앱을 지원하며 QR issuer는 `Cresta`, 계정 표시는 login ID를 사용한다.
 - 관리자 복구는 서버 로컬 OS 계정 접근과 미사용 복구 코드를 모두 요구한다. 복구 코드도 없으면 자동 우회하지 않고 별도 운영 복구 절차가 마련될 때까지 계정을 잠금 상태로 유지한다.
 ## 외부 LLM credential 경계

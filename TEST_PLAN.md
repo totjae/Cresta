@@ -1,5 +1,18 @@
 # Cresta 테스트 계획
 
+### Phase 11A.2 disposable runtime data / backup policy correction (2026-08-31)
+
+| ID | 요구사항 | 검증 | 결과 |
+| --- | --- | --- | --- |
+| T-V2-OPS-11A2-001 | DB-070~073, OPS-040~044, SEC-072 | MOCK/development PostgreSQL·Redis·runtime history 내구성 정책 | PASS — disposable, data loss accepted, backup optional |
+| T-V2-OPS-11A2-002 | DB-062, DB-072, OPS-042 | backup restore 없는 fresh recovery model | PASS — Git migration chain → fresh DB head `20260829_0044` → runtime restart |
+| T-V2-OPS-11A2-003 | DB-071, OPS-040~041 | 기존 fresh dump disposition | PASS — `OPTIONAL_PRE_DEPLOY_SNAPSHOT`, 삭제 없음, encryption/off-host blocker 없음 |
+| T-V2-OPS-11A2-004 | SEC-032~033, KIW-011~012 | disposable data와 secret 정책 분리 | PASS — credential/password/API key Git 금지와 file secret 규칙 불변 |
+| T-V2-OPS-11A2-005 | LIVE future readiness | 현재 예외의 LIVE 자동 적용 여부 | PASS — LIVE backup·retention·RPO/RTO 명시적 미결정 유지 |
+| T-V2-OPS-11A2-006 | 문서·migration consistency | 관련 명세, migration head, whitespace | PASS — code/runtime/migration 변경 없음, head `20260829_0044`, `git diff --check` PASS |
+
+이번 Phase는 문서 정책 정정이다. backend/frontend full suite는 재실행하지 않았으며 database, Compose, systemd, running container와 dependency를 변경하지 않았다. Preflight B의 npm audit high 1건은 별도 OPEN risk로 유지하고 이 정책 변경의 migration/recreate blocker로 사용하지 않는다.
+
 ### Phase 11A.1 frontend test baseline cleanup (2026-08-31)
 
 | ID | 요구사항 | 검증 | 결과 |
@@ -984,7 +997,7 @@ Phase 10D focused test와 runtime 변경은 시작하지 않았다. Risk Policy 
 | T-DB-006 | DB-050~053 | Redis 전체 삭제 후 worker 재시작 | DB·Broker로 복구, 작업 중복 없음 | 계획 |
 | T-DB-007 | DB-060~063 | schema 불일치·migration 실패·seed 재실행 | worker 시작 차단, 중복 seed 없음 | 계획 |
 | T-DB-008 | DB-064, SEC-033 | `/` 등 예약문자가 포함된 DB 비밀번호로 Alembic 실행 | URL은 정상 해석되고 오류·로그에 비밀번호 또는 완성된 인증 URL 미노출 | 단위 통과·PostgreSQL 재검증 대기 |
-| T-DB-009 | DB-070~073 | 암호화 백업 복원·보존 삭제 | 불변조건 통과, hold 데이터 보존 | 계획 |
+| T-DB-009 | DB-070~073 | 현재 MOCK runtime data 유실 후 fresh database 재구축 | 전체 migration head 적용과 runtime 재시작 가능; 기존 row 보존 요구 없음 | 계획 (Phase 11A.2 정책 정정) |
 
 ### 3.14 HTTP·WebSocket API
 
@@ -1007,7 +1020,7 @@ Phase 10D focused test와 runtime 변경은 시작하지 않았다. Risk Policy 
 | T-OPS-002 | OPS-010~013 | 의존 서비스 지연·종료 중 UNKNOWN 주문 | READY 차단, 상태 영속·재동기화 | 계획 |
 | T-OPS-003 | OPS-020~023 | schema 비호환 이미지 배포 | 거래 중지 상태 유지와 안전 롤백 | 계획 |
 | T-OPS-004 | OPS-030~034 | 디스크 85%·UNKNOWN·시각 오차 발생 | 경보·구조화 로그·상세 비공개 health | 계획 |
-| T-OPS-005 | OPS-040~044 | 암호화 백업 월간 복원 훈련 | RPO/RTO 측정, 수동 확인 전 주문 금지 | 계획 |
+| T-OPS-005 | OPS-040~044 | 현재 MOCK fresh database recovery와 optional snapshot 분류 | migration head·MOCK/secret/Broker 재동기화 확인 전 주문 금지; backup 부재는 blocker 아님 | 계획 (Phase 11A.2 정책 정정) |
 | T-OPS-006 | OPS-050~053 | DB·Redis·키움·시세 장애 주입 | 장애별 게이트와 복구 순서 준수 | 계획 |
 | T-OPS-007 | OPS-060~063 | Web 또는 Broker secret 유출 가정 | 세션·token 폐기, 증거 보존·사고 기록 | 계획 |
 | T-OPS-008 | OPS-006~007 | N100 자원 제한과 디스크 임계값 검사 | 예약 메모리 유지, 20% 경고·10% 차단 | 계획 |

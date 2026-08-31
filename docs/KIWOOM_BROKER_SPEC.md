@@ -41,7 +41,7 @@
 │   ├── postgres/        PostgreSQL bind mount
 │   └── redis/           Redis 영속 데이터가 필요할 때 사용
 ├── logs/                서비스 로그
-├── backups/             암호화된 백업
+├── backups/             MOCK/development optional convenience snapshot, Git 제외
 └── artifacts/           진단·시험 결과, 비밀정보 제외
 ```
 

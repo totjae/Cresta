@@ -38,7 +38,7 @@ tls_termination: host_nginx
 
 N100 환경에서는 Scout·Core 모델을 서버에 직접 적재하지 않고 외부 모델 adapter 또는 mock adapter를 사용한다. 동시 감시 종목은 MVP 상한 3개를 유지하고, CPU 집약 분석 작업은 기본 동시 실행 1개로 제한한다.
 
-초기 저장공간 예산은 PostgreSQL 100GiB, 암호화 백업 50GiB, 로그 15GiB, 시험·진단 artifacts 10GiB, 이미지·빌드 cache 15GiB로 제한하고 최소 60GiB를 운영 여유 공간으로 남긴다. 실제 사용량에 따라 조정하되 여유 공간 20% 미만에서는 경고, 10% 미만에서는 신규매수와 고용량 수집을 차단한다.
+초기 저장공간 예산은 PostgreSQL 100GiB, optional local snapshot 최대 50GiB, 로그 15GiB, 시험·진단 artifacts 10GiB, 이미지·빌드 cache 15GiB로 제한하고 최소 60GiB를 운영 여유 공간으로 남긴다. optional snapshot 용량은 보존 예약이나 내구성 보장이 아니다. 실제 사용량에 따라 조정하되 여유 공간 20% 미만에서는 경고, 10% 미만에서는 신규매수와 고용량 수집을 차단한다.
 
 | ID | 요구사항 |
 | --- | --- |
@@ -159,7 +159,7 @@ curl --fail --silent --show-error --max-time 5 \
 ```text
 명세·migration·시험 결과 확인
 → 이미지 digest 고정 및 취약점 검사
-→ DB 암호화 백업
+→ 필요 시 optional convenience DB snapshot
 → 장외 또는 신규진입 중지 상태 전환
 → one-shot migration 실행 및 성공 확인
 → 서비스 교체
@@ -171,7 +171,7 @@ curl --fail --silent --show-error --max-time 5 \
 | --- | --- |
 | OPS-020 | 운영 이미지는 변경 가능한 tag만 쓰지 않고 digest 또는 불변 버전으로 배포한다. |
 | OPS-021 | 장중 무중단 자동 배포를 첫 버전에서 지원하지 않으며 신규진입 중지와 미체결 확인 후 배포한다. |
-| OPS-022 | schema 비호환 또는 health 실패 시 거래 게이트를 닫은 채 이전 호환 이미지로 롤백한다. destructive migration은 복원 절차를 사용한다. |
+| OPS-022 | schema 비호환 또는 health 실패 시 거래 게이트를 닫는다. 현재 `MOCK`/development는 호환되는 이전 이미지로 롤백하거나, 데이터 유실을 수용하고 fresh database에 migration을 재적용해 재구축할 수 있다. 향후 LIVE rollback과 destructive migration 복구 정책은 LIVE readiness에서 별도로 정한다. |
 | OPS-023 | 배포자, 이미지·설정·schema 버전, 시작·종료 시각과 검증 결과를 기록한다. |
 
 ### 3.4 상태 확인과 모니터링
@@ -196,25 +196,30 @@ Watch 시세 최신성·갭, queue 지연
 
 ### 3.5 백업과 복원 목표
 
-초기 운영 목표:
+Phase 11A.2에서 확정한 현재 `MOCK`/development 정책:
 
 ```yaml
-database:
-  full_backup: daily_after_market
-  wal_archive_or_incremental: 15_minutes
-  off_host_copy: daily
-  rpo_target: 15_minutes
-  rto_target: 60_minutes
-restore_drill: monthly
+scope: mock_development
+postgres_runtime_data: disposable
+redis_runtime_data: disposable
+decision_order_execution_history: disposable
+backup: optional
+encrypted_backup_required: false
+off_host_copy_required: false
+restore_drill_required: false
+recovery: fresh_database_then_alembic_head_then_runtime_restart
+data_loss_accepted: true
 ```
+
+Git repository와 migration chain이 재구축 source of truth다. PostgreSQL이 실행 중일 때의 transaction authority와 장기 보존 의무는 구분한다. 이 정책은 LIVE에 자동 적용하지 않으며 LIVE backup·retention·RPO/RTO는 향후 LIVE readiness에서 명시적으로 다시 결정한다.
 
 | ID | 요구사항 |
 | --- | --- |
-| OPS-040 | PostgreSQL 백업은 인증·TOTP·거래 데이터를 포함하므로 암호화하고 접근을 최소화한다. |
-| OPS-041 | 백업 키는 백업 파일과 분리하고 서버 한 대의 디스크 고장으로 DB와 모든 백업이 함께 소실되지 않게 한다. |
-| OPS-042 | 월 1회 격리 환경 복원 후 schema version, 주문 수량 불변조건, 감사 연결과 비밀 미노출을 검증한다. |
-| OPS-043 | Redis는 필수 복구 원본이 아니며 복원 후 PostgreSQL과 키움으로 캐시·큐를 재구성한다. |
-| OPS-044 | 복원된 서버는 키움 전체 재동기화와 사용자 수동 확인 전 주문 권한을 얻지 않는다. |
+| OPS-040 | 현재 `MOCK`/development PostgreSQL snapshot은 선택 사항이며 암호화·off-host copy·restore rehearsal을 요구하지 않는다. 생성한 snapshot은 Git에 포함하지 않고 접근 권한을 최소화한다. |
+| OPS-041 | 현재 `MOCK`/development에서는 PostgreSQL·Redis와 runtime history 유실을 의도적으로 허용하며 backup 부재나 동일 host 유실 가능성을 deployment blocker로 취급하지 않는다. |
+| OPS-042 | 현재 복구 절차는 fresh PostgreSQL 생성 → 전체 Alembic migration 적용 → runtime 재시작이다. 기존 runtime row 복원은 완료 조건이 아니다. |
+| OPS-043 | Redis는 disposable cache/queue state이며 유실 시 PostgreSQL과 외부 source를 기준으로 필요한 상태를 다시 구성한다. PostgreSQL까지 유실된 경우 fresh database recovery를 사용한다. |
+| OPS-044 | fresh database로 재구축한 서버는 migration head, MOCK 환경, secret 준비, Broker 계좌 재동기화와 사용자 수동 확인 전 주문 권한을 얻지 않는다. |
 
 ### 3.6 장중 장애 대응
 
@@ -260,7 +265,7 @@ restore_drill: monthly
 - 익일 보유 정책과 잔여 포지션 확인
 - 미체결·UNKNOWN·불일치 0건 또는 승인된 예외 확인
 - 당일 주문·체결·손익·감사 로그 대조
-- 백업 성공과 원격 복제 확인
+- 필요 시 생성한 optional convenience snapshot의 상태 확인; snapshot·원격 복제 부재는 현재 MOCK 운영 blocker가 아님
 
 ## 4. 오류·예외 또는 경계 조건
 
@@ -334,7 +339,7 @@ Docker Compose에서 API 또는 Frontend 컨테이너만 재생성하면 고정 
 `CRESTA_KIWOOM_ENABLED=true`는 세 secret이 준비되고 출구 IP를 별도로 확인한 뒤에만 적용한다. 이번 단계의 `CONFIGURED`는 파일 준비 상태이며 키움 인증·계좌조회 성공을 뜻하지 않는다.
 
 - 키움이나 네트워크 장애 시 Cresta가 시장 체결을 보장하지 않는다는 경고를 유지한다.
-- RPO/RTO는 운영 목표이며 거래 결과 보장을 의미하지 않는다.
+- 현재 MOCK/development에는 runtime data RPO/RTO를 두지 않으며 데이터 유실을 허용한다. LIVE RPO/RTO는 향후 별도 정의한다.
 - 백업 복원본을 기존 서버와 동시에 같은 계좌의 Active worker로 실행하지 않는다.
 - TLS 인증서 만료 임박 시 갱신 실패 경보를 발생시키며 만료 후 HTTP 우회 접속을 열지 않는다.
 - 호스트 Nginx가 `Host`, `X-Forwarded-Proto`, `X-Forwarded-For`, `X-Request-Id`를 전달하지 않거나 HTTPS 원본을 보장하지 못하면 인증 서비스 공개를 중지한다.
@@ -377,7 +382,11 @@ soak fail 조건은 unexpected crash 또는 무제한 restart 증가, memory/DB 
 
 ### 4.6 Phase 11A Ubuntu build·운영 절차
 
-사전 조건은 Ubuntu host, Docker Engine과 Compose plugin, `/home/totquf4171/cresta`, host Nginx/TLS, 충분한 disk, test된 PostgreSQL backup/restore 경로다. 실제 IP·추가 mount·경보 채널은 host preflight에서 기록하며 repository에 새 값으로 추정하지 않는다.
+사전 조건은 Ubuntu host, Docker Engine과 Compose plugin, `/home/totquf4171/cresta`, host Nginx/TLS, 충분한 disk와 fresh PostgreSQL에 migration head를 적용할 수 있는 검증된 경로다. 현재 MOCK/development의 backup/restore 경로는 필수 사전조건이 아니다. 실제 IP·추가 mount·경보 채널은 host preflight에서 기록하며 repository에 새 값으로 추정하지 않는다.
+
+2026-08-31 생성한 `/home/totquf4171/cresta/backups/cresta-pre-v2-runtime-20260831-011222.dump`는 `OPTIONAL_PRE_DEPLOY_SNAPSHOT`이다. PostgreSQL custom archive 검증과 SHA-256 `277bb1aa5c6c68e069905d464dd5a4b7f3e5f6b82787478b53afdb867cab07ef` evidence는 편의상 유지하지만 암호화·off-host copy·restore rehearsal을 요구하지 않으며 삭제하지 않는다.
+
+Phase 11A.2 시점 서버 checkout은 `refactor/v2-runtime`이고 `cresta-boot.service`는 host reboot 시 현재 checkout으로 Compose reconciliation과 one-shot migration을 수행할 수 있다. 다음 maintenance phase를 즉시 이어가는 동안에는 이를 deployment transition state로 취급한다. 작업이 지연되면 이전 `master` checkout으로 돌아가는 편이 더 안전하다는 운영 경고를 적용하되, 이 Phase에서는 branch·systemd·Compose를 변경하지 않는다.
 
 1. 검토된 checkpoint를 `/home/totquf4171/cresta`에 clone 또는 fast-forward하고 branch/ref와 dirty state를 확인한다. 운영 ref는 review에서 확정한 immutable commit만 사용한다.
 2. `deploy/.env.example`을 `deploy/.env`로 복사한 뒤 `MOCK`, `LIVE=false`, `V7_SOURCED_HANDOFF_ENABLED=false`를 유지한다. 실제 secret은 `.env`에 넣지 않는다.
@@ -419,7 +428,7 @@ sudo docker inspect --format '{{.Name}} restart={{.RestartCount}}' \
   $(sudo docker compose -f deploy/compose.yaml -f deploy/compose.kiwoom.yaml ps -q)
 ```
 
-일반 restart는 `docker compose ... restart <service>`, clean stop은 `docker compose ... stop`, stack 제거는 volume 삭제 옵션 없이 `docker compose ... down`을 사용한다. application rollback은 먼저 handoff OFF와 Console의 PAUSE_ENTRY로 신규진입을 중지하고, DB backup과 현재 schema head를 보존한 뒤 review된 이전 호환 image/commit을 checkout·build하여 같은 health 절차로 교체한다. DB migration은 application image와 함께 자동 downgrade하지 않는다. 이전 image가 current schema와 호환되지 않으면 서비스를 시작하지 않고 backup restore 또는 별도 승인된 forward correction을 사용한다.
+일반 restart는 `docker compose ... restart <service>`, clean stop은 `docker compose ... stop`, stack 제거는 volume 삭제 옵션 없이 `docker compose ... down`을 사용한다. application rollback은 먼저 handoff OFF와 Console의 PAUSE_ENTRY로 신규진입을 중지하고, 현재 schema head를 기록한 뒤 review된 이전 호환 image/commit을 checkout·build하여 같은 health 절차로 교체한다. optional snapshot은 있으면 보존하지만 필수 rollback 자산이 아니다. DB migration은 application image와 함께 자동 downgrade하지 않는다. 이전 image가 current schema와 호환되지 않으면 현재 MOCK/development에서는 별도 승인 아래 fresh database를 만들고 migration을 재적용하거나 review된 forward correction을 사용한다.
 
 자동 handoff 긴급 중지는 `deploy/.env`의 `CRESTA_V7_SOURCED_HANDOFF_ENABLED=false`를 확인한 후 다음처럼 해당 service만 recreate한다.
 
@@ -480,7 +489,7 @@ NAVER Cloud Platform에서 NAVER API HUB와 뉴스 검색 권한을 활성화한
 
 - 깨끗한 Ubuntu 환경에서 문서화된 순서로 MOCK 서비스를 배포할 수 있다.
 - 의존 서비스 장애별로 신규주문 차단과 복구 후 재동기화가 재현된다.
-- 암호화 백업을 격리 환경에 복원하고 핵심 불변조건을 검증한다.
+- 현재 MOCK/development에서 fresh database에 전체 migration을 적용하고 runtime을 재시작할 수 있다.
 - 동일 계좌 worker 이중 실행과 복원 서버 동시 실행이 차단된다.
 - 장 전·장 후 점검 결과와 장애 대응 이력이 감사 가능하다.
 - 외부에서는 `https://trade.mihoservice.xyz`로만 접근할 수 있고, 원격 호스트에서 서버의 7788 포트로 직접 접근할 수 없다.
@@ -488,6 +497,6 @@ NAVER Cloud Platform에서 NAVER API HUB와 뉴스 검색 권한을 활성화한
 
 ## 6. 미결정·보류 항목
 
-- 외부 백업 매체와 암호화 키 보관 위치
+- 향후 LIVE의 backup·retention, 암호화, off-host 매체, RPO/RTO와 restore drill
 - 경보 전달 채널과 야간 알림 정책
 - TLS 인증서 발급·자동 갱신 도구와 갱신 실패 알림 방식
