@@ -1,5 +1,17 @@
 # Cresta 테스트 계획
 
+### Phase 11A.4A fixed-stop correlation ID capacity correction (2026-08-31)
+
+| ID | 요구사항 | 검증 | 결과 |
+| --- | --- | --- | --- |
+| T-V2-STOP-11A4A-001 | DB-006, DB-054, GRD-085 | fixed-stop worker correlation ID canonical format와 독립 생성 | PASS — UUIDv7 36자, 동일 평가 시각 2회 생성 distinct |
+| T-V2-STOP-11A4A-002 | DB-054, EXE-251~258 | PostgreSQL `varchar(36)` 실제 persistence boundary | PASS — 기존 37자 값 `DataError` 재현, 기본 producer trigger/RiskEvent 영속 |
+| T-V2-STOP-11A4A-003 | EXE-251~258 | SHADOW·APPROVAL_ONLY·MOCK_AUTOMATIC fixed-stop 의미 불변 | PASS — evidence-only, EXIT_PENDING/Order 0, typed exact-one SELL 유지 |
+| T-V2-STOP-11A4A-004 | EXE-256~281, ORD-052~060 | PostgreSQL concurrent trigger 및 Broker pre-send authority | PASS — trigger/Intent/Order exact-one, `STOP_TRIGGER`와 authority key 불변 |
+| T-V2-STOP-11A4A-005 | repository regression | SQLite/full backend, Ruff, migration head, whitespace | PASS — backend 758/758, Ruff/diff PASS, head `20260829_0044` |
+
+PostgreSQL 검증은 `127.0.0.1 / cresta_acceptance`의 test-only PostgreSQL 17.11과 실행별 격리 schema만 사용했다. correlation ID는 trigger·RiskEvent·OrderIntent의 추적 metadata로 전달되지만 fixed-stop dedupe는 position/version/policy unique, order authority는 persisted `StopTrigger.id` 기반 `order-authority-key-v1`이므로 변경되지 않는다. migration, production server, LIVE, Stage/Gate와 Broker call은 변경하거나 사용하지 않았다.
+
 ### Phase 11A.2 disposable runtime data / backup policy correction (2026-08-31)
 
 | ID | 요구사항 | 검증 | 결과 |

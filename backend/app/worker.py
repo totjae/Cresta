@@ -321,7 +321,7 @@ class KiwoomBrokerWorker:
         """
         if self.identity is None:
             return
-        correlation_id = f"stop-{now.isoformat()}"
+        correlation_id = uuid7()
 
         def execute() -> None:
             with SessionLocal() as db:

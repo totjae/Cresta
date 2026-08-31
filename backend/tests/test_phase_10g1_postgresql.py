@@ -14,13 +14,13 @@ from decimal import Decimal
 from pathlib import Path
 from threading import Barrier
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.engine import Engine, make_url
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.orm.exc import StaleDataError
 from sqlalchemy.pool import NullPool
@@ -83,6 +83,7 @@ from app.models import (
     OrderIntent,
     Position,
     ReauthProof,
+    RiskEvent,
     StopTrigger,
     TradingOrder,
     User,
@@ -898,6 +899,36 @@ def test_postgresql_e2e_fixed_stop_exact_one_and_rollback(
 ) -> None:
     _fixed_stop_case(db, admin, settings)
     db.rollback()
+
+
+def test_postgresql_fixed_stop_default_correlation_fits_persistence_boundary(
+    db: Session,
+    settings: Settings,
+) -> None:
+    evaluated_at = datetime(2026, 8, 30, 21, 1, 22, 948000, tzinfo=UTC)
+    oversized = f"stop-{evaluated_at.isoformat()}"
+    assert len(oversized) > 36
+    _set_gate(db, "RECONCILING")
+    _position(db, average_price=Decimal(50000), quantity=10)
+    _snapshot(db, bid_price=Decimal(49000), received_at=evaluated_at)
+    db.commit()
+
+    with pytest.raises(DataError):
+        run_fixed_stop_triggers(
+            db,
+            settings=settings,
+            now=evaluated_at,
+            correlation_id=oversized,
+        )
+    assert db.scalar(select(func.count()).select_from(StopTrigger)) == 0
+
+    assert run_fixed_stop_triggers(db, settings=settings, now=evaluated_at) == 1
+    trigger = db.scalar(select(StopTrigger))
+    event = db.scalar(select(RiskEvent))
+    assert trigger is not None and event is not None
+    assert len(trigger.correlation_id) == 36
+    assert str(UUID(trigger.correlation_id)) == trigger.correlation_id
+    assert event.correlation_id == trigger.correlation_id
 
 
 def _runtime_handoff_ready(

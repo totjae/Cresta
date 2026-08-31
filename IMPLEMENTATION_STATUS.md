@@ -1,5 +1,12 @@
 # Cresta 구현 상태
 
+### 2026-08-31 Cresta v2 Phase 11A.4A Fixed-Stop Correlation ID Capacity Correction 완료
+
+- Ubuntu Stage A에서 broker worker의 `stop-{ISO timestamp}` correlation ID가 37자로 생성되어 PostgreSQL `stop_triggers.correlation_id varchar(36)` 최초 flush를 43회 거부한 원인을 교정했다. SQLite는 `String(36)` 길이를 강제하지 않아 같은 오류를 검출하지 못했다.
+- fixed-stop worker producer와 direct-call fallback은 기존 canonical `uuid7()` helper를 사용한다. UUID 문자열은 정확히 36자이며 동일 평가 시각의 독립 실행도 서로 다른 ID를 만든다. correlation ID는 tracing metadata로만 유지되고 trigger idempotency unique, `STOP_TRIGGER` source identity, `order-authority-key-v1`, Approval과 Broker pre-send authority는 변경하지 않았다.
+- 실제 local test-only PostgreSQL 17.11 격리 schema에서 기존 37자 producer가 `DataError`로 거부되는 persistence boundary를 재현한 뒤 UUIDv7 trigger와 RiskEvent가 정상 영속되는 것을 확인했다. PostgreSQL fixed-stop persistence/concurrency/authority/pre-send/PAUSE 5/5, SQLite worker·fixed-stop 20/20과 stage/pre-send fixed-stop 14/14가 PASS했다.
+- backend 전체 758/758, Ruff와 `git diff --check`가 PASS했다. schema/migration은 변경하지 않았고 head는 `20260829_0044`다. 서버 접속·배포·Compose·DB·Stage·Gate·order mutation과 commit/push는 수행하지 않았으며 Stage A는 별도 redeploy/re-acceptance 전까지 재개하지 않는다.
+
 ### 2026-08-31 Cresta v2 Phase 11A.2 Disposable Runtime Data / Backup Policy Correction 완료
 
 - 사용자 승인에 따라 현재 `MOCK`/development의 PostgreSQL·Redis와 Decision·Order·execution history를 disposable operational data로 분류했다. 실행 중 PostgreSQL의 transaction authority는 유지하지만 장기 보존은 요구하지 않으며, 데이터 유실은 의도적으로 수용한다.

@@ -20,6 +20,7 @@ from app.execution_stage import (
     StageResolutionStatus,
     resolve_current_execution_stage,
 )
+from app.ids import uuid7
 from app.models import (
     ConfigurationVersion,
     GuardEvaluation,
@@ -964,7 +965,7 @@ def run_fixed_stop_triggers(
                 position=position,
                 settings=settings,
                 now=evaluated_at,
-                correlation_id=correlation_id or f"stop-{evaluated_at.isoformat()}",
+                correlation_id=correlation_id or uuid7(),
                 stage_evidence_loader=stage_evidence_loader,
                 stage_validation_policy=stage_validation_policy,
             )

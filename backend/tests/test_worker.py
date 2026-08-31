@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from sqlalchemy import select
@@ -174,6 +175,38 @@ def _configured_settings(tmp_path: Path) -> Settings:
         kiwoom_app_secret_file=files[1],
         kiwoom_account_id_file=files[2],
     )
+
+
+def test_fixed_stop_worker_uses_distinct_persistence_safe_correlation_ids(
+    monkeypatch: pytest.MonkeyPatch,
+    session_factory: sessionmaker[Session],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(worker_module, "SessionLocal", session_factory)
+    captured: list[str] = []
+
+    def capture_correlation_id(*_args, **kwargs) -> int:
+        captured.append(kwargs["correlation_id"])
+        return 0
+
+    monkeypatch.setattr(worker_module, "run_fixed_stop_triggers", capture_correlation_id)
+    monkeypatch.setattr(worker_module, "recover_exit_pending", lambda *_args, **_kwargs: 0)
+    worker = worker_module.KiwoomBrokerWorker(
+        _configured_settings(tmp_path),
+        client=SnapshotClient(),
+        websocket=ControlledWebSocket(),
+    )
+    worker.identity = object()  # type: ignore[assignment]
+
+    evaluated_at = datetime(2026, 8, 31, 6, 1, 22, 948000, tzinfo=UTC)
+    asyncio.run(worker._run_stop_triggers(evaluated_at))
+    asyncio.run(worker._run_stop_triggers(evaluated_at))
+
+    assert len(captured) == 2
+    assert captured[0] != captured[1]
+    for correlation_id in captured:
+        assert len(correlation_id) == 36
+        assert str(UUID(correlation_id)) == correlation_id
 
 
 def test_worker_reaches_ready_only_after_websocket_and_clean_reconciliation(
