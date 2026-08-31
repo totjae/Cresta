@@ -1,5 +1,17 @@
 # Cresta 테스트 계획
 
+### Phase 11A.4F agent memory limit correction (2026-08-31)
+
+| ID | 요구사항 | 검증 | 결과 |
+| --- | --- | --- | --- |
+| T-V2-OPS-11A4F-001 | OPS-006, measured agent resource allocation | effective Compose agent memory 512 MiB, CPU 0.25·reservation 없음 | 검증 예정 |
+| T-V2-OPS-11A4F-002 | 다른 service resource 불변 | worker 512m, scheduler/handoff 256m 및 base service diff 없음 | 검증 예정 |
+| T-V2-OPS-11A4F-003 | Docker default swap 관계 | runtime `Memory=512 MiB`, `MemorySwap=1 GiB`, cgroup memory/swap max 각 512 MiB | 서버 검증 예정 |
+| T-V2-OPS-11A4F-004 | fresh runtime memory acceptance | 15~20분 normal cycle, margin·max events·swap·OOM/restart 측정 | 서버 검증 예정 |
+| T-V2-OPS-11A4F-005 | deployment/trading regression | agent-only recreate, platform health, authority/order 불변, migration 0044 | 서버 검증 예정 |
+
+512 MiB는 Phase 11A.4E에서 관찰한 약 254 MiB resident cgroup pressure와 약 117 MiB swap, 반복 hard-limit event를 근거로 선택한 운영 allocation이다. cache correction 이후 short-window runaway는 없었지만 384 MiB는 측정 수요에 비해 여유가 작다. 서버 fresh revalidation 전에는 Stage A PASS 또는 memory blocker 해제로 처리하지 않는다.
+
 ### Phase 11A.4D agent cache retention correction (2026-08-31)
 
 | ID | 요구사항 | 검증 | 결과 |

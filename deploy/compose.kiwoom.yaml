@@ -81,7 +81,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-    mem_limit: 256m
+    mem_limit: 512m
     cpus: 0.25
     networks: [backend]
     logging: *default-logging

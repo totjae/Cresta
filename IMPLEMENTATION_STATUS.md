@@ -1,5 +1,11 @@
 # Cresta 구현 상태
 
+### 2026-08-31 Cresta v2 Phase 11A.4F Agent Memory Limit Correction 검증 중
+
+- Phase 11A.4E의 cache-corrected fresh agent는 startup 약 72 MiB에서 normal collection 뒤 253.0~254.1 MiB로 상승했고 256 MiB hard limit에서 `memory.events max=518`, swap 약 116.94 MiB를 기록했다. 단기 runaway/OOM은 없었으나 resident pressure와 swap을 합친 실효 수요가 약 350~380 MiB여서 384 MiB는 운영 여유가 부족하다.
+- N100·약 15 GiB host에서 정상 workload에 의미 있는 여유를 제공하도록 agent의 Compose `mem_limit`만 512 MiB로 교정한다. 이는 측정 기반 운영 allocation이며 application/trading semantic requirement가 아니다. CPU, reservation, explicit swap policy와 다른 service resource는 변경하지 않는다.
+- local Compose/config regression과 서버의 agent-only fresh runtime 검증이 완료되기 전까지 Stage A memory blocker와 Stage A restart readiness는 OPEN이다. cache logic, provider semantics, backend runtime, migration, DB, Stage/Gate/handoff/LIVE는 변경하지 않는다.
+
 ### 2026-08-31 Cresta v2 Phase 11A.4D Agent Cache Retention Correction 완료
 
 - Phase 11A.4C에서 agent RSS/PSS가 256 MiB limit 근처에 고정된 원인 후보 중 process-global official-source cache의 무제한 과거 세대 보존을 최소 교정한다. KRX daily cache는 현재 credential과 현재 `krx_lookback_days` 날짜 창의 KOSPI/KOSDAQ endpoint만 유지해 최대 `2 × lookback_days`(설정 상한 20)로 제한한다.
