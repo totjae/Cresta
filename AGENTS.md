@@ -59,6 +59,7 @@
 | LLM Provider 및 Gateway 명세 | [docs/LLM_PROVIDER_GATEWAY_SPEC.md](docs/LLM_PROVIDER_GATEWAY_SPEC.md) | 공식 API·Gateway·Ollama Adapter, 모델 기능, route, 비밀·비용·fallback 정책 |
 | 판단 실행·승인 명세 | [docs/DECISION_EXECUTION_SPEC.md](docs/DECISION_EXECUTION_SPEC.md) | AI·Guard 신호의 실행 권한 분기, Guard 재검사, 승인과 주문 생성 경계 |
 | 데이터베이스 명세 | [docs/DATABASE_SPEC.md](docs/DATABASE_SPEC.md) | 테이블, 제약조건, 트랜잭션, migration, 보존과 Redis 경계 |
+| Activation evidence 명세 | [docs/ACTIVATION_EVIDENCE_SPEC.md](docs/ACTIVATION_EVIDENCE_SPEC.md) | Activation Gate 시험 artifact, publisher, content-addressed store, revision binding과 production resolver 계약 |
 | 운영·장애복구 명세 | [docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md) | 배포, 모니터링, 백업·복원과 장애 대응 |
 | 구현 준비도 검토 | [docs/IMPLEMENTATION_READINESS_REVIEW.md](docs/IMPLEMENTATION_READINESS_REVIEW.md) | 2026-07-31~08-06 구현 전 명세 공백·초기 착수 게이트를 보존한 역사적 스냅샷 |
 | 시스템 설계 | [docs/SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md) | 전체 아키텍처, 모듈 책임, 데이터 모델과 장애·보안 원칙 |
@@ -93,6 +94,7 @@
 | 에이전트 역할·DAG·증거·병렬 실행 | `MULTI_AGENT_ORCHESTRATION_SPEC.md`, `AI_DECISION_SPEC.md`, `SYSTEM_DESIGN.md`, `DATABASE_SPEC.md`, `TEST_PLAN.md` |
 | LLM provider·gateway·model·route·비용 | `LLM_PROVIDER_GATEWAY_SPEC.md`, `SECURITY_SPEC.md`, `CONFIGURATION_SPEC.md`, `DATABASE_SPEC.md`, `API_SPEC.md`, `WEB_UI_SPEC.md`, `TEST_PLAN.md` |
 | 판단 실행, Guard 분기, 승인·주문 연결 | `DECISION_EXECUTION_SPEC.md`, `GUARD_RISK_SPEC.md`, `ORDER_EXECUTION_SPEC.md`, `ORDER_STATE_MACHINE_SPEC.md`, `API_SPEC.md`, `DATABASE_SPEC.md`, `WEB_UI_SPEC.md`, `TEST_PLAN.md` |
+| Activation Gate evidence artifact·publisher·resolver | `ACTIVATION_EVIDENCE_SPEC.md`, `CONFIGURATION_SPEC.md`, `AI_DECISION_SPEC.md`, `MULTI_AGENT_ORCHESTRATION_SPEC.md`, `OPERATIONS_RUNBOOK.md`, `TEST_PLAN.md`, `IMPLEMENTATION_STATUS.md` |
 | Docker·배포·모니터링·복구 | `OPERATIONS_RUNBOOK.md`, `SYSTEM_DESIGN.md`, `TEST_PLAN.md` |
 
 ## 5. 신규 문서 등록 형식

@@ -9,6 +9,11 @@ from datetime import UTC, datetime, timedelta
 
 from websockets.exceptions import WebSocketException
 
+from app.activation_authority import (
+    activation_authority_is_configured,
+    production_activation_evidence_loader,
+    production_activation_validation_policy,
+)
 from app.agents.worker import AgentWorker
 from app.analysis_scheduler import AnalysisSchedulerWorker
 from app.broker.kiwoom import KiwoomAdapterError, KiwoomMockClient
@@ -452,7 +457,14 @@ async def _run_worker(worker_name: str) -> int:
     if worker_name == "kiwoom" and settings.kiwoom_configuration_status() != "CONFIGURED":
         logger.error("Kiwoom worker configuration unavailable code=KIWOOM_NOT_CONFIGURED")
         return 2
-    worker = workers[worker_name](settings)
+    if worker_name == "agent" and activation_authority_is_configured(settings):
+        worker = AgentWorker(
+            settings,
+            finalization_evidence_loader=production_activation_evidence_loader(settings),
+            finalization_validation_policy=production_activation_validation_policy(settings),
+        )
+    else:
+        worker = workers[worker_name](settings)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):

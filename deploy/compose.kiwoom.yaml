@@ -72,8 +72,10 @@ services:
     environment:
       CRESTA_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
       CRESTA_LLM_SECRET_DIRECTORY: /run/cresta-llm-secrets
+      CRESTA_ARTIFACT_ROOT: /var/lib/cresta-artifacts
     volumes:
       - ../secrets/llm:/run/cresta-llm-secrets:ro
+      - ../artifacts:/var/lib/cresta-artifacts:ro
     secrets:
       - postgres_password
     depends_on:

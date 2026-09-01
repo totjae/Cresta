@@ -79,6 +79,30 @@ def test_compose_has_bounded_logs_and_internal_database_ports() -> None:
     assert '"127.0.0.1:7788:8080"' in _service(base, "nginx")
 
 
+def test_activation_artifact_mount_is_read_only_and_only_on_runtime_consumers() -> None:
+    base = (ROOT / "deploy" / "compose.yaml").read_text(encoding="utf-8")
+    overlay = (ROOT / "deploy" / "compose.kiwoom.yaml").read_text(encoding="utf-8")
+    mount = "../artifacts:/var/lib/cresta-artifacts:ro"
+
+    api = _service(base, "api")
+    agent = _service(overlay, "agent")
+    assert "CRESTA_ARTIFACT_ROOT: /var/lib/cresta-artifacts" in api
+    assert "env_file: [.env]" in api
+    assert mount in api
+    assert "CRESTA_ARTIFACT_ROOT: /var/lib/cresta-artifacts" in agent
+    assert mount in agent
+    assert "mem_limit: 512m" in agent
+
+    for name in ("postgres", "redis", "migration", "frontend", "nginx"):
+        assert mount not in _service(base, name)
+    for name in ("worker", "scheduler", "sourced-handoff"):
+        assert mount not in _service(overlay, name)
+    assert "env_file: [.env]" in _service(overlay, "sourced-handoff")
+    env_example = (ROOT / "deploy" / ".env.example").read_text(encoding="utf-8")
+    assert "CRESTA_V7_SOURCED_HANDOFF_ENABLED=false" in env_example
+    assert "CRESTA_LIVE_TRADING_ENABLED=false" in env_example
+
+
 def test_boot_unit_uses_optional_source_overlay_reconciler() -> None:
     unit = (ROOT / "deploy" / "cresta-boot.service").read_text(encoding="utf-8")
     script = (ROOT / "deploy" / "boot-reconcile.sh").read_text(encoding="utf-8")

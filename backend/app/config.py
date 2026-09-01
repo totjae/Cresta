@@ -7,11 +7,15 @@ from urllib.parse import quote
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+EXPECTED_MIGRATION_HEAD = "20260829_0044"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CRESTA_", case_sensitive=False)
 
     environment: str = "MOCK"
+    deployed_revision: str | None = None
+    artifact_root: Path | None = None
     live_trading_enabled: bool = False
     execution_stage: str = "SHADOW"
     analysis_scheduler_poll_seconds: int = Field(default=5, ge=1, le=30)

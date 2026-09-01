@@ -69,6 +69,26 @@ sudo docker compose -f deploy/compose.yaml run --rm --no-deps api \
   sh -c 'test "$(id -u):$(id -g)" = "10001:10001" && test -r /app/app/broker/kiwoom.py'
 ```
 
+#### 3.1.1 Activation evidence artifact store
+
+Stage B Activation Gate evidence는 repository-adjacent persistent `artifacts/` 아래의
+`activation-evidence/sha256/` content-addressed store를 사용한다. application은 배포 경로를
+추정하지 않으며 deployment가 `CRESTA_ARTIFACT_ROOT`를 명시하고 API에는 해당 root를
+read-only로 mount해야 한다. configuration·root·권한 중 하나라도 없으면 production API는
+`_unavailable_evidence_loader` 또는 store-unavailable 분류로 fail-closed한다.
+
+artifact 생성은 API container가 아니라 명시적으로 실행한 **Cresta Activation Acceptance
+Publisher**만 소유한다. Publisher는 exact candidate acceptance를 통과한 뒤 host store에
+create-only로 발행하고 API는 읽기와 검증만 수행한다. 참조 중인 artifact는 자동 정리하지
+않으며 현재 MOCK/development에서 operator cleanup 전까지 보존한다. 향후 LIVE retention과
+off-host archive는 별도 readiness 정책이다. body, layout, 64 KiB bound, reference와 장애
+taxonomy의 단일 기준은 [Activation Evidence Artifact 및 Resolver 명세](ACTIVATION_EVIDENCE_SPEC.md)다.
+
+| ID | 요구사항 |
+| --- | --- |
+| OPS-009 | Activation evidence store는 명시적 `CRESTA_ARTIFACT_ROOT` 아래 persistent content-addressed filesystem이고 API는 read-only다. root 부재·접근 불가·artifact missing/corruption은 Gate를 fail-closed하며 Gate API와 runtime worker는 artifact를 쓰지 않는다. |
+| OPS-010 | 배포 전 exact candidate commit을 `CRESTA_DEPLOYED_REVISION`에 full lowercase SHA로 설정하고 API의 `CRESTA_ARTIFACT_ROOT`는 host persistent artifact directory를 read-only mount한다. 두 authority 중 하나라도 없으면 Gate evidence는 unavailable이며 container 내부 Git 조회나 mutable tag fallback을 사용하지 않는다. |
+
 ### 3.2 서비스와 의존 순서
 
 ```text

@@ -426,7 +426,7 @@ DecisionContext Freeze
 | MAO-209 | v7 ENTRY run은 Decision Agent 또는 Arbiter 단계에서 Approval, OrderIntent, TradingOrder 또는 Broker 호출을 생성할 수 없다. |
 | MAO-210 | v7 최초 완결 decision slice는 SHADOW/DIAGNOSTIC이며 ArbiterResult 이후 거래 resource를 생성하지 않는다. 이에 앞선 Phase 4 upstream partial slice는 MAO-221~235에 따라 DecisionContext Freeze에서 checkpoint한다. |
 | MAO-211 | DIAGNOSTIC v7 결과는 기존 run과 동일하게 TRADING으로 승격할 수 없다. |
-| MAO-212 | v7 TRADING admission/finalization은 별도 activation gate가 열렸을 때만 허용한다. |
+| MAO-212 | v7 TRADING admission/finalization은 별도 activation gate가 열렸을 때만 허용한다. OPEN evidence는 [Activation Evidence Artifact 및 Resolver 명세](ACTIVATION_EVIDENCE_SPEC.md)의 exact acceptance binding, immutable published artifact와 revision authority를 모두 통과해야 한다. |
 | MAO-213 | v7 evaluation root는 기존 AgentRun이다. 최초 slice는 admission부터 `purpose=DIAGNOSTIC`이고 activation 이후 scheduler-owned production run은 admission부터 `purpose=TRADING`이며, 두 목적 사이의 상태 전이나 결과 복사를 허용하지 않는다. |
 | MAO-214 | DecisionContext Freeze는 AgentStage가 아니라 Scout와 Candidate Audit 이후의 서버 소유 영속 transaction이다. Context commit 전에는 세 Decision Agent stage가 runnable하거나 claim 가능하지 않다. |
 | MAO-215 | Freeze는 필수 stage의 존재, 권위 `AgentStageRun.state`와 structured status 일치, output hash, 같은-run EvidenceBundle·stage provenance를 검증한다. ENTRY Position Risk의 명시적 `NOT_APPLICABLE`은 허용하지만 stage 부재로 대체할 수 없다. 세부 terminal matrix는 DB-163을 따른다. |

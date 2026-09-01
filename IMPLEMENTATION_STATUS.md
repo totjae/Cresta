@@ -1,5 +1,59 @@
 # Cresta 구현 상태
 
+### 2026-09-02 Cresta v2 Phase 11B.0B2 Activation Acceptance Candidate Closure 완료
+
+- 기존 `REQUIRED_ACTIVATION_TEST_IDS` 118개를 단일 authority로 사용해
+  `backend/tests/activation_acceptance_bindings.json`의 exact 118-ID/155-node binding을
+  완성했다. missing/unexpected/duplicate/unresolved는 0이고 required-set hash는
+  `d740a14dbcc471e588fc2a03776a216e7bc4c2e6053497d604f3e9804cca913e`와 일치한다.
+- structured pytest hook으로 PASS/FAIL/ERROR/SKIP/XFAIL/XPASS/NOT_RUN을 구분하는
+  operator runner를 구현했다. all-node PASS만 발행 가능하고 no-publish `run-all`은
+  118/118 PASS, 나머지 outcome 0, artifact publication 0으로 완료됐다.
+- configured `CRESTA_ARTIFACT_ROOT`만 사용하는 read-only production resolver와 explicit
+  `CRESTA_DEPLOYED_REVISION` authority를 API/agent에 연결했다. exact code/test-plan/spec/
+  migration/environment/set-hash 및 artifact body/descriptor를 재검증하고 logical invalid는
+  422, store infrastructure unavailable은 retryable 503으로 fail-closed한다.
+- ACT-012, FIN-LIFE-006, DB-MIG-001/008/010의 실제 PostgreSQL gap과 production resolver
+  재생성-session persistence를 추가했다. current manifest의 PostgreSQL node는 13/13 PASS했고
+  default backend는 848 PASS와 expected PostgreSQL-only 87 skip으로 완료됐다. focused
+  foundation/runner/resolver/Gate API/deployment는 120/120 PASS했다.
+- API와 agent만 persistent artifact root를 read-only mount하며 agent 512m, handoff OFF,
+  LIVE disabled와 거래 authority/semantic은 변경하지 않았다. Alembic unique head는
+  `20260829_0044`, Ruff와 `git diff --check`는 PASS다. final exact-revision evidence artifact는
+  아직 발행하지 않았고 server/Gate/Stage/handoff/LIVE mutation과 push도 수행하지 않았다.
+
+### 2026-09-01 Cresta v2 Phase 11B.0B1 Activation Evidence Foundation 완료
+
+- `backend/app/activation_evidence.py`에 strict `activation-evidence-artifact-v1`, canonical
+  UTF-8 JSON parser/serializer, SHA-256 identity/reference, 65,536-byte bounded
+  content-addressed filesystem store와 PASSED-only publisher foundation을 구현했다.
+- store는 configured root에서 digest만으로 path를 구성하고 regular file/symlink를 검사한다.
+  complete temporary file의 create-only hard-link publication으로 overwrite를 금지하며 identical
+  race는 idempotent success, 기존 corrupt/different bytes와 hash mismatch는 fail-closed한다.
+- `activation-acceptance-bindings-v1` strict model/parser, exact node ID와 synthetic-set
+  completeness 검증, 기존 `REQUIRED_ACTIVATION_TEST_IDS`에서 계산하는 required-set hash helper를
+  구현했다. B1 완료 시점에는 authoritative 118-ID manifest와 실제 evidence artifact를 만들지 않았다.
+- foundation 60/60, 기존 Activation Gate 24/24와 backend 전체 821 PASS가 통과했다. 기존
+  test DB 미설정 PostgreSQL 81건만 skip이며 신규 skip은 없다. Ruff, `git diff --check`와
+  Alembic unique head `20260829_0044`도 PASS했다.
+- B1 완료 시점에는 production Settings/API/resolver와 `_unavailable_evidence_loader`를 변경하지
+  않아 Gate OPEN이 불가능했다. migration, server, Stage/Gate/handoff/LIVE, commit/push는 변경하거나
+  수행하지 않았으며 exact 118 binding과 candidate gap closure는 Phase 11B.0B2에 남긴다.
+
+### 2026-09-01 Cresta v2 Phase 11B.0S Activation Evidence Authority 명세 완료
+
+- `activation-evidence-artifact-v1`의 one-ID/one-artifact body, 64 KiB canonical JSON,
+  SHA-256 content addressing과 `sha256:<64hex>` reference를 명세했다.
+- deployment-owned filesystem store, create-only publisher, version-controlled test binding,
+  exact code/test-plan/spec/migration/environment/required-set binding과 `EXACT_REVISION`
+  freshness를 확정했다. Gate API와 runtime worker는 artifact write authority가 없다.
+- production resolver는 configured root의 read-only bounded resolver이며 missing, invalid,
+  unreadable, corruption과 store unavailable을 fail-closed한다. B0S 완료 시점에는 구체 구현과
+  deployment wiring이 `NOT_IMPLEMENTED`였고 `_unavailable_evidence_loader`가 안전 default였다.
+- 현재 배포의 PolicyProfile 3/3, Decision route 3/3과 Decision prompt 준비도는 별도 blocker로
+  남아 있다. 이번 Phase는 문서만 변경했으며 code, test, migration, server, Gate, Stage,
+  handoff와 LIVE를 변경하지 않았다.
+
 ### 2026-08-31 Cresta v2 Phase 11A.4F Agent Memory Limit Correction 검증 중
 
 - Phase 11A.4E의 cache-corrected fresh agent는 startup 약 72 MiB에서 normal collection 뒤 253.0~254.1 MiB로 상승했고 256 MiB hard limit에서 `memory.events max=518`, swap 약 116.94 MiB를 기록했다. 단기 runaway/OOM은 없었으나 resident pressure와 swap을 합친 실효 수요가 약 350~380 MiB여서 384 MiB는 운영 여유가 부족하다.

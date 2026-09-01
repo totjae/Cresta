@@ -477,7 +477,7 @@ ExecutionStage:           TRADING Decision → Approval / Order 실행 권한
 | AI-246 | DecisionAgentResult는 각 Decision Agent AgentStageRun의 server-owned `output_json/output_hash`이며 별도 결과 table을 만들지 않는다. 결과는 같은 DecisionContext ID/hash와 해당 역할의 PolicyProfile identity/hash를 보존하고 stage role과 agent type을 일대일 검증한다. |
 | AI-247 | ArbiterResult는 Provider route·prompt·model·invocation이 없는 `ENTRY_ARBITER` AgentStageRun의 `output_json/output_hash`다. 정확한 C/B/A result stage ID/hash와 consensus policy version을 보존하며 별도 ArbiterResult table을 만들지 않는다. |
 | AI-248 | finalized v7 ENTRY Decision은 nullable source AgentRun FK, exact ENTRY_ARBITER stage FK와 검증한 output hash를 all-or-none으로 보존한다. 동일 source run과 source Arbiter stage는 finalized Decision을 각각 최대 하나만 가지며 legacy Decision은 source lineage를 backfill하지 않는다. |
-| AI-249 | Activation Gate는 system-owned ConfigurationVersion manifest로 영속화한다. OPEN admission에는 test ID·requirement·code/build identity·spec version·실행·유효시각·evidence reference/hash를 가진 전체 safety evidence set 검증이 필요하며 단순 `passed=true`는 충분하지 않다. |
+| AI-249 | Activation Gate는 system-owned ConfigurationVersion manifest로 영속화한다. OPEN admission에는 test ID·requirement·full Git revision·test-plan/spec/migration/environment identity·실행·freshness·evidence reference/hash를 가진 전체 safety evidence set 검증이 필요하며 단순 `passed=true`는 충분하지 않다. Artifact body·발행·저장·resolver와 exact revision authority는 [Activation Evidence Artifact 및 Resolver 명세](ACTIVATION_EVIDENCE_SPEC.md)를 따른다. |
 | AI-250 | v7 AgentRun ID가 evaluation lineage root이고 Decision의 source FK가 Execution·Order 방향의 역추적을 연결한다. 별도 상위 correlation ID나 DecisionRun·EvidenceSet을 만들지 않으며 operational correlation과 finalization idempotency를 구분한다. |
 
 #### 7.11.1 Activation acceptance set

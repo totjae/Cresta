@@ -68,6 +68,9 @@ services:
     environment:
       CRESTA_TOTP_ENCRYPTION_KEY_FILE: /run/secrets/totp_encryption_key
       CRESTA_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+      CRESTA_ARTIFACT_ROOT: /var/lib/cresta-artifacts
+    volumes:
+      - ../artifacts:/var/lib/cresta-artifacts:ro
     secrets:
       - totp_encryption_key
       - postgres_password

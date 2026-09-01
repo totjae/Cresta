@@ -30,6 +30,10 @@ import app.broker.pre_send_authority as pre_send_authority_module
 import app.decision_execution as decision_execution_module
 import app.sourced_handoff as sourced_handoff_module
 import tests.test_phase_10f_broker_pre_send as phase_10f_module
+from app.activation_authority import (
+    production_activation_evidence_loader,
+    production_activation_validation_policy,
+)
 from app.activation_gate import (
     ACTIVATION_CATEGORY,
     ACTIVATION_SCOPE,
@@ -41,7 +45,8 @@ from app.activation_gate import (
     select_current_v7_entry_activation_gate,
     validate_activation_gate_draft,
 )
-from app.agents.decision_finalizer import finalize_entry_decision
+from app.agents.decision_finalizer import DecisionFinalizationError, finalize_entry_decision
+from app.agents.runtime import AgentRuntimeError, create_v7_upstream_trading_run
 from app.api.dependencies import get_settings
 from app.approvals import ApprovalError, approve, reject
 from app.auth.crypto import encrypt_totp_secret, hash_password, token_hash
@@ -72,6 +77,8 @@ from app.execution_stage import (
 )
 from app.main import create_app
 from app.models import (
+    AgentRun,
+    AgentStageRun,
     Approval,
     AuditLog,
     ConfigurationVersion,
@@ -93,12 +100,15 @@ from app.sourced_execution import execute_sourced_entry_decision
 from app.sourced_handoff import SourcedHandoffWorker
 from app.stop_trigger import run_fixed_stop_triggers
 from tests.conftest import TEST_KEY, TEST_PASSWORD, TEST_TOTP_SECRET
+from tests.test_activation_acceptance import REVISION as ACTIVATION_REVISION
+from tests.test_activation_acceptance import _strict_gate
 from tests.test_kiwoom_order_sender import FakeOrderClient, persisted_order, ready_worker
 from tests.test_kiwoom_order_sender import (
     test_ambiguous_outcome_becomes_unknown_and_closes_gate as _ambiguous_send_case,
 )
 from tests.test_phase_9c1_foundation import NOW as ACTIVATION_NOW
 from tests.test_phase_9c1_foundation import _gate_payload
+from tests.test_phase_9c2_trading_runtime import _activate_gate, _setup
 from tests.test_phase_9d_decision_finalizer import _completed_trading
 from tests.test_phase_9d_decision_finalizer import (
     test_post_flush_database_failure_rolls_back_and_remains_retryable as _finalizer_rollback_case,
@@ -388,6 +398,114 @@ def test_incremental_0040_to_0041_to_0042_to_0043_to_0044() -> None:
             with engine.connect() as connection:
                 assert connection.scalar(text("select to_regclass('account_funds_snapshots')"))
                 assert connection.scalar(text("select to_regclass('order_capacity_snapshots')"))
+        finally:
+            engine.dispose()
+
+
+def _insert_legacy_v6_fixture(engine: Engine) -> None:
+    observed = datetime(2026, 8, 25, 10, 0, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users "
+                "(id,login_id,password_hash,password_params,status,created_at,updated_at) "
+                "VALUES ('u1','legacy-pg','x','test','ACTIVE',:at,:at)"
+            ),
+            {"at": observed},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO market_snapshots "
+                "(id,symbol,market,source,sequence_or_hash,payload_hash,last_price,open_price,"
+                "high_price,low_price,cumulative_volume,trading_status,quality,recovery_snapshot,"
+                "event_at,received_at,created_at) VALUES "
+                "('m1','005930','KRX','TEST','legacy-pg','h',1,1,1,1,1,'OPEN','NORMAL',false,"
+                ":at,:at,:at)"
+            ),
+            {"at": observed},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO decisions "
+                "(id,purpose,evaluation_request_id,input_snapshot_id,symbol,market,decision_kind,"
+                "model_provider,model_id,prompt_version,schema_version,scout_output_json,"
+                "core_output_json,action,confidence,risk_level,reason_codes_json,valid_until,"
+                "execution_outcome,validation_status,latency_ms,created_at) VALUES "
+                "('d1','TRADING','legacy-pg-decision','m1','005930','KRX','ENTRY','SERVER',"
+                "'test','v1','v1','{}','{}','WAIT',0.5,'LOW','[]',:at,'NO_ACTION','VALID',0,:at)"
+            ),
+            {"at": observed},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO agent_runs "
+                "(id,owner_id,purpose,execution_stage,market,symbol,market_snapshot_id,input_hash,"
+                "dag_version,route_versions_json,idempotency_key,state,analysis_context,"
+                "basis_decision_id,fusion_policy_version,fusion_state,valid_until,created_at) "
+                "VALUES ('r1','u1','TRADING_ADVISORY','SHADOW','KRX','005930','m1','h',"
+                "'agent-dag-v6','{}','legacy-pg-run','CREATED','POSITION','d1','fusion-v1',"
+                "'PENDING',:at,:at)"
+            ),
+            {"at": observed},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO agent_stage_runs "
+                "(id,run_id,role,sequence,dependency_roles_json,state,input_hash,fencing_token,"
+                "attempt_count,max_attempts,available_at,created_at) VALUES "
+                "('s1','r1','CORE',1,'[]','SUCCEEDED','h',0,0,1,:at,:at)"
+            ),
+            {"at": observed},
+        )
+
+
+def test_postgresql_phase3_legacy_upgrade_downgrade_upgrade_roundtrip() -> None:
+    with _migrated_schema("phase3_roundtrip", "20260817_0038") as schema:
+        engine = _schema_engine(schema)
+        try:
+            _insert_legacy_v6_fixture(engine)
+            for command, revision in (
+                ("upgrade", "20260825_0039"),
+                ("downgrade", "20260817_0038"),
+                ("upgrade", "20260825_0039"),
+            ):
+                result = _alembic(schema, command, revision)
+                assert result.returncode == 0, result.stderr
+                with engine.connect() as connection:
+                    assert connection.scalar(text("SELECT version_num FROM alembic_version")) == revision
+                    assert connection.scalar(text("SELECT count(*) FROM decisions WHERE id='d1'")) == 1
+                    assert connection.scalar(text("SELECT count(*) FROM agent_runs WHERE id='r1'")) == 1
+                    assert connection.scalar(text("SELECT role FROM agent_stage_runs WHERE id='s1'")) == "CORE"
+            with engine.connect() as connection:
+                lineage = connection.execute(
+                    text(
+                        "SELECT source_agent_run_id,source_stage_run_id,source_stage_output_hash "
+                        "FROM decisions WHERE id='d1'"
+                    )
+                ).one()
+                assert lineage == (None, None, None)
+        finally:
+            engine.dispose()
+
+
+def test_postgresql_sourced_free_0040_roundtrip_preserves_legacy_rows() -> None:
+    with _migrated_schema("sourced_free", "20260825_0039") as schema:
+        engine = _schema_engine(schema)
+        try:
+            _insert_legacy_v6_fixture(engine)
+            for command, revision in (
+                ("upgrade", "20260827_0040"),
+                ("downgrade", "20260825_0039"),
+                ("upgrade", "20260827_0040"),
+            ):
+                result = _alembic(schema, command, revision)
+                assert result.returncode == 0, result.stderr
+                with engine.connect() as connection:
+                    assert connection.scalar(text("SELECT version_num FROM alembic_version")) == revision
+                    row = connection.execute(
+                        text("SELECT action,schema_version FROM decisions WHERE id='d1'")
+                    ).one()
+                    assert row == ("WAIT", "v1")
         finally:
             engine.dispose()
 
@@ -805,6 +923,139 @@ def test_finalizer_concurrent_finalization_returns_one_decision(
     assert len(set(decision_ids)) == 1
     with session_factory() as check:
         assert check.scalar(select(func.count()).select_from(Decision)) == 1
+
+
+def test_postgresql_admission_gate_lock_failure_recovers_without_partial_run(
+    client, db: Session, admin: User, monkeypatch, session_factory
+) -> None:
+    route_ids, _, snapshot = _setup(client, db, admin, monkeypatch)
+    now = datetime.now(UTC)
+    gate, loader = _activate_gate(db, admin, snapshot, now=now)
+    correlation_id = str(uuid4())
+
+    with session_factory() as blocker:
+        locked = blocker.scalar(
+            select(ConfigurationVersion)
+            .where(ConfigurationVersion.id == gate.id)
+            .with_for_update()
+        )
+        assert locked is not None
+        with session_factory() as worker:
+            worker.execute(text("SET LOCAL lock_timeout = '100ms'"))
+            user = worker.get(User, admin.id)
+            assert user is not None
+            with pytest.raises(AgentRuntimeError, match="ACTIVATION_GATE_DB_RETRYABLE_FAILURE"):
+                create_v7_upstream_trading_run(
+                    worker,
+                    user=user,
+                    market="KRX",
+                    symbol="005930",
+                    route_ids=route_ids,
+                    correlation_id=correlation_id,
+                    evidence_loader=loader,
+                    now=now,
+                )
+        with session_factory() as check:
+            assert check.scalar(select(func.count()).select_from(AgentRun)) == 0
+            assert check.scalar(select(func.count()).select_from(AgentStageRun)) == 0
+            audit = check.scalar(
+                select(AuditLog).where(AuditLog.correlation_id == correlation_id)
+            )
+            assert audit is not None and (
+                audit.action,
+                audit.result,
+            ) == ("ACTIVATION_GATE_DB_RETRYABLE_FAILURE", "RETRYABLE_FAILURE")
+        blocker.rollback()
+
+    with session_factory() as recovered:
+        user = recovered.get(User, admin.id)
+        assert user is not None
+        run, created = create_v7_upstream_trading_run(
+            recovered,
+            user=user,
+            market="KRX",
+            symbol="005930",
+            route_ids=route_ids,
+            correlation_id=str(uuid4()),
+            evidence_loader=loader,
+            now=now,
+        )
+        retried, retry_created = create_v7_upstream_trading_run(
+            recovered,
+            user=user,
+            market="KRX",
+            symbol="005930",
+            route_ids=route_ids,
+            correlation_id=str(uuid4()),
+            evidence_loader=loader,
+            now=now,
+        )
+        assert created and not retry_created and retried.id == run.id
+        assert recovered.scalar(select(func.count()).select_from(AgentRun)) == 1
+
+
+def test_postgresql_finalizer_gate_lock_failure_recovers_exact_once(
+    client, db: Session, admin: User, monkeypatch, session_factory
+) -> None:
+    run, _, _, gate, loader, _ = _completed_trading(client, db, admin, monkeypatch)
+    run_id = run.id
+    with session_factory() as blocker:
+        locked = blocker.scalar(
+            select(ConfigurationVersion)
+            .where(ConfigurationVersion.id == gate.id)
+            .with_for_update()
+        )
+        assert locked is not None
+        with session_factory() as worker:
+            worker.execute(text("SET LOCAL lock_timeout = '100ms'"))
+            with pytest.raises(
+                DecisionFinalizationError, match="FINALIZATION_DB_RETRYABLE_FAILURE"
+            ):
+                finalize_entry_decision(worker, run_id=run_id, evidence_loader=loader)
+        with session_factory() as check:
+            current = check.get(AgentRun, run_id)
+            assert current is not None and (
+                current.state,
+                current.error_code,
+                current.completed_at,
+            ) == ("RUNNING", "FINALIZATION_DB_RETRYABLE_FAILURE", None)
+            assert check.scalar(select(func.count()).select_from(Decision)) == 0
+            assert check.scalar(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(AuditLog.action == "FINALIZATION_DB_RETRYABLE_FAILURE")
+            ) == 1
+        blocker.rollback()
+
+    with session_factory() as recovered:
+        decision = finalize_entry_decision(
+            recovered, run_id=run_id, evidence_loader=loader
+        )
+        repeated = finalize_entry_decision(
+            recovered, run_id=run_id, evidence_loader=loader
+        )
+        assert repeated.id == decision.id
+        assert recovered.scalar(select(func.count()).select_from(Decision)) == 1
+        current = recovered.get(AgentRun, run_id)
+        assert current is not None and current.state == "SUCCEEDED"
+
+
+def test_postgresql_unknown_sourced_representation_rejects_mixed_fields(
+    client, db: Session, admin: User, monkeypatch
+) -> None:
+    decision = _finalized(client, db, admin, monkeypatch, "UNKNOWN")
+    assert len(decision.schema_version) == 25
+    assert decision.action == "UNKNOWN"
+    assert decision.model_provider is None and decision.execution_outcome is None
+    with pytest.raises(IntegrityError):
+        db.execute(
+            text("UPDATE decisions SET model_provider='SERVER' WHERE id=:id"),
+            {"id": decision.id},
+        )
+        db.commit()
+    db.rollback()
+    db.refresh(decision)
+    assert decision.action == "UNKNOWN" and decision.model_provider is None
 
 
 def test_sourced_no_action_concurrent_handoff_returns_one_execution(
@@ -1730,6 +1981,80 @@ def test_postgresql_activation_gate_concurrent_service_activation_exact_one(
         evidence_loader=loader,
         snapshot_verifier=lambda _snapshot: None,
     ).outcome is GateOutcome.PASS
+
+
+def test_postgresql_production_evidence_gate_survives_recreated_sessions(
+    db: Session,
+    admin: User,
+    session_factory,
+    tmp_path: Path,
+) -> None:
+    gate = _strict_gate(tmp_path)
+    authority = Settings(
+        artifact_root=tmp_path,
+        deployed_revision=ACTIVATION_REVISION,
+    )
+    loader = production_activation_evidence_loader(authority)
+    policy = production_activation_validation_policy(authority)
+    version = create_activation_gate_draft(
+        db,
+        user=admin,
+        payload=gate,
+        reason="Phase 11B.0B2 production resolver PostgreSQL persistence",
+        now=datetime.now(UTC),
+        evidence_loader=loader,
+        policy=policy,
+        snapshot_verifier=lambda _snapshot: None,
+    )
+    version_id = version.id
+    admin_id = admin.id
+    db.close()
+
+    with session_factory() as validating:
+        validate_activation_gate_draft(
+            validating,
+            version_id=version_id,
+            now=datetime.now(UTC),
+            evidence_loader=production_activation_evidence_loader(authority),
+            policy=policy,
+            snapshot_verifier=lambda _snapshot: None,
+        )
+    with session_factory() as activating:
+        user = activating.get(User, admin_id)
+        assert user is not None
+        active = activate_activation_gate(
+            activating,
+            user=user,
+            version_id=version_id,
+            now=datetime.now(UTC),
+            evidence_loader=production_activation_evidence_loader(authority),
+            policy=policy,
+            correlation_id=str(uuid4()),
+            request_ip="127.0.0.1",
+            user_agent="pytest",
+            snapshot_verifier=lambda _snapshot: None,
+        )
+        assert active.state == "ACTIVE"
+    with session_factory() as restarted:
+        assert select_current_v7_entry_activation_gate(
+            restarted,
+            now=datetime.now(UTC),
+            evidence_loader=production_activation_evidence_loader(authority),
+            policy=policy,
+            snapshot_verifier=lambda _snapshot: None,
+        ).outcome is GateOutcome.PASS
+        assert restarted.scalar(
+            select(func.count()).select_from(ConfigurationVersion).where(
+                ConfigurationVersion.category == ACTIVATION_CATEGORY,
+                ConfigurationVersion.state == "ACTIVE",
+            )
+        ) == 1
+        assert restarted.scalar(
+            select(func.count()).select_from(AuditLog).where(
+                AuditLog.action == "V7_ENTRY_ACTIVATION_ACTIVATED",
+                AuditLog.target == version_id,
+            )
+        ) == 1
 
 
 def test_postgresql_execution_stage_concurrent_service_activation_exact_one(

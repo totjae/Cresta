@@ -13,6 +13,14 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.activation_evidence import (
+    EXACT_REVISION_FRESHNESS,
+    ActivationEvidenceError,
+    ActivationEvidenceStoreError,
+    EvidenceReference,
+    EvidenceStoreFailureCategory,
+    parse_canonical_artifact,
+)
 from app.models import (
     AuditLog,
     ConfigurationVersion,
@@ -358,13 +366,20 @@ class ActivationValidationPolicy:
     code_revision: str | None = None
     test_plan_version: str | None = None
     spec_version: str | None = None
+    migration_revision: str | None = None
+    environment: str | None = None
+    required_acceptance_set_hash: str | None = None
+    require_artifact_v1: bool = False
 
 
 class ActivationGateError(Exception):
-    def __init__(self, code: str, status_code: int = 422) -> None:
+    def __init__(
+        self, code: str, status_code: int = 422, *, retryable: bool = False
+    ) -> None:
         super().__init__(code)
         self.code = code
         self.status_code = status_code
+        self.retryable = retryable
 
 
 EvidenceLoader = Callable[[str], bytes]
@@ -393,6 +408,22 @@ def validate_activation_payload(
         if observed >= gate.valid_until:
             raise ValueError("OPEN gate is expired")
         validation_policy = policy or ActivationValidationPolicy()
+        if validation_policy.require_artifact_v1 and any(
+            value is None
+            for value in (
+                validation_policy.code_revision,
+                validation_policy.test_plan_version,
+                validation_policy.spec_version,
+                validation_policy.migration_revision,
+                validation_policy.environment,
+                validation_policy.required_acceptance_set_hash,
+            )
+        ):
+            raise ActivationGateError(
+                "ACTIVATION_GATE_EVIDENCE_UNAVAILABLE",
+                503,
+                retryable=True,
+            )
         expected_ids = tuple(sorted(validation_policy.required_test_ids))
         if tuple(item.test_id for item in gate.safety_evidence) != expected_ids:
             raise ValueError("activation acceptance evidence set is incomplete")
@@ -415,13 +446,49 @@ def validate_activation_payload(
                 evidence.spec_version != validation_policy.spec_version
             ):
                 raise ValueError("evidence spec version mismatch")
-            artifact = evidence_loader(evidence.evidence_ref)
+            try:
+                artifact = evidence_loader(evidence.evidence_ref)
+            except ActivationEvidenceStoreError as exc:
+                if exc.category in {
+                    EvidenceStoreFailureCategory.UNREADABLE,
+                    EvidenceStoreFailureCategory.STORE_UNAVAILABLE,
+                }:
+                    raise ActivationGateError(
+                        "ACTIVATION_GATE_EVIDENCE_UNAVAILABLE",
+                        503,
+                        retryable=True,
+                    ) from exc
+                raise ValueError("activation evidence is invalid") from exc
             if activation_digest(artifact) != evidence.evidence_hash:
                 raise ValueError("evidence artifact hash mismatch")
+            if validation_policy.require_artifact_v1:
+                try:
+                    reference = EvidenceReference.parse(evidence.evidence_ref)
+                    body = parse_canonical_artifact(artifact)
+                except ActivationEvidenceError as exc:
+                    raise ValueError("activation artifact is invalid") from exc
+                if (
+                    reference.digest != evidence.evidence_hash
+                    or body.test_id != evidence.test_id
+                    or body.requirement_ids != evidence.requirement_ids
+                    or body.result != evidence.result
+                    or body.code_revision != evidence.code_revision
+                    or body.test_plan_version != evidence.test_plan_version
+                    or body.spec_version != evidence.spec_version
+                    or body.executed_at != evidence.executed_at
+                    or body.freshness_contract != evidence.freshness_contract
+                    or body.migration_revision != validation_policy.migration_revision
+                    or body.environment != validation_policy.environment
+                    or body.required_acceptance_set_hash
+                    != validation_policy.required_acceptance_set_hash
+                    or evidence.valid_until is not None
+                    or evidence.freshness_contract != EXACT_REVISION_FRESHNESS
+                ):
+                    raise ValueError("activation artifact descriptor mismatch")
             if evidence.valid_until is not None:
                 if observed >= evidence.valid_until:
                     raise ValueError("evidence is stale")
-            else:
+            elif not validation_policy.require_artifact_v1:
                 freshness = freshness_contracts.get(evidence.freshness_contract or "")
                 if freshness is None or observed >= evidence.executed_at + freshness:
                     raise ValueError("evidence freshness contract is invalid or stale")

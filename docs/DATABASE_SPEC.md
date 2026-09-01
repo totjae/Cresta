@@ -407,8 +407,14 @@ Context canonical JSON은 UTF-8, Unicode 비 ASCII 문자를 escape하지 않는
 | --- | --- |
 | DB-177 | Activation Gate는 별도 table이나 ExecutionStage 결합으로 표현하지 않고 system-owned `configuration_versions` category `V7_ENTRY_ACTIVATION`을 사용한다. 첫 target은 `scope=SYSTEM`, `target_id=MOCK`이다. ConfigurationVersion의 `ACTIVE` lifecycle과 payload의 `gate_state=OPEN | CLOSED`는 별개이며 ACTIVE row 부재, CLOSED, schema/hash 오류, 만료 또는 target version 불일치는 CLOSED와 동일하게 처리한다. |
 | DB-178 | `activation-gate-v1` payload는 target DAG, DecisionContext·DecisionAgentResult schema, 세 PolicyProfile ID/hash map, consensus policy, prompt/model/route version map, safety evidence descriptor 목록, canonical version snapshot/hash, validation policy version과 유효시간을 포함한다. 알 수 없는 필드·schema 또는 부분 version snapshot은 OPEN으로 해석하지 않는다. |
-| DB-179 | 각 safety evidence descriptor는 `test_id`, requirement IDs, `result=PASSED`, code revision 또는 동등 build identity, TEST_PLAN/spec version, `executed_at`, `valid_until` 또는 명시적 freshness contract, `evidence_ref`, `evidence_hash`를 모두 가진다. 단순 boolean 통과값은 허용하지 않으며 activation acceptance set 전체가 존재·PASSED·target version 일치·freshness·hash 검증을 통과해야 gate validation이 성공한다. |
+| DB-179 | 각 safety evidence descriptor는 `test_id`, requirement IDs, `result=PASSED`, full Git revision, TEST_PLAN/spec version, `executed_at`, `valid_until` 또는 명시적 freshness contract, `evidence_ref`, `evidence_hash`를 모두 가진다. Resolved artifact는 migration revision, environment와 required-set hash를 추가로 보존하며 deployment authority와 exact 일치해야 한다. 단순 boolean 통과값은 허용하지 않으며 activation acceptance set 전체가 존재·PASSED·target version 일치·freshness·hash 검증을 통과해야 gate validation이 성공한다. |
 | DB-180 | v7 TRADING run admission은 당시 ACTIVE+OPEN gate ID/hash를 AgentRun에 freeze한다. Finalizer는 현재 gate를 다시 조회해 run freeze ID/hash, ACTIVE+OPEN 상태, DAG/policy/schema/route map과 Context/Arbiter 유효성을 재검증한다. gate가 superseded·CLOSED·변경되면 기존 run을 새 gate로 승격하지 않고 finalization을 거부한다. ExecutionStage는 이 검증과 독립적으로 Decision 이후 Approval/Order admission을 제어한다. |
+
+Activation safety evidence의 artifact body와 bytes는 DB row나 신규 table에 저장하지 않는다.
+`ConfigurationVersion`은 `evidence_ref`와 `evidence_hash`를 포함한 Gate manifest만 보존하며,
+filesystem store·publisher·resolver와 retention의 단일 기준은
+[Activation Evidence Artifact 및 Resolver 명세](ACTIVATION_EVIDENCE_SPEC.md)다. 이 경계에는
+신규 PostgreSQL schema와 migration이 필요하지 않다.
 
 ### 보존·삭제와 compatibility
 

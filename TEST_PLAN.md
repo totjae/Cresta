@@ -1,5 +1,60 @@
 # Cresta 테스트 계획
 
+Activation Gate evidence용 현재 test-plan identifier는
+`cresta-v2-activation-test-plan-2026-09-01.1`이다. required 118개 ID의 canonical set hash는
+`d740a14dbcc471e588fc2a03776a216e7bc4c2e6053497d604f3e9804cca913e`다. 이 identifier와
+hash는 [Activation Evidence Artifact 및 Resolver 명세](docs/ACTIVATION_EVIDENCE_SPEC.md)의
+publisher binding과 Gate validation authority에서 exact 비교한다. 현재 표의 문서상 PASS를
+artifact PASS로 자동 변환하지 않으며 version-controlled node binding과 exact revision rerun이
+완료된 항목만 publisher가 발행할 수 있다.
+
+### Phase 11B.0B2 activation acceptance candidate closure (2026-09-02)
+
+| ID | 요구사항 | 검증 | 결과 |
+| --- | --- | --- | --- |
+| T-V2-ACT-EVIDENCE-B2-001 | authoritative binding completeness | required constant와 manifest의 ID/set hash 및 exact pytest collection 대조 | PASS — 118/118, 155 unique nodes, missing/unexpected/duplicate/unresolved 0 |
+| T-V2-ACT-EVIDENCE-B2-002 | structured runner/fail-closed publication | 모든 outcome 분류, multi-node all-pass, full-set/no-publish | PASS — 118 PASSED, 비성공 outcome 0, published 0 |
+| T-V2-ACT-EVIDENCE-B2-003 | production resolver/authority | read-only store, exact deployment authority, body/descriptor와 failure taxonomy | PASS — focused foundation/runner/resolver/Gate API/deployment 120/120 |
+| T-V2-ACT-EVIDENCE-B2-004 | real PostgreSQL gaps/control persistence | ACT-012, FIN-LIFE-006, DB-MIG-001/008/010과 recreated-session resolver/Gate | PASS — current manifest PostgreSQL subset 13/13, skip 0 |
+| T-V2-ACT-EVIDENCE-B2-005 | repository regression | default backend, Ruff, diff, Alembic unique head | PASS — 848 PASS + expected PostgreSQL-only 87 skip, Ruff/diff PASS, head 0044 |
+
+118개 Gate ID의 machine-readable ID→node/backend traceability authority는
+`backend/tests/activation_acceptance_bindings.json`이다. 이 candidate 검증은 functional PASS를
+증명하지만 immutable exact-revision evidence publication은 수행하지 않았다. final artifact는
+candidate commit이 명시적으로 push되고 remote revision이 검증된 후 별도 Phase에서만 발행한다.
+
+### Phase 11B.0B1 activation evidence foundation (2026-09-01)
+
+| ID | 요구사항 | 검증 | 결과 |
+| --- | --- | --- | --- |
+| T-V2-ACT-EVIDENCE-B1-001 | artifact v1 strict body/invariants | exact field/literal/revision, sorted unique arrays, PASSED summary와 recursive float 거부 | PASS |
+| T-V2-ACT-EVIDENCE-B1-002 | canonical JSON/size | UTF-8, sorted keys, duplicate/BOM/noncanonical/non-finite 거부와 65,536-byte 경계 | PASS |
+| T-V2-ACT-EVIDENCE-B1-003 | evidence reference security | exact `sha256:<64 lowercase hex>`와 traversal/path/URL/whitespace/NUL 거부 | PASS |
+| T-V2-ACT-EVIDENCE-B1-004 | content-addressed store | deterministic layout, bounded regular read, symlink/oversize/hash mismatch/corruption 거부 | PASS |
+| T-V2-ACT-EVIDENCE-B1-005 | create-only publisher | complete temp + create-only hard link, identical dual publisher race와 idempotence, overwrite 0 | PASS |
+| T-V2-ACT-EVIDENCE-B1-006 | PASSED-only/bindings foundation | non-PASS 전부 거부, typed metadata, exact node bindings와 missing/unexpected/duplicate 검증 | PASS |
+| T-V2-ACT-EVIDENCE-B1-007 | required-set/SafetyEvidence compatibility | production 118-ID constant hash와 normative digest exact 일치, descriptor shape 호환 | PASS |
+| T-V2-ACT-EVIDENCE-B1-008 | repository regression | foundation, existing Gate, backend full, Ruff, migration head, whitespace | PASS — 60/60, 24/24, backend 821 PASS + 기존 PostgreSQL 81 skip, Ruff/diff PASS, head 0044 |
+
+위 B1 ID는 foundation 구현 추적용이며 Gate OPEN의 required 118개 set에 추가하지 않는다.
+B1 완료 시점에는 authoritative `backend/tests/activation_acceptance_bindings.json`, actual
+acceptance 실행/artifact, production resolver/Settings/API wiring을 생성하지 않았다.
+따라서 B1만으로 Gate OPEN 또는 Stage B activation은 불가능했다.
+
+### Phase 11B.0S activation evidence specification (2026-09-01)
+
+| ID | 요구사항 | 검증 | 결과 |
+| --- | --- | --- | --- |
+| T-V2-ACT-EVIDENCE-SPEC-001 | artifact body/canonical/hash | one-ID/one-artifact, exact fields, canonical UTF-8 JSON, 64 KiB와 SHA-256 | SPECIFIED — B1 foundation PASS |
+| T-V2-ACT-EVIDENCE-SPEC-002 | store/reference/immutability | configured root, `sha256:<64hex>`, create-only, traversal·overwrite 금지 | SPECIFIED — B1 foundation PASS |
+| T-V2-ACT-EVIDENCE-SPEC-003 | publisher/test binding | exact 118 machine binding, all-node PASS, non-PASS 발행 금지 | SPECIFIED — B2 118-ID binding/runner PASS |
+| T-V2-ACT-EVIDENCE-SPEC-004 | revision/freshness | exact code/test-plan/spec/migration/environment/set hash와 `EXACT_REVISION` | SPECIFIED — B2 authority validation PASS, immutable publication은 B3 |
+| T-V2-ACT-EVIDENCE-SPEC-005 | resolver/failure taxonomy | read-only bounded lookup, safe path, deterministic fail-closed categories | SPECIFIED — B2 production resolver/API PASS |
+
+이 다섯 ID는 specification acceptance tracking이며 현재 Gate OPEN의 118개 required set에
+추가하지 않는다. required set 변경은 별도 normative review, test-plan version bump와 set hash
+갱신 없이는 허용하지 않는다.
+
 ### Phase 11A.4F agent memory limit correction (2026-08-31)
 
 | ID | 요구사항 | 검증 | 결과 |
@@ -628,22 +683,22 @@ Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript
 
 | 테스트 ID | 관련 요구사항 | 시나리오 | 기대 결과 | 상태 |
 | --- | --- | --- | --- | --- |
-| T-V2-AI-001 | AI-205~208 | 같은 ENTRY run으로 세 Decision Agent 호출 | 세 Agent가 동일 DecisionContext ID/hash를 사용 | 계획 (Phase 1) |
-| T-V2-AI-002 | AI-206 | DecisionContext 고정 후 최신 시세·DB 변경 | 이미 시작한 세 Agent 입력은 변하지 않음 | 계획 (Phase 1) |
-| T-V2-AI-003 | AI-207 | 한 Agent 결과 또는 prompt를 다른 Agent 입력에 주입 | 계약 또는 runtime에서 거부 | 계획 (Phase 1) |
+| T-V2-AI-001 | AI-205~208 | 같은 ENTRY run으로 세 Decision Agent 호출 | 세 Agent가 동일 DecisionContext ID/hash를 사용 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
+| T-V2-AI-002 | AI-206 | DecisionContext 고정 후 최신 시세·DB 변경 | 이미 시작한 세 Agent 입력은 변하지 않음 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
+| T-V2-AI-003 | AI-207 | 한 Agent 결과 또는 prompt를 다른 Agent 입력에 주입 | 계약 또는 runtime에서 거부 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
 | T-V2-AI-004 | AI-200~204 | Scout·Decision Agent·Arbiter가 Order/Approval/Broker 필드나 호출 생성 시도 | schema/runtime 거부, 거래 resource 0건 | 계획 (Phase 1) |
-| T-V2-AI-005 | AI-209~212 | 허용되지 않은 action·reason·evidence 반환 | `INVALID_OUTPUT`, BUY 없음 | 계획 (Phase 1) |
+| T-V2-AI-005 | AI-209~212 | 허용되지 않은 action·reason·evidence 반환 | `INVALID_OUTPUT`, BUY 없음 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
 | T-V2-AI-006 | AI-213~215 | 동일 context를 세 PolicyProfile로 실행 | 입력은 동일하고 policy/provenance만 역할별 상이 | 계획 (Phase 1) |
-| T-V2-AI-007 | AI-216~218 | Decision Agent timeout·provider·schema 실패 | `deterministic-mock-v2` BUY fallback 0건, Guard 안전 규칙 지속 | 계획 (Phase 1) |
-| T-V2-AI-008 | AI-217 | 필수 Agent 1개 실패 상태에서 Arbiter 실행 | BUY 생성 0건 | 계획 (Phase 1) |
+| T-V2-AI-007 | AI-216~218 | Decision Agent timeout·provider·schema 실패 | `deterministic-mock-v2` BUY fallback 0건, Guard 안전 규칙 지속 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
+| T-V2-AI-008 | AI-217 | 필수 Agent 1개 실패 상태에서 Arbiter 실행 | BUY 생성 0건 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
 | T-V2-AI-009 | AI-226 | ArbiterResult를 Execution Orchestrator에 직접 전달 | 입력 거부, TRADING Decision·Approval·Order 0건 | 계획 (Phase 1) |
-| T-V2-AI-010 | AI-227~231 | 검증된 ArbiterResult를 정상 finalization | `purpose=TRADING`, `decision_kind=ENTRY` Decision 정확히 1개와 완전한 lineage | 계획 (Phase 1) |
-| T-V2-AI-011 | AI-229 | 동일 run·context·ArbiterResult·policy로 finalization 반복 | 최종 ENTRY Decision 최대 1개 | 계획 (Phase 1) |
-| T-V2-AI-012 | AI-230 | context hash·provenance·만료 불일치 상태에서 finalization | TRADING Decision 0건, fail-closed 결과 기록 | 계획 (Phase 1) |
-| T-V2-AI-013 | AI-231 | Finalizer 처리 전후 action과 confidence 비교 | ArbiterResult action을 재해석하지 않고 새 confidence를 계산하지 않음 | 계획 (Phase 1) |
+| T-V2-AI-010 | AI-227~231 | 검증된 ArbiterResult를 정상 finalization | `purpose=TRADING`, `decision_kind=ENTRY` Decision 정확히 1개와 완전한 lineage | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
+| T-V2-AI-011 | AI-229 | 동일 run·context·ArbiterResult·policy로 finalization 반복 | 최종 ENTRY Decision 최대 1개 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
+| T-V2-AI-012 | AI-230 | context hash·provenance·만료 불일치 상태에서 finalization | TRADING Decision 0건, fail-closed 결과 기록 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
+| T-V2-AI-013 | AI-231 | Finalizer 처리 전후 action과 confidence 비교 | ArbiterResult action을 재해석하지 않고 새 confidence를 계산하지 않음 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
 | T-V2-AI-014 | AI-219 | runtime role과 DecisionAgentResult.agent_type 조합 전체 검증 | 세 역할은 일대일 매핑, ENTRY_ARBITER의 agent_type 거부 | 계획 (Phase 1) |
 | T-V2-AI-015 | AI-236~237 | v7 Scheduler admission과 production ENTRY 실행 | pipeline 시작·결과 인계만 수행, 자체 판단 규칙과 deterministic-mock-v2 BUY 사용 0건 | 계획 (Phase 1) |
-| T-V2-AI-016 | AI-229~230 | Finalizer의 TRADING Decision 영속 transaction에서 DB 오류 또는 commit 결과 불명확 발생 | Execution/Broker로 새 결과를 전달하지 않고 lineage/idempotency key로 기존 Decision을 먼저 조회; 중복 Decision 0건, 확인 불가 시 fail-closed 유지 | 계획 (Phase 1) |
+| T-V2-AI-016 | AI-229~230 | Finalizer의 TRADING Decision 영속 transaction에서 DB 오류 또는 commit 결과 불명확 발생 | Execution/Broker로 새 결과를 전달하지 않고 lineage/idempotency key로 기존 Decision을 먼저 조회; 중복 Decision 0건, 확인 불가 시 fail-closed 유지 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
 | T-V2-ARB-001 | AI-220~225, AI-268 | 모든 C/B/A status·action 조합과 9개 normative example | `consensus-policy-v1` precedence, 여섯 pattern/action/reason mapping과 truth table에 완전히 일치 | 통과 (2026-08-26 Phase 8C pure evaluator matrix) |
 | T-V2-ARB-002 | AI-203, AI-270, AI-273, MAO-250, MAO-253 | ENTRY_ARBITER 실행과 handler surface 검사 | route/invocation/Prompt/Model/LLM/Provider/network/web/tool/live/Broker 0건 | 통과 (2026-08-26 Phase 8C provider-less production dispatch) |
 | T-V2-ARB-003 | AI-222, AI-274, DB-197, DB-201 | 동일 authoritative input을 DB query·C/B/A completion order만 바꿔 반복 | canonical input hash, Result와 output hash가 모두 동일 | 통과 (2026-08-26 Phase 8C canonical determinism) |
@@ -674,7 +729,7 @@ Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript
 | T-V2-ARB-028 | AI-273, AI-275, MAO-255 | all-BUY와 mandatory-UNKNOWN Arbiter 성공 뒤 downstream resource/Finalizer trigger 조사 | Decision·Approval·OrderIntent·TradingOrder·Broker·Activation·Execution 0건 | 통과 (2026-08-26 Phase 8D authority/Finalizer boundary) |
 | T-V2-ARB-029 | MAO-200, MAO-236, DB-191 | historical 4-route v7 및 Phase 3B~8C·LLM/provider/control-plane·v1~v6 회귀 | 과거 run retroactive Decision/Arbiter stage 0건, 기존 runtime 의미와 전체 backend 회귀 유지 | 통과 (2026-08-26 Phase 8D focused + legacy 98 + full 571 regression) |
 | T-V2-MAO-001 | MAO-200~209 | v7 ENTRY DAG 정상 실행 | 기존 Scout 재사용, Decision Agent 3개와 Arbiter 1회 실행 | 계획 (Phase 1) |
-| T-V2-MAO-002 | MAO-203~205 | Decision Agent 병렬 실행 | 상호 dependency와 결과 공유 없음 | 계획 (Phase 1) |
+| T-V2-MAO-002 | MAO-203~205 | Decision Agent 병렬 실행 | 상호 dependency와 결과 공유 없음 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
 | T-V2-MAO-003 | MAO-200 | 과거 v1~v6 run 조회·replay | 기존 의미와 결과 변경 없음 | 계획 (Phase 1) |
 | T-V2-MAO-004 | AI-232~235, AI-285, MAO-210~212, MAO-260 | v7 DIAGNOSTIC 정상 완료 | ArbiterResult 존재, run SUCCEEDED/completed_at, TRADING Decision·Approval·Order 0건 | 통과 (2026-08-27 Phase 9D 네 action DIAGNOSTIC closure) |
 | T-V2-MAO-005 | AI-234, AI-285, MAO-256 | 과거 DIAGNOSTIC ArbiterResult의 TRADING 승격·복사 또는 purpose mutation 시도 | 거부, 거래 resource 0건 | 통과 (2026-08-27 Phase 9C.2 Gate provenance 없는 purpose mutation fail-closed 및 별도 admission identity) |
@@ -684,12 +739,12 @@ Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript
 | T-V2-ACT-004 | AI-241, CFG-107~108 | validation/admission/finalization 중 Gate version 변경 | frozen version 승격 없이 admission 또는 finalization 거부 | 통과 (2026-08-27 Phase 9C.2 admission freeze + Phase 9D live supersession denial) |
 | T-V2-ACT-005 | AI-242, AI-284, CFG-111, EXE-214~219 | OPEN Gate와 ExecutionStage SHADOW에서 정상 ArbiterResult finalization | TRADING Decision 정확히 1건, ExecutionStage resource·Approval·Order·Broker 0건 | 통과 (2026-08-27 Phase 9D four-action Finalizer E2E/side-effect zero) |
 | T-V2-ACT-006 | CFG-104~106, DB-178~179 | exact activation payload를 key/list 순서만 바꿔 canonicalize | same version snapshot hash와 payload hash; unknown/default/partial null 거부 | 통과 (2026-08-27 Phase 9C.1 canonical key/fixed list/UTC/null/hash validation) |
-| T-V2-ACT-007 | CFG-107, MAO-257 | ACTIVE Gate 부재, CLOSED, 둘 이상, malformed를 각각 admission | 모든 case AgentRun·stage 0건 | 부분 통과 (2026-08-27 Phase 9C.2 no-Gate/CLOSED/INVALID와 ambiguity 분류의 0-run 의미; PostgreSQL exact-one 미검증) |
+| T-V2-ACT-007 | CFG-107, MAO-257 | ACTIVE Gate 부재, CLOSED, 둘 이상, malformed를 각각 admission | 모든 case AgentRun·stage 0건 | 통과 (2026-09-01 Phase 11B.0B2 PostgreSQL exact-one/ambiguity/production resolver persistence) |
 | T-V2-ACT-008 | CFG-107, MAO-257, DB-180 | valid ACTIVE+OPEN Gate admission | TRADING run 1개와 exact Gate ID/hash freeze | 통과 (2026-08-27 Phase 9C.2 internal admission, upstream 7, exact full-payload hash freeze/idempotent reuse) |
 | T-V2-ACT-009 | CFG-108, DB-180, DB-211 | admission 뒤 동일 Gate CLOSED 또는 새 Gate ACTIVE | Decision 0건, CLOSED/SUPERSEDED exact audit와 CANCELLED lifecycle | 통과 (2026-08-27 Phase 9D production-style CLOSED/SUPERSEDED finalization denial) |
-| T-V2-ACT-010 | CFG-108, DB-208 | transaction start 뒤 write boundary 전 Gate closure/supersession | staged insert rollback, Decision 0건 | 부분 통과 (2026-08-27 Phase 9D injected write-boundary supersession rollback; PostgreSQL TOCTOU/locking 미검증) |
+| T-V2-ACT-010 | CFG-108, DB-208 | transaction start 뒤 write boundary 전 Gate closure/supersession | staged insert rollback, Decision 0건 | 통과 (2026-09-01 Phase 11B.0B2 PostgreSQL Gate/expiry TOCTOU) |
 | T-V2-ACT-011 | CFG-105, CFG-111, EXE-218 | Gate target/state와 ExecutionStage/action mode 비교 | 상호 변환·자동 변경 없음 | 통과 (2026-08-27 Phase 9C.2 Gate admission-only, LLM/Arbiter/Execution semantic isolation) |
-| T-V2-ACT-012 | DB-210, DB-213 | run 생성 전 Gate CLOSED/invalid 및 transient DB read/lock failure | exact admission AuditLog action/result/metadata, partial run/stage 0건, DB failure retry | 부분 통과 (2026-08-27 Phase 9C.2 exact CLOSED/INVALID/DB_RETRYABLE audit shape와 0 partial row; 실제 DB 장애 복구는 미검증) |
+| T-V2-ACT-012 | DB-210, DB-213 | run 생성 전 Gate CLOSED/invalid 및 transient DB read/lock failure | exact admission AuditLog action/result/metadata, partial run/stage 0건, DB failure retry | 통과 (2026-09-01 Phase 11B.0B2 PostgreSQL lock failure/recovery exact-once) |
 | T-V2-DB-CTX-001 | DB-160~164, AI-244 | 같은 run과 같은 canonical manifest/hash로 Context freeze 반복 | DecisionContext 정확히 1개, 동일 ID/hash 반환 | 통과 (2026-08-25 Phase 3B SQLite) |
 | T-V2-DB-CTX-002 | DB-164 | 같은 run에 다른 manifest/hash로 Context freeze 재시도 | conflict로 fail-closed, 기존 Context 변경 없음 | 통과 (2026-08-25 Phase 3B immutable conflict) |
 | T-V2-DB-CTX-003 | DB-166, MAO-215 | 다른 run의 Scout stage 또는 EvidenceBundle을 Context에 참조 | freeze transaction rollback, Context 0건 | 통과 (2026-08-25 Phase 3B same-run selection) |
@@ -698,13 +753,13 @@ Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript
 | T-V2-DB-CTX-006 | DB-165 | required reference별 valid_until이 서로 다른 Context freeze | 서버가 가장 이른 값을 Context valid_until과 manifest/hash에 저장; 유효시각 계산 불가는 freeze 거부 | 통과 (2026-08-25 Phase 3B earliest validity) |
 | T-V2-DB-POL-001 | DB-159, DB-171~172, AI-245 | 세 PolicyProfile ACTIVE version으로 v7 admission | C/B/A의 정확한 ID/category/sequence/agent type/hash map을 canonical freeze | 통과 (2026-08-25 Phase 3C SQLite canonical admission) |
 | T-V2-DB-POL-002 | DB-172, AI-245 | run 실행 중 ACTIVE PolicyProfile 교체 | 기존 run map/hash와 stage 입력 provenance 불변 | 통과 (2026-08-25 Phase 3C immutable freeze/historical resolution) |
-| T-V2-DB-ROLE-001 | DB-167, MAO-213~217 | 신규 네 role을 v7과 v1~v6 run에 각각 저장 시도 | v7 DAG에서만 허용하고 v1~v6 삽입은 runtime validation 거부 | 부분 통과 (2026-08-25 Phase 3A DB allowlist; DAG validation은 Phase 3B) |
+| T-V2-DB-ROLE-001 | DB-167, MAO-213~217 | 신규 네 role을 v7과 v1~v6 run에 각각 저장 시도 | v7 DAG에서만 허용하고 v1~v6 삽입은 runtime validation 거부 | 통과 (2026-09-01 Phase 11B.0B2 exact Phase 3B role/DAG binding) |
 | T-V2-DB-ROLE-002 | DB-168, AI-247, DB-199, DB-204 | ENTRY_ARBITER에 route·prompt·model 또는 invocation 생성 시도 | 거부; Arbiter stage의 route_id/invocation_id NULL과 invocation 0건 | 통과 (2026-08-26 Phase 8C application claim/completion validation and zero invocation) |
 | T-V2-DB-FIN-001 | DB-173~176, DB-205~208, AI-277~280 | 정상 v7 TRADING Finalizer persistence | sourced-entry-decision-v1 exact mapping, source run/stage/hash와 Context·C/B/A·Arbiter 역추적 | 통과 (2026-08-27 Phase 9D SQLite production-style Finalizer/API lineage) |
 | T-V2-DB-FIN-002 | DB-173, DB-207 | source stage run_id, source run purpose/DAG/context가 불일치 | SOURCE_CONFLICTED, rollback, Decision 0건 | 통과 (2026-08-27 Phase 9D authoritative source application validation) |
 | T-V2-DB-FIN-003 | DB-173, DB-207 | source stage role/state/route/invocation이 exact Arbiter contract와 불일치 | SOURCE_CONFLICTED, Decision 0건 | 통과 (2026-08-27 Phase 9D strict source-stage validator/wrong-role acceptance) |
 | T-V2-DB-FIN-004 | DB-173, DB-207 | source stored/recomputed hash 또는 Context/C/B/A lineage 불일치 | SOURCE_CONFLICTED, Decision 0건 | 통과 (2026-08-27 Phase 9D hash/lineage revalidation) |
-| T-V2-DB-FIN-005 | DB-174~175, DB-209, AI-278 | 동일 finalization identity/material 반복 및 concurrent insert | 동일 Decision 반환, source/evaluation identity별 최대 1개 | 부분 통과 (2026-08-27 Phase 9D SQLite exact retry/unique recovery foundation; PostgreSQL race 미검증) |
+| T-V2-DB-FIN-005 | DB-174~175, DB-209, AI-278 | 동일 finalization identity/material 반복 및 concurrent insert | 동일 Decision 반환, source/evaluation identity별 최대 1개 | 통과 (2026-09-01 Phase 11B.0B2 PostgreSQL concurrent exact-one) |
 | T-V2-DB-FIN-006 | DB-176, DB-209 | commit 결과 불명확 재시도와 같은 identity의 payload mismatch | 조회 후 exact match만 반환; mismatch는 identity conflict, 기존 row 불변 | 통과 (2026-08-27 Phase 9D lookup-first retry/exact comparator) |
 | T-V2-DB-FIN-007 | AI-279~281, DB-205 | BUY/WAIT/REJECT/UNKNOWN ArbiterResult 각각 finalization | action/reason/validity exact 보존 Decision 각 1건 | 통과 (2026-08-27 Phase 9D four-action production-style E2E) |
 | T-V2-DB-FIN-008 | AI-280, DB-205~206 | sourced Decision physical fields 검사 | confidence/risk/model/prompt/Scout/Core/latency/execution/config null, validation VALID; sentinel 0건 | 통과 (2026-08-27 Phase 9D actual Finalizer insert exact physical mapping) |
@@ -722,7 +777,7 @@ Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript
 | T-V2-FIN-LIFE-003 | MAO-260~261 | TRADING 네 action Finalizer success/reuse | Decision exact-one과 run SUCCEEDED/completed_at 원자 commit | 통과 (2026-08-27 Phase 9D four-action/idempotency transaction) |
 | T-V2-FIN-LIFE-004 | MAO-260, DB-211 | CLOSED/superseded/invalid Gate | expected denial은 CANCELLED, invalid config는 FAILED, exact error/audit, Decision 0 | 통과 (2026-08-27 Phase 9D live Gate lifecycle matrix) |
 | T-V2-FIN-LIFE-005 | MAO-260, DB-211 | source expiry/conflict/identity conflict | run FAILED와 exact error/audit, Decision 0 | 통과 (2026-08-27 Phase 9D terminal source/identity matrix) |
-| T-V2-FIN-LIFE-006 | MAO-262, DB-210~211 | transient DB/lock failure 뒤 recovery | RUNNING/completed_at null/retryable error 유지 후 exact-one success; persistent retry audit | 부분 통과 (2026-08-27 Phase 9D SQLite injected rollback/retry audit; PostgreSQL lock failure/recovery 미검증) |
+| T-V2-FIN-LIFE-006 | MAO-262, DB-210~211 | transient DB/lock failure 뒤 recovery | RUNNING/completed_at null/retryable error 유지 후 exact-one success; persistent retry audit | 통과 (2026-09-01 Phase 11B.0B2 PostgreSQL lock failure/recovery exact-one) |
 | T-V2-P9E-001 | PRD-045~047, AI-276~286 | ACTIVE+OPEN Gate에서 full TRADING BUY/WAIT/REJECT/UNKNOWN production-style E2E | exact sourced Decision 1, run SUCCEEDED, action/reason/null payload 보존 | 통과 (2026-08-27 Phase 9E acceptance) |
 | T-V2-P9E-002 | CFG-104~111, DB-213 | no Gate/CLOSED/INVALID 및 actual snapshot 영역별 mismatch admission | run/stage/input 0, exact admission audit와 Gate classification | 통과 (2026-08-27 Phase 9C.2/9E 종합 재검증; PostgreSQL ambiguity locking 제외) |
 | T-V2-P9E-003 | CFG-108, AI-241, DB-180 | Gate A admission 뒤 mid-pipeline Gate B/CLOSED | semantic input·Arbiter 완료 가능, frozen A 불변, Finalizer에서만 차단 | 통과 (2026-08-27 Phase 9C.2/9D/9E regression) |
@@ -742,16 +797,16 @@ Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript
 | T-V2-DB-GATE-002 | DB-178~179, AI-239~240 | required safety evidence 누락·FAILED·expired·target mismatch·hash 오류 | gate validation과 TRADING admission 거부 | 통과 (2026-08-27 Phase 9C.1 validator + Phase 9C.2 selector/admission fail-closed) |
 | T-V2-DB-GATE-003 | DB-180, AI-241 | run admission 후 gate superseded 또는 ACTIVE CLOSED version으로 교체 | 기존 run을 새 gate로 승격하지 않고 finalization 거부 | 통과 (2026-08-27 Phase 9D frozen provenance 유지/live denial) |
 | T-V2-DB-GATE-004 | DB-180, AI-242, EXE-214~215 | Activation OPEN + ExecutionStage SHADOW에서 valid v7 TRADING result finalization | Finalized Decision 가능, Approval·OrderIntent·Order 0건 | 통과 (2026-08-27 Phase 9D OPEN Gate Decision/authority boundary) |
-| T-V2-DB-MIG-001 | DB-157~182, DB-060~063 | PostgreSQL Phase 3 migration upgrade→downgrade→upgrade | 신규 constraint·table·index 왕복 성공, 기존 판단·주문 이력 보존 | 부분 통과 (2026-08-25 SQLite 왕복; PostgreSQL 미검증) |
+| T-V2-DB-MIG-001 | DB-157~182, DB-060~063 | PostgreSQL Phase 3 migration upgrade→downgrade→upgrade | 신규 constraint·table·index 왕복 성공, 기존 판단·주문 이력 보존 | 통과 (2026-09-01 Phase 11B.0B2 isolated PostgreSQL roundtrip) |
 | T-V2-DB-MIG-002 | DB-166, DB-174, DB-182 | SQLite test schema에 같은 logical FK/unique/role 계약 적용 | PostgreSQL과 동일 인수 의미로 schema·constraint 시험 통과 | 통과 (2026-08-25 Phase 3A SQLite) |
 | T-V2-DB-MIG-003 | DB-157~182 | migration 전후 agent-dag-v1~v6 fixture 조회·replay | 기존 purpose·role·Core output 의미와 row 수 변경 없음 | 통과 (2026-08-25 Phase 3A legacy fixture) |
 | T-V2-DB-MIG-004 | DB-157~182 | 기존 POSITION TRADING_ADVISORY와 fusion fixture migration 왕복 | basis/fusion lineage와 행동 의미 보존 | 통과 (2026-08-25 Phase 3A SQLite fixture) |
 | T-V2-DB-MIG-005 | DB-173~174, DB-182 | legacy deterministic ENTRY Decision migration | source run/stage/hash는 NULL, backfill·재해석 없음 | 통과 (2026-08-25 Phase 3A SQLite fixture) |
 | T-V2-DB-MIG-006 | DB-181~182 | v7 Context 또는 sourced Decision이 있는 DB에서 downgrade 시도 | lineage 삭제·SET NULL 없이 downgrade 명시적 거부 | 통과 (2026-08-25 Phase 3A v7 TRADING guard) |
 | T-V2-DB-MIG-007 | DB-205~206 | Phase 9C upgrade 후 legacy Decision fixture | 기존 non-null payload/API와 row/hash 불변 | 통과 (2026-08-27 Phase 9C.1 SQLite legacy row/migration/API regression) |
-| T-V2-DB-MIG-008 | DB-205~206 | 25-char sourced schema, UNKNOWN action과 exact nullable representation insert | PostgreSQL/SQLite constraint 통과; truncation 없음, invalid mixed representation 거부 | 부분 통과 (2026-08-27 Phase 9C.1 SQLite ORM/CHECK; PostgreSQL 미검증) |
+| T-V2-DB-MIG-008 | DB-205~206 | 25-char sourced schema, UNKNOWN action과 exact nullable representation insert | PostgreSQL/SQLite constraint 통과; truncation 없음, invalid mixed representation 거부 | 통과 (2026-09-01 Phase 11B.0B2 PostgreSQL UNKNOWN/mixed representation) |
 | T-V2-DB-MIG-009 | DB-206, DB-212 | sourced/UNKNOWN/nullable row 존재 상태 downgrade | 명시적 거부, coercion·sentinel·lineage 삭제 없음 | 통과 (2026-08-27 Phase 9C.1 SQLite explicit 0040 refusal) |
-| T-V2-DB-MIG-010 | DB-206 | sourced row 없는 upgrade→downgrade→upgrade | 기존 legacy rows와 constraints 보존 | 부분 통과 (2026-08-27 Phase 9C.1 SQLite roundtrip; PostgreSQL 미검증) |
+| T-V2-DB-MIG-010 | DB-206 | sourced row 없는 upgrade→downgrade→upgrade | 기존 legacy rows와 constraints 보존 | 통과 (2026-09-01 Phase 11B.0B2 isolated PostgreSQL sourced-free roundtrip) |
 | T-V2-UPSTREAM-001 | MAO-221, DB-186 | v7 diagnostic upstream admission | Intel·Verifier·네 Scout·Candidate Audit만 생성; CORE·C/B/A·Arbiter stage와 실행 0건 | 통과 (2026-08-25 Phase 4C SQLite atomic admission) |
 | T-V2-UPSTREAM-002 | AI-251, MAO-225 | v7 네 Scout contract dispatch | legacy v1 path가 아닌 AgentAssessmentV2 schema/validation 사용 | 통과 (2026-08-25 Phase 4C production E2E) |
 | T-V2-UPSTREAM-003 | AI-255, MAO-232 | ENTRY이며 열린 position 없음 | Position Risk stage 존재, explicit `NOT_APPLICABLE/UNKNOWN`, score null, `OPEN_POSITION_NOT_FOUND`, Provider 0건 | 통과 (2026-08-25 Phase 4C production E2E) |
@@ -828,17 +883,17 @@ Evidence: Backend 전체 시험과 Ruff, Frontend component 시험과 TypeScript
 | T-V2-DA-ACC-005 | AI-260, AI-263, MAO-245 | primary Provider failure 뒤 configured fallback 성공 | requested primary profile, actual fallback provider/model, fallback flag/path와 hash 차이를 보존 | 통과 (2026-08-25 Phase 7E production fallback provenance) |
 | T-V2-DA-ACC-006 | AI-265, MAO-240~244 | C/B/A all BUY와 terminal 후 reconciliation/config·다른 Agent 변화 | 외부 도구·거래·Arbiter resource 0건, exact stage 3개와 terminal output 불변 | 통과 (2026-08-25 Phase 7E authority/immutability/layer closure) |
 | T-V2-DA-LEGACY-001 | MAO-236, DB-191 | v1~v6와 Phase 4~6 stored fixture replay | 기존 role/route/finalization 의미와 row/hash 불변 | 통과 (2026-08-25 Phase 7C v1~v6 및 historical four-route regression) |
-| T-V2-EXE-001 | EXE-200~203 | `APPROVAL_ONLY` + BUY policy `AUTOMATIC` | 직접 Order 생성 0건, fail-closed | 계획·현행 결함 회귀 |
-| T-V2-EXE-002 | EXE-204~205 | PENDING Approval 생성 후 `SHADOW` 전환 뒤 approve | Approval `INVALIDATED`, Order 0건 | 계획·현행 결함 회귀 |
-| T-V2-EXE-003 | EXE-206~208 | CREATED Order 생성 후 `SHADOW` downgrade 뒤 worker dispatch | Broker `place_order` 호출 0회 | 계획·현행 결함 회귀 |
-| T-V2-EXE-004 | EXE-201 | `SHADOW`에서 BUY consensus 생성 | 판단 기록만 존재, Approval·OrderIntent·Order 0건 | 계획 (Phase 1) |
+| T-V2-EXE-001 | EXE-200~203 | `APPROVAL_ONLY` + BUY policy `AUTOMATIC` | 직접 Order 생성 0건, fail-closed | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
+| T-V2-EXE-002 | EXE-204~205 | PENDING Approval 생성 후 `SHADOW` 전환 뒤 approve | Approval `INVALIDATED`, Order 0건 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
+| T-V2-EXE-003 | EXE-206~208 | CREATED Order 생성 후 `SHADOW` downgrade 뒤 worker dispatch | Broker `place_order` 호출 0회 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
+| T-V2-EXE-004 | EXE-201 | `SHADOW`에서 BUY consensus 생성 | 판단 기록만 존재, Approval·OrderIntent·Order 0건 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
 | T-V2-EXE-005 | EXE-203 | `MOCK_AUTOMATIC` + BUY consensus + Guard PASS | 자동 MOCK Order 정확히 1건 | 통과 (2026-08-29 Phase 10E) |
-| T-V2-EXE-006 | EXE-209~210 | privileged diagnostic order 실행과 운영 readiness 조회 | 진단 경로·권한·표시가 production execution 및 자동매매 준비 상태와 분리 | 계획 (Phase 1) |
+| T-V2-EXE-006 | EXE-209~210 | privileged diagnostic order 실행과 운영 readiness 조회 | 진단 경로·권한·표시가 production execution 및 자동매매 준비 상태와 분리 | 통과 (2026-09-01 Phase 11B.0B2 binding/dry-run) |
 | T-V2-EXE-007 | PRD-014, CFG-084~085, EXE-211~213 | `APPROVAL_ONLY`에서 FIXED_STOP trigger와 `AUTOMATIC`·`MANUAL_APPROVAL` mode 평가 | 자동 Order 0건; user-bound Approval authority가 없으면 synthetic Approval 없이 EXIT_PENDING 위험·경보 유지 | 통과 (2026-08-29 Phase 10E P0 closure) |
 | T-V2-EXE-008 | EXE-213 | `MOCK_AUTOMATIC`에서 FIXED_STOP trigger, 정상 market·position·gate, Guard PASS와 managed sell quantity 양수 | Approval 없이 MOCK SELL Order 정확히 1건; 동일 trigger 재처리 중복 0건, Broker Worker 경로로만 송신 | 통과 (2026-08-29 Phase 10E CREATED boundary) |
-| T-V2-EXE-009 | EXE-200~203, EXE-211 | ENTRY BUY, POSITION PARTIAL_SELL/FULL_SELL, FIXED_STOP 원인을 ExecutionStage별 table-driven 평가 | SHADOW는 Approval·Order 0건; APPROVAL_ONLY는 허용된 승인만 생성하고 직접 자동 Order 0건; MOCK_AUTOMATIC은 action policy와 Guard가 허용할 때만 자동 MOCK Order | 부분 통과 (2026-08-29 Phase 10E sourced BUY/fixed-stop; 일반 POSITION actions는 기존 범위) |
+| T-V2-EXE-009 | EXE-200~203, EXE-211 | ENTRY BUY, POSITION PARTIAL_SELL/FULL_SELL, FIXED_STOP 원인을 ExecutionStage별 table-driven 평가 | SHADOW는 Approval·Order 0건; APPROVAL_ONLY는 허용된 승인만 생성하고 직접 자동 Order 0건; MOCK_AUTOMATIC은 action policy와 Guard가 허용할 때만 자동 MOCK Order | 통과 (2026-09-01 Phase 11B.0B2 exact sourced/position/fixed-stop matrix binding) |
 | T-V2-EXE-010 | EXE-216, GRD-097 | legacy/sourced WAIT·REJECT·UNKNOWN Decision routing | 모두 NO_ACTION, BUY-like Guard·Approval·Order·Broker 0건 | 통과 (2026-08-27 Phase 9E actual sourced routing, Guard/Approval/Order 0) |
-| T-V2-EXE-011 | EXE-217~220 | sourced BUY Finalizer 완료 및 후속 execution persistence | Decision의 execution_mode/outcome은 불변 null, Finalizer 시 DecisionExecution·Approval·Order·Broker 0건, 후속 상태는 DecisionExecution에만 기록 | 부분 통과 (2026-08-27 Phase 9D Finalizer half complete; 후속 Execution integration은 범위 외) |
+| T-V2-EXE-011 | EXE-217~220 | sourced BUY Finalizer 완료 및 후속 execution persistence | Decision의 execution_mode/outcome은 불변 null, Finalizer 시 DecisionExecution·Approval·Order·Broker 0건, 후속 상태는 DecisionExecution에만 기록 | 통과 (2026-09-01 Phase 11B.0B2 PostgreSQL background/handoff execution binding) |
 | T-V2-EXE-012 | EXE-218~219 | Gate OPEN/CLOSED와 세 ExecutionStage/mode 조합 | Gate와 execution 권한 독립, 둘 중 필요한 조건 하나라도 실패하면 권한 확대 없음 | 통과 (2026-08-27 Phase 9C.2 Gate semantic isolation + Phase 9D/9E null execution authority regression) |
 | T-V2-EXE-AUTH-001 | PRD-048, EXE-222~225, DB-214 | sourced WAIT/REJECT/UNKNOWN 반복·동시 handoff와 policy/stage 변경 | Decision당 `v7exe-` DecisionExecution 정확히 1개, NO_ACTION/원 action code, Guard·Approval·Order 0 | 계획 (Phase 10C.2) |
 | T-V2-EXE-AUTH-002 | EXE-221, EXE-226, GRD-098 | source run/Context/C/B/A/Arbiter/hash/Decision representation corruption과 임의 TRADING BUY | `SOURCE_AUTHORITY_INVALID`, external authority 0, Decision/AgentRun 불변 | 계획 (Phase 10C.2) |

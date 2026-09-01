@@ -31,6 +31,7 @@ from app.approvals import ApprovalError
 from app.auth.service import AuthenticationError, CsrfError, ReauthProofError
 from app.broker.mock_order_test import MockOrderTestError
 from app.calendar_overrides import CalendarOverrideError
+from app.config import EXPECTED_MIGRATION_HEAD
 from app.db import engine
 from app.emergency_stop import EmergencyStopError
 from app.errors import ResourceNotFoundError
@@ -44,7 +45,6 @@ from app.risk_policy import RiskPolicyError
 from app.watchlist import WatchlistError
 
 logger = logging.getLogger("cresta.api")
-EXPECTED_MIGRATION_HEAD = "20260829_0044"
 
 
 def create_app() -> FastAPI:
@@ -145,7 +145,7 @@ def create_app() -> FastAPI:
                     "code": exc.code,
                     "message": "v7 ENTRY Activation Gate 설정을 처리할 수 없습니다.",
                     "correlation_id": request.state.request_id,
-                    "retryable": False,
+                    "retryable": exc.retryable,
                 }
             },
         )

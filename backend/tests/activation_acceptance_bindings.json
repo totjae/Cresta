@@ -1,0 +1,1285 @@
+{
+  "schema_version": "activation-acceptance-bindings-v1",
+  "test_plan_version": "cresta-v2-activation-test-plan-2026-09-01.1",
+  "required_acceptance_set_hash": "d740a14dbcc471e588fc2a03776a216e7bc4c2e6053497d604f3e9804cca913e",
+  "bindings": [
+    {
+      "test_id": "T-V2-ACT-002",
+      "requirement_ids": [
+        "CFG-104"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c1_foundation.py::test_activation_contract_hashes_and_strict_validation"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ACT-003",
+      "requirement_ids": [
+        "CFG-104"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_admission_rejects_every_actual_snapshot_mismatch[decision_route]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_admission_rejects_every_actual_snapshot_mismatch[model]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_admission_rejects_every_actual_snapshot_mismatch[policy]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_admission_rejects_every_actual_snapshot_mismatch[prompt]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_admission_rejects_every_actual_snapshot_mismatch[scout_route]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ACT-004",
+      "requirement_ids": [
+        "CFG-107"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c2_trading_runtime.py::test_same_trading_identity_with_changed_gate_fails_closed_without_mutation",
+        "tests/test_phase_9d_decision_finalizer.py::test_live_gate_denials_terminalize_without_decision[SUPERSEDED-ACTIVATION_GATE_SUPERSEDED-CANCELLED]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ACT-005",
+      "requirement_ids": [
+        "AI-242"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs0-BUY]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ACT-006",
+      "requirement_ids": [
+        "CFG-104"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c1_foundation.py::test_activation_contract_hashes_and_strict_validation"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ACT-007",
+      "requirement_ids": [
+        "CFG-107"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_activation_gate_concurrent_service_activation_exact_one",
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_gate_and_stage_ambiguous_current_fail_closed",
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_production_evidence_gate_survives_recreated_sessions"
+      ],
+      "backend": "POSTGRESQL"
+    },
+    {
+      "test_id": "T-V2-ACT-008",
+      "requirement_ids": [
+        "CFG-107"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_admission_freezes_gate_and_is_idempotent_and_purpose_separated"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ACT-009",
+      "requirement_ids": [
+        "CFG-108"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c2_trading_runtime.py::test_same_trading_identity_with_changed_gate_fails_closed_without_mutation",
+        "tests/test_phase_9d_decision_finalizer.py::test_live_gate_denials_terminalize_without_decision[SUPERSEDED-ACTIVATION_GATE_SUPERSEDED-CANCELLED]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ACT-010",
+      "requirement_ids": [
+        "CFG-108"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_finalizer_gate_and_expiry_toctou_are_atomic[EXPIRY]",
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_finalizer_gate_and_expiry_toctou_are_atomic[GATE]"
+      ],
+      "backend": "POSTGRESQL"
+    },
+    {
+      "test_id": "T-V2-ACT-011",
+      "requirement_ids": [
+        "CFG-105"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[CLOSED-outputs5-BUY]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[SUPERSEDED-outputs4-BUY]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[UNCHANGED-outputs0-BUY]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[UNCHANGED-outputs1-WAIT]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[UNCHANGED-outputs2-REJECT]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[UNCHANGED-outputs3-UNKNOWN]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ACT-012",
+      "requirement_ids": [
+        "DB-210"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_admission_gate_lock_failure_recovers_without_partial_run"
+      ],
+      "backend": "POSTGRESQL"
+    },
+    {
+      "test_id": "T-V2-AI-001",
+      "requirement_ids": [
+        "AI-205"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_decision_agent_acceptance.py::test_full_e2e_has_shared_context_and_arbiter_ready_lineage"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-AI-002",
+      "requirement_ids": [
+        "AI-206"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_decision_agent_acceptance.py::test_parallel_readiness_order_independence_and_result_immutability"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-AI-003",
+      "requirement_ids": [
+        "AI-207"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_decision_agent_acceptance.py::test_parallel_readiness_order_independence_and_result_immutability"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-AI-005",
+      "requirement_ids": [
+        "AI-209"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_decision_agent_execution.py::test_invalid_reason_evidence_overlap_and_extra_field_are_rejected[mutation0-DECISION_AGENT_REASON_NOT_ALLOWED]",
+        "tests/test_v7_decision_agent_execution.py::test_invalid_reason_evidence_overlap_and_extra_field_are_rejected[mutation1-DECISION_AGENT_REASON_NOT_ALLOWED]",
+        "tests/test_v7_decision_agent_execution.py::test_invalid_reason_evidence_overlap_and_extra_field_are_rejected[mutation2-DECISION_AGENT_REASON_NOT_ALLOWED]",
+        "tests/test_v7_decision_agent_execution.py::test_invalid_reason_evidence_overlap_and_extra_field_are_rejected[mutation3-DECISION_AGENT_EVIDENCE_NOT_ALLOWED]",
+        "tests/test_v7_decision_agent_execution.py::test_invalid_reason_evidence_overlap_and_extra_field_are_rejected[mutation4-DECISION_AGENT_EVIDENCE_NOT_ALLOWED]",
+        "tests/test_v7_decision_agent_execution.py::test_invalid_reason_evidence_overlap_and_extra_field_are_rejected[mutation5-DECISION_AGENT_OUTPUT_SCHEMA_INVALID]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-AI-007",
+      "requirement_ids": [
+        "AI-216"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_decision_agent_execution.py::test_timeout_provider_error_and_invalid_output_are_structured"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-AI-008",
+      "requirement_ids": [
+        "AI-217"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_decision_agent_execution.py::test_one_timeout_isolated_between_two_successful_agents",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_full_production_e2e_stops_at_arbiter[FULL-E2E-UNKNOWN]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-AI-010",
+      "requirement_ids": [
+        "AI-227"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs0-BUY]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-AI-011",
+      "requirement_ids": [
+        "AI-229"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_success_retry_is_exact_once_and_preserves_completed_at"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-AI-012",
+      "requirement_ids": [
+        "AI-230"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_source_expiry_and_corruption_fail_closed[EXPIRED]",
+        "tests/test_phase_9e_acceptance.py::test_phase_9e_source_stage_and_output_corruption_fails_closed[CONTEXT_HASH]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-AI-013",
+      "requirement_ids": [
+        "AI-231"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs0-BUY]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-AI-016",
+      "requirement_ids": [
+        "AI-229"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_post_flush_database_failure_rolls_back_and_remains_retryable",
+        "tests/test_phase_9e_acceptance.py::test_phase_9e_duplicate_reconciliation_and_ambiguous_retry_are_exact_once"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-001",
+      "requirement_ids": [
+        "AI-220"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_pure_truth_table_is_deterministic_for_all_success_actions"
+      ],
+      "backend": "STATIC"
+    },
+    {
+      "test_id": "T-V2-ARB-002",
+      "requirement_ids": [
+        "AI-203"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter.py::test_all_buy_production_path_is_providerless_and_has_no_authority"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-003",
+      "requirement_ids": [
+        "AI-222"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter.py::test_input_and_result_hashes_are_canonical_and_order_independent"
+      ],
+      "backend": "STATIC"
+    },
+    {
+      "test_id": "T-V2-ARB-004",
+      "requirement_ids": [
+        "AI-221"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_exact_one_finalizer_ready_lineage"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-005",
+      "requirement_ids": [
+        "AI-266"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[context_hash]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[context_identity]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[hash_mismatch]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[hash_missing]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[malformed]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[missing_a]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[missing_b]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[missing_c]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[output_missing]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[policy_provenance]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[role_identity]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[stage_identity]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_structural_corruption_never_materializes_unknown[validity]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-006",
+      "requirement_ids": [
+        "AI-267"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter.py::test_pre_materialization_expiry_creates_no_stage"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-007",
+      "requirement_ids": [
+        "AI-271"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter.py::test_post_materialization_expiry_is_timed_out_without_output",
+        "tests/test_v7_entry_arbiter.py::test_post_materialization_tamper_is_conflicted_without_output"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-008",
+      "requirement_ids": [
+        "AI-271"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[CONFLICTED-AGGRESSIVE_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[CONFLICTED-BALANCED_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[CONFLICTED-CONSERVATIVE_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[FAILED-AGGRESSIVE_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[FAILED-BALANCED_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[FAILED-CONSERVATIVE_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[INSUFFICIENT_DATA-AGGRESSIVE_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[INSUFFICIENT_DATA-BALANCED_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[INSUFFICIENT_DATA-CONSERVATIVE_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[INVALID_OUTPUT-AGGRESSIVE_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[INVALID_OUTPUT-BALANCED_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[INVALID_OUTPUT-CONSERVATIVE_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[TIMED_OUT-AGGRESSIVE_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[TIMED_OUT-BALANCED_DECISION]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_each_role_non_success_is_normal_unknown_consensus[TIMED_OUT-CONSERVATIVE_DECISION]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-009",
+      "requirement_ids": [
+        "MAO-248"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_full_production_e2e_stops_at_arbiter[FULL-E2E-UNKNOWN]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-010",
+      "requirement_ids": [
+        "MAO-246"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter.py::test_materialization_is_exactly_once_and_mismatch_does_not_repair"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-011",
+      "requirement_ids": [
+        "MAO-250"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter.py::test_stale_fencing_completion_cannot_overwrite_arbiter",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_worker_recovers_before_and_after_materialization"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-012",
+      "requirement_ids": [
+        "AI-270"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter.py::test_unexpected_evaluator_failure_is_failed_without_unknown_result"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-013",
+      "requirement_ids": [
+        "AI-273"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_full_production_e2e_stops_at_arbiter[FULL-E2E-BUY]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-ARB-014",
+      "requirement_ids": [
+        "AI-269"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter.py::test_contracts_are_strict_ordered_and_pattern_bound"
+      ],
+      "backend": "STATIC"
+    },
+    {
+      "test_id": "T-V2-ARB-015",
+      "requirement_ids": [
+        "AI-266"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_full_production_e2e_stops_at_arbiter[FULL-E2E-BUY]",
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_full_production_e2e_stops_at_arbiter[FULL-E2E-UNKNOWN]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-CTX-001",
+      "requirement_ids": [
+        "DB-160"
+      ],
+      "test_nodeids": [
+        "tests/test_decision_context_freeze.py::test_freeze_is_canonical_idempotent_and_uses_earliest_validity"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-CTX-002",
+      "requirement_ids": [
+        "DB-164"
+      ],
+      "test_nodeids": [
+        "tests/test_decision_context_freeze.py::test_freeze_conflict_does_not_update_existing_context"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-CTX-003",
+      "requirement_ids": [
+        "DB-166"
+      ],
+      "test_nodeids": [
+        "tests/test_decision_context_freeze.py::test_freeze_rejects_cross_run_lineage[bundle]",
+        "tests/test_decision_context_freeze.py::test_freeze_rejects_cross_run_lineage[stage]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-CTX-004",
+      "requirement_ids": [
+        "DB-164"
+      ],
+      "test_nodeids": [
+        "tests/test_decision_context_freeze.py::test_decision_agent_claim_requires_committed_valid_context[CONSERVATIVE_DECISION]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-CTX-005",
+      "requirement_ids": [
+        "DB-163"
+      ],
+      "test_nodeids": [
+        "tests/test_decision_context_freeze.py::test_missing_position_risk_stage_is_not_not_applicable",
+        "tests/test_decision_context_freeze.py::test_position_risk_not_applicable_is_explicitly_allowed"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-CTX-006",
+      "requirement_ids": [
+        "DB-165"
+      ],
+      "test_nodeids": [
+        "tests/test_decision_context_freeze.py::test_freeze_is_canonical_idempotent_and_uses_earliest_validity"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-001",
+      "requirement_ids": [
+        "DB-173"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs0-BUY]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-002",
+      "requirement_ids": [
+        "DB-173"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9e_acceptance.py::test_phase_9e_source_stage_and_output_corruption_fails_closed[CONTEXT_ID]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-003",
+      "requirement_ids": [
+        "DB-173"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9e_acceptance.py::test_phase_9e_source_stage_and_output_corruption_fails_closed[ROLE]",
+        "tests/test_phase_9e_acceptance.py::test_phase_9e_source_stage_and_output_corruption_fails_closed[ROUTE]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-004",
+      "requirement_ids": [
+        "DB-173"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9e_acceptance.py::test_phase_9e_source_stage_and_output_corruption_fails_closed[CBA_LINEAGE]",
+        "tests/test_phase_9e_acceptance.py::test_phase_9e_source_stage_and_output_corruption_fails_closed[HASH_MISMATCH]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-005",
+      "requirement_ids": [
+        "DB-174"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10g1_postgresql.py::test_finalizer_concurrent_finalization_returns_one_decision"
+      ],
+      "backend": "POSTGRESQL"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-006",
+      "requirement_ids": [
+        "DB-176"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_conflicting_existing_decision_is_not_mutated",
+        "tests/test_phase_9d_decision_finalizer.py::test_success_retry_is_exact_once_and_preserves_completed_at"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-007",
+      "requirement_ids": [
+        "DB-205"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs0-BUY]",
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs1-WAIT]",
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs2-REJECT]",
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs3-UNKNOWN]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-008",
+      "requirement_ids": [
+        "DB-205"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs0-BUY]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-009",
+      "requirement_ids": [
+        "DB-208"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_source_expiry_and_corruption_fail_closed[EXPIRED]",
+        "tests/test_phase_9d_decision_finalizer.py::test_write_boundary_recheck_rolls_back_staged_decision[EXPIRY]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-010",
+      "requirement_ids": [
+        "DB-205"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs0-BUY]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-011",
+      "requirement_ids": [
+        "DB-210"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_live_gate_denials_terminalize_without_decision[INVALID-ACTIVATION_GATE_INVALID-FAILED]",
+        "tests/test_phase_9d_decision_finalizer.py::test_source_expiry_and_corruption_fail_closed[HASH]",
+        "tests/test_phase_9d_decision_finalizer.py::test_success_retry_is_exact_once_and_preserves_completed_at"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-012",
+      "requirement_ids": [
+        "DB-209"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_worker_idle_reconciliation_is_opportunistic_and_exact_once"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-FIN-013",
+      "requirement_ids": [
+        "AI-286"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs0-BUY]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-GATE-001",
+      "requirement_ids": [
+        "DB-177"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_admission_freezes_gate_and_is_idempotent_and_purpose_separated"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-GATE-002",
+      "requirement_ids": [
+        "DB-178"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c1_foundation.py::test_activation_contract_hashes_and_strict_validation"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-GATE-003",
+      "requirement_ids": [
+        "DB-180"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c2_trading_runtime.py::test_same_trading_identity_with_changed_gate_fails_closed_without_mutation"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-GATE-004",
+      "requirement_ids": [
+        "DB-180"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs0-BUY]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-MIG-001",
+      "requirement_ids": [
+        "DB-157"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_phase3_legacy_upgrade_downgrade_upgrade_roundtrip"
+      ],
+      "backend": "POSTGRESQL"
+    },
+    {
+      "test_id": "T-V2-DB-MIG-002",
+      "requirement_ids": [
+        "DB-166"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_persistence_foundation.py::test_decision_source_lineage_constraints_and_legacy_nulls"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-MIG-003",
+      "requirement_ids": [
+        "DB-157"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_persistence_foundation.py::test_migration_preserves_legacy_rows_and_null_lineage"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-MIG-004",
+      "requirement_ids": [
+        "DB-157"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_persistence_foundation.py::test_migration_preserves_legacy_rows_and_null_lineage"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-MIG-005",
+      "requirement_ids": [
+        "DB-173"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_persistence_foundation.py::test_migration_preserves_legacy_rows_and_null_lineage"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-MIG-006",
+      "requirement_ids": [
+        "DB-181"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_persistence_foundation.py::test_migration_refuses_destructive_v7_downgrade"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-MIG-007",
+      "requirement_ids": [
+        "DB-205"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c1_foundation.py::test_decision_discriminator_and_legacy_contract_fail_closed"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-MIG-008",
+      "requirement_ids": [
+        "DB-205"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_unknown_sourced_representation_rejects_mixed_fields"
+      ],
+      "backend": "POSTGRESQL"
+    },
+    {
+      "test_id": "T-V2-DB-MIG-009",
+      "requirement_ids": [
+        "DB-206"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_persistence_foundation.py::test_phase_9c1_migration_refuses_unknown_downgrade"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-MIG-010",
+      "requirement_ids": [
+        "DB-206"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_sourced_free_0040_roundtrip_preserves_legacy_rows"
+      ],
+      "backend": "POSTGRESQL"
+    },
+    {
+      "test_id": "T-V2-DB-POL-001",
+      "requirement_ids": [
+        "DB-159"
+      ],
+      "test_nodeids": [
+        "tests/test_policy_profile_admission.py::test_three_active_profiles_freeze_deterministic_canonical_map"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-POL-002",
+      "requirement_ids": [
+        "DB-172"
+      ],
+      "test_nodeids": [
+        "tests/test_policy_profile_admission.py::test_active_replacement_cannot_reinterpret_existing_run_and_new_input_uses_it"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-ROLE-001",
+      "requirement_ids": [
+        "DB-167"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_historical_four_route_v7_run_is_not_retroactively_upgraded",
+        "tests/test_v7_persistence_foundation.py::test_agent_stage_accepts_all_v7_roles"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-DB-ROLE-002",
+      "requirement_ids": [
+        "DB-168"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter.py::test_phase8_role_enablement_does_not_add_a_provider_role",
+        "tests/test_v7_persistence_foundation.py::test_route_and_prompt_accept_decision_roles_but_reject_arbiter"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EVIDENCE-V7-001",
+      "requirement_ids": [
+        "MAO-228"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_v7_production_e2e_freezes_one_context_and_keeps_running"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EVIDENCE-V7-002",
+      "requirement_ids": [
+        "MAO-229"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_v7_unknown_or_stale_freshness_fails_closed_without_context"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EXE-001",
+      "requirement_ids": [
+        "EXE-200"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10d_execution_authority.py::test_sourced_stage_action_matrix_keeps_automatic_closed[APPROVAL_ONLY-AUTOMATIC-FAILED_SAFE-AUTOMATIC_NOT_ALLOWED_IN_APPROVAL_ONLY-0-0]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EXE-002",
+      "requirement_ids": [
+        "EXE-204"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10f_broker_pre_send.py::test_manual_approval_is_rechecked_and_invalidated"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EXE-003",
+      "requirement_ids": [
+        "EXE-206"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10f_broker_pre_send.py::test_automatic_authority_revocation_is_unsent_and_idempotent[STAGE]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EXE-004",
+      "requirement_ids": [
+        "EXE-201"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10c2_sourced_execution.py::test_shadow_modes_guard_and_typed_subject_have_no_downstream_authority[AUTOMATIC-rules2-SHADOW_RECORDED-1]",
+        "tests/test_phase_10c2_sourced_execution.py::test_shadow_modes_guard_and_typed_subject_have_no_downstream_authority[DISABLED-None-DISABLED-0]",
+        "tests/test_phase_10c2_sourced_execution.py::test_shadow_modes_guard_and_typed_subject_have_no_downstream_authority[MANUAL_APPROVAL-rules1-SHADOW_RECORDED-1]",
+        "tests/test_phase_10c2_sourced_execution.py::test_shadow_modes_guard_and_typed_subject_have_no_downstream_authority[MANUAL_APPROVAL-rules3-GUARD_BLOCKED-1]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EXE-005",
+      "requirement_ids": [
+        "EXE-203"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10e_mock_automatic.py::test_sourced_mock_automatic_creates_exact_one_order_without_approval"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EXE-006",
+      "requirement_ids": [
+        "EXE-209"
+      ],
+      "test_nodeids": [
+        "tests/test_broker_status_api.py::test_broker_status_api_requires_auth_and_omits_owner_and_secrets",
+        "tests/test_mock_order_test_api.py::test_mock_order_test_uses_session_csrf_and_queues_one_share"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EXE-007",
+      "requirement_ids": [
+        "EXE-211"
+      ],
+      "test_nodeids": [
+        "tests/test_decision_execution_sell.py::test_full_sell_automatic_in_approval_only_fails_closed",
+        "tests/test_phase_10e_mock_automatic.py::test_fixed_stop_missing_explicit_action_authority_never_uses_safe_default"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EXE-008",
+      "requirement_ids": [
+        "EXE-213"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10e_mock_automatic.py::test_fixed_stop_mock_automatic_uses_typed_exact_one_authority"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EXE-009",
+      "requirement_ids": [
+        "EXE-200"
+      ],
+      "test_nodeids": [
+        "tests/test_decision_execution_sell.py::test_full_sell_automatic_in_approval_only_fails_closed",
+        "tests/test_decision_execution_sell.py::test_partial_sell_manual_approval_uses_floor_of_managed_sellable_quantity",
+        "tests/test_phase_10d_execution_authority.py::test_sourced_manual_approval_to_one_authoritative_created_order",
+        "tests/test_phase_10e_mock_automatic.py::test_fixed_stop_mock_automatic_uses_typed_exact_one_authority",
+        "tests/test_phase_10e_mock_automatic.py::test_sourced_mock_automatic_creates_exact_one_order_without_approval"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EXE-010",
+      "requirement_ids": [
+        "EXE-216"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9e_acceptance.py::test_phase_9e_wait_reject_unknown_route_to_no_action_without_authority[outputs0-WAIT]",
+        "tests/test_phase_9e_acceptance.py::test_phase_9e_wait_reject_unknown_route_to_no_action_without_authority[outputs1-REJECT]",
+        "tests/test_phase_9e_acceptance.py::test_phase_9e_wait_reject_unknown_route_to_no_action_without_authority[outputs2-UNKNOWN]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-EXE-011",
+      "requirement_ids": [
+        "EXE-217"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_background_automatic_runtime_to_mock_broker",
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_background_shadow_runtime",
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs0-BUY]"
+      ],
+      "backend": "MIXED"
+    },
+    {
+      "test_id": "T-V2-EXE-012",
+      "requirement_ids": [
+        "EXE-218"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[CLOSED-outputs5-BUY]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[SUPERSEDED-outputs4-BUY]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[UNCHANGED-outputs0-BUY]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[UNCHANGED-outputs1-WAIT]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[UNCHANGED-outputs2-REJECT]",
+        "tests/test_phase_9c2_trading_runtime.py::test_trading_runs_full_v7_pipeline_to_arbiter_without_downstream_authority[UNCHANGED-outputs3-UNKNOWN]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-FIN-API-001",
+      "requirement_ids": [
+        "AI-280"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c1_foundation.py::test_decision_discriminator_and_legacy_contract_fail_closed"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-FIN-API-002",
+      "requirement_ids": [
+        "AI-280"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs0-BUY]",
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs1-WAIT]",
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs2-REJECT]",
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs3-UNKNOWN]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-FIN-API-003",
+      "requirement_ids": [
+        "AI-282"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9c1_foundation.py::test_sourced_decision_representation_and_incomplete_api_lineage_fails_closed"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-FIN-API-004",
+      "requirement_ids": [
+        "AI-283"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_reconciliation_recovers_completed_arbiter_and_sourced_api_roundtrips_unknown"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-FIN-LIFE-001",
+      "requirement_ids": [
+        "MAO-260"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_diagnostic_arbiter_success_closes_run_without_decision[BUY]",
+        "tests/test_phase_9d_decision_finalizer.py::test_diagnostic_arbiter_success_closes_run_without_decision[REJECT]",
+        "tests/test_phase_9d_decision_finalizer.py::test_diagnostic_arbiter_success_closes_run_without_decision[UNKNOWN]",
+        "tests/test_phase_9d_decision_finalizer.py::test_diagnostic_arbiter_success_closes_run_without_decision[WAIT]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-FIN-LIFE-002",
+      "requirement_ids": [
+        "MAO-260"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_diagnostic_arbiter_failures_close_with_exact_error[CONFLICTED-ENTRY_ARBITER_CONFLICTED]",
+        "tests/test_phase_9d_decision_finalizer.py::test_diagnostic_arbiter_failures_close_with_exact_error[FAILED-ENTRY_ARBITER_FAILED]",
+        "tests/test_phase_9d_decision_finalizer.py::test_diagnostic_arbiter_failures_close_with_exact_error[TIMED_OUT-ENTRY_ARBITER_TIMED_OUT]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-FIN-LIFE-003",
+      "requirement_ids": [
+        "MAO-260"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_finalizer_preserves_all_four_actions_and_exact_sourced_payload[outputs3-UNKNOWN]",
+        "tests/test_phase_9d_decision_finalizer.py::test_success_retry_is_exact_once_and_preserves_completed_at"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-FIN-LIFE-004",
+      "requirement_ids": [
+        "MAO-260"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_live_gate_denials_terminalize_without_decision[CLOSED-ACTIVATION_GATE_CLOSED-CANCELLED]",
+        "tests/test_phase_9d_decision_finalizer.py::test_live_gate_denials_terminalize_without_decision[INVALID-ACTIVATION_GATE_INVALID-FAILED]",
+        "tests/test_phase_9d_decision_finalizer.py::test_live_gate_denials_terminalize_without_decision[SUPERSEDED-ACTIVATION_GATE_SUPERSEDED-CANCELLED]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-FIN-LIFE-005",
+      "requirement_ids": [
+        "MAO-260"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_source_expiry_and_corruption_fail_closed[EXPIRED]",
+        "tests/test_phase_9d_decision_finalizer.py::test_source_expiry_and_corruption_fail_closed[HASH]",
+        "tests/test_phase_9d_decision_finalizer.py::test_source_expiry_and_corruption_fail_closed[ROLE]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-FIN-LIFE-006",
+      "requirement_ids": [
+        "MAO-262"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_10g1_postgresql.py::test_postgresql_finalizer_gate_lock_failure_recovers_exact_once"
+      ],
+      "backend": "POSTGRESQL"
+    },
+    {
+      "test_id": "T-V2-INPUT-V2-001",
+      "requirement_ids": [
+        "AI-252"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_scout_input_v2_is_deterministic_policy_independent_and_context_sensitive"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-INPUT-V2-002",
+      "requirement_ids": [
+        "AI-253"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_scout_input_v2_is_deterministic_policy_independent_and_context_sensitive"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-INPUT-V2-003",
+      "requirement_ids": [
+        "AI-252"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_scout_input_v2_is_deterministic_policy_independent_and_context_sensitive"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-INPUT-V2-004",
+      "requirement_ids": [
+        "AI-254"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_expired_required_input_rejects_without_partial_admission"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-MAO-002",
+      "requirement_ids": [
+        "MAO-203"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_decision_agent_acceptance.py::test_parallel_readiness_order_independence_and_result_immutability"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-MAO-004",
+      "requirement_ids": [
+        "MAO-210"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_diagnostic_arbiter_success_closes_run_without_decision[BUY]",
+        "tests/test_phase_9d_decision_finalizer.py::test_diagnostic_arbiter_success_closes_run_without_decision[REJECT]",
+        "tests/test_phase_9d_decision_finalizer.py::test_diagnostic_arbiter_success_closes_run_without_decision[UNKNOWN]",
+        "tests/test_phase_9d_decision_finalizer.py::test_diagnostic_arbiter_success_closes_run_without_decision[WAIT]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-MAO-005",
+      "requirement_ids": [
+        "MAO-256"
+      ],
+      "test_nodeids": [
+        "tests/test_decision_context_freeze.py::test_diagnostic_run_cannot_be_promoted_to_trading_without_gate_provenance"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-MAO-006",
+      "requirement_ids": [
+        "MAO-260"
+      ],
+      "test_nodeids": [
+        "tests/test_phase_9d_decision_finalizer.py::test_live_gate_denials_terminalize_without_decision[CLOSED-ACTIVATION_GATE_CLOSED-CANCELLED]"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-SCOUT-HASH-001",
+      "requirement_ids": [
+        "MAO-233"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_v7_scout_hash_uses_dependencies_not_other_scout_outputs"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-SCOUT-HASH-002",
+      "requirement_ids": [
+        "MAO-234"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_v7_scout_hash_uses_dependencies_not_other_scout_outputs"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-UPSTREAM-001",
+      "requirement_ids": [
+        "MAO-221"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_v7_admission_materializes_exact_upstream_slice_and_v2_input"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-UPSTREAM-002",
+      "requirement_ids": [
+        "AI-251"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_v7_production_e2e_freezes_one_context_and_keeps_running"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-UPSTREAM-003",
+      "requirement_ids": [
+        "AI-255"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_expanded_scouts.py::test_v7_entry_position_risk_is_explicit_not_applicable_without_tools"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-UPSTREAM-004",
+      "requirement_ids": [
+        "MAO-228"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_v7_production_e2e_freezes_one_context_and_keeps_running"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-UPSTREAM-005",
+      "requirement_ids": [
+        "MAO-231"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_v7_production_e2e_freezes_one_context_and_keeps_running"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-UPSTREAM-006",
+      "requirement_ids": [
+        "MAO-224"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_v7_production_e2e_freezes_one_context_and_keeps_running"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-UPSTREAM-007",
+      "requirement_ids": [
+        "MAO-224"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_v7_admission_is_idempotent_and_policy_change_conflicts"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-UPSTREAM-008",
+      "requirement_ids": [
+        "MAO-224"
+      ],
+      "test_nodeids": [
+        "tests/test_decision_context_freeze.py::test_freeze_conflict_does_not_update_existing_context"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-UPSTREAM-009",
+      "requirement_ids": [
+        "MAO-222"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_upstream_runtime.py::test_v7_production_e2e_freezes_one_context_and_keeps_running"
+      ],
+      "backend": "SQLITE"
+    },
+    {
+      "test_id": "T-V2-UPSTREAM-010",
+      "requirement_ids": [
+        "MAO-223"
+      ],
+      "test_nodeids": [
+        "tests/test_v7_entry_arbiter_acceptance.py::test_phase8d_historical_four_route_v7_run_is_not_retroactively_upgraded"
+      ],
+      "backend": "SQLITE"
+    }
+  ]
+}

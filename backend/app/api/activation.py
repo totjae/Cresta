@@ -6,9 +6,15 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import Field
 from sqlalchemy.orm import Session
 
+from app.activation_authority import (
+    production_activation_evidence_loader,
+    production_activation_validation_policy,
+    unavailable_activation_evidence_loader,
+)
 from app.activation_gate import (
     ActivationGatePayload,
     ActivationStrictModel,
+    ActivationValidationPolicy,
     EvidenceLoader,
     activate_activation_gate,
     activation_gate_history,
@@ -16,6 +22,7 @@ from app.activation_gate import (
     validate_activation_gate_draft,
 )
 from app.api.dependencies import AuthContext, get_auth_context, require_csrf
+from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import ConfigurationVersion
 
@@ -53,13 +60,21 @@ class ActivationGateHistoryResponse(ActivationStrictModel):
 
 
 def _unavailable_evidence_loader(_reference: str) -> bytes:
-    raise KeyError("activation evidence artifact resolver is not configured")
+    return unavailable_activation_evidence_loader(_reference)
 
 
-def get_activation_evidence_loader() -> EvidenceLoader:
+def get_activation_evidence_loader(
+    settings: Settings = Depends(get_settings),
+) -> EvidenceLoader:
     """Return the deployment-owned immutable artifact resolver dependency."""
 
-    return _unavailable_evidence_loader
+    return production_activation_evidence_loader(settings)
+
+
+def get_activation_validation_policy(
+    settings: Settings = Depends(get_settings),
+) -> ActivationValidationPolicy:
+    return production_activation_validation_policy(settings)
 
 
 def _response(request_id: str, version: ConfigurationVersion) -> ActivationGateVersionResponse:
@@ -84,6 +99,9 @@ def post_activation_gate_draft(
     context: AuthContext = Depends(require_csrf),
     db: Session = Depends(get_db),
     evidence_loader: EvidenceLoader = Depends(get_activation_evidence_loader),
+    validation_policy: ActivationValidationPolicy = Depends(
+        get_activation_validation_policy
+    ),
 ) -> ActivationGateVersionResponse:
     version = create_activation_gate_draft(
         db,
@@ -92,6 +110,7 @@ def post_activation_gate_draft(
         reason=payload.reason,
         now=datetime.now(UTC),
         evidence_loader=evidence_loader,
+        policy=validation_policy,
     )
     return _response(request.state.request_id, version)
 
@@ -104,12 +123,16 @@ def validate_activation_gate_version(
     _: AuthContext = Depends(require_csrf),
     db: Session = Depends(get_db),
     evidence_loader: EvidenceLoader = Depends(get_activation_evidence_loader),
+    validation_policy: ActivationValidationPolicy = Depends(
+        get_activation_validation_policy
+    ),
 ) -> ActivationGateVersionResponse:
     version = validate_activation_gate_draft(
         db,
         version_id=version_id,
         now=datetime.now(UTC),
         evidence_loader=evidence_loader,
+        policy=validation_policy,
     )
     return _response(request.state.request_id, version)
 
@@ -122,6 +145,9 @@ def activate_activation_gate_version(
     context: AuthContext = Depends(require_csrf),
     db: Session = Depends(get_db),
     evidence_loader: EvidenceLoader = Depends(get_activation_evidence_loader),
+    validation_policy: ActivationValidationPolicy = Depends(
+        get_activation_validation_policy
+    ),
 ) -> ActivationGateVersionResponse:
     version = activate_activation_gate(
         db,
@@ -129,6 +155,7 @@ def activate_activation_gate_version(
         version_id=version_id,
         now=datetime.now(UTC),
         evidence_loader=evidence_loader,
+        policy=validation_policy,
         correlation_id=request.state.request_id,
         request_ip=request.client.host if request.client else "unknown",
         user_agent=request.headers.get("user-agent", "unknown"),

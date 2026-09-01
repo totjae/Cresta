@@ -277,7 +277,7 @@ model/prompt 합성은 금지한다.
 test_id: <non-empty string>
 requirement_ids: [<non-empty string>]
 result: PASSED
-code_revision: <non-empty build/revision identity>
+code_revision: <40 lowercase hexadecimal Git commit SHA>
 test_plan_version: <non-empty string>
 spec_version: <non-empty string>
 executed_at: <UTC timestamp>
@@ -296,8 +296,9 @@ payload 검증 시 identity/version 대상 일치, evidence hash, 실행시각�
 validity/freshness를 모두 통과해야 한다. `evidence_hash`는 `evidence_ref`가 가리키는
 불변 시험 report artifact bytes의 SHA-256이다. `freshness_contract`는
 `activation-validation-policy-v1`에 등록된 versioned contract ID여야 하며 unknown ID는
-invalid다. direct `valid_until`은 DB-authoritative time과 비교하고, contract ID 경로는
-해당 validation policy가 `executed_at`과 현재 시간을 평가한다.
+invalid다. 현재 Activation artifact의 `EXACT_REVISION`은 wall-clock duration이 아니라
+code/test-plan/spec/migration/environment/required-set authority exact match로 평가한다. direct
+`valid_until`과 미래의 명시적 time-based contract만 DB-authoritative time을 평가한다.
 
 Canonical JSON은 UTF-8, `ensure_ascii=false`, key 사전순, 불필요한 공백 없는 separator를
 사용한다. timestamp는 UTC ISO-8601 `+00:00`로 정규화하고 0인 소수 초는 생략한다. null은
@@ -307,6 +308,14 @@ Canonical JSON은 UTF-8, `ensure_ascii=false`, key 사전순, 불필요한 공�
 목록은 위 고정 순서를 사용하므로 입력 순서를 자동 의미로 받아들이지 않는다.
 `validated_at < valid_until`이어야 하며 Gate validator의 DB-authoritative time이
 `valid_until` 이상이면 OPEN으로 평가하지 않는다.
+
+`safety_evidence`가 참조하는 독립 artifact의 body, `sha256:<64hex>` namespace,
+content-addressed filesystem store, publisher, exact revision·migration·environment binding과
+production resolver의 단일 상세 기준은 [Activation Evidence Artifact 및 Resolver 명세](ACTIVATION_EVIDENCE_SPEC.md)다.
+Gate API는 artifact를 생성·수정·삭제하지 않으며, deployment가 기대하는 authority와 resolved
+artifact body를 exact 비교하지 않고 evidence item끼리 일치하는지만 확인해서는 OPEN할 수 없다.
+현재 `EXACT_REVISION` freshness는 artifact에 적용되고 이 payload의 `valid_until`은 별도의
+Gate lifecycle expiry로 계속 적용한다.
 
 Gate outcome precedence는 deterministic하다. DB read/lock failure는 retryable
 infrastructure failure다. ACTIVE ambiguity 또는 selected payload의 schema/canonical/hash
@@ -417,6 +426,8 @@ execution을 자동 승격하지 않는다.
 | CFG-133 | Compose 기본값은 `CRESTA_ENVIRONMENT=MOCK`, `CRESTA_LIVE_TRADING_ENABLED=false`, `CRESTA_V7_SOURCED_HANDOFF_ENABLED=false`다. startup은 Activation Gate, ExecutionStage 또는 trading policy를 생성·seed하지 않는다. |
 | CFG-134 | PostgreSQL password, TOTP encryption key, Kiwoom MOCK credential과 external provider key는 Docker secret/read-only file로만 주입한다. direct secret environment field는 example과 Compose에 두지 않는다. |
 | CFG-135 | migration one-shot도 동일 `Settings.validate_safety()`와 password-file URL resolution을 사용하므로 malformed safety config와 non-MOCK/LIVE endpoint는 migration 실패로 runtime startup을 차단한다. |
+| CFG-136 | Activation evidence resolver의 server-owned key는 `CRESTA_ARTIFACT_ROOT`이며 API에는 해당 directory가 read-only mount된다. unset·빈 값·부재·non-directory이면 Gate OPEN create/validate/activate가 fail-closed하고 cwd/repository/tmp fallback은 없다. |
+| CFG-137 | deployed code authority는 `CRESTA_DEPLOYED_REVISION`의 exact 40-character lowercase Git SHA다. unset·malformed 값은 application 전체를 추정값으로 시작시키지 않고 Activation evidence authority만 unavailable로 유지하며 branch/tag/image `latest` 또는 runtime `git` 조회로 대체하지 않는다. |
 
 ### 개발 단계 설정 인증 정책
 

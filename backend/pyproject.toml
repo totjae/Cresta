@@ -32,6 +32,7 @@ test = [
 [project.scripts]
 cresta-admin = "app.cli:main"
 cresta-worker = "app.worker:main"
+cresta-activation-acceptance = "app.activation_acceptance:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
